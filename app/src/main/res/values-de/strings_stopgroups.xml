@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="stop_group_title">Diese Haltestellen als Favorit merken</string>
+    <string name="stop_group_text">Ihre Abfahrten zusammen, unter einem Namen.</string>
+    <string name="stop_group_ok">OK</string>
+    <string name="stop_group_removed">Haltestellen-Kombination aus den Favoriten entfernt</string>
+    <string name="stop_group_on">Diese Haltestellen-Kombination aus den Favoriten entfernen</string>
+    <string name="stop_group_off">Diese Haltestellen-Kombination als Favorit merken</string>
+    <plurals name="departures_notice_count">
+        <item quantity="one">%d Störung, anzeigen</item>
+        <item quantity="other">%d Störungen, anzeigen</item>
+    </plurals>
+</resources>

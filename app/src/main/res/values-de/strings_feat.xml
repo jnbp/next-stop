@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tarifbereiche, Ticket-Filter, Störungen und Aufzüge. -->
+<resources>
+    <!-- Tarifbereiche (VBB A/B/C) -->
+    <string name="fare_abc_description">Fährt in den Tarifbereich C: Berlin-ABC-Fahrschein nötig</string>
+    <string name="fare_abc_note">Diese Fahrt führt in den Tarifbereich C (z. B. Potsdam, BER). Ein Berlin-AB-Fahrschein reicht nicht: nötig ist ABC oder das Deutschlandticket.</string>
+    <!-- Deutschlandticket und Fahrrad -->
+    <string name="settings_ticket">Fahrschein</string>
+    <string name="local_only_title">Nur Deutschlandticket</string>
+    <string name="local_only_text">Schaltet unter Verkehrsmittel Fernverkehr (ICE, IC, EC …) und Fernbusse aus, die das Deutschlandticket nicht abdeckt; aus schaltet sie wieder ein. An, sobald beide aus sind.</string>
+    <string name="local_only_search_text">Schaltet Fernverkehr und Fernbusse aus (oder wieder ein).</string>
+    <string name="local_only_chip">Deutschlandticket</string>
+    <string name="bike_title">Mit Fahrrad</string>
+    <string name="bike_text">Nur Verbindungen, deren Fahrten ein Fahrrad mitnehmen. Auch unter Suchoptionen umstellbar, das gilt dann für die nächsten Suchen.</string>
+    <string name="bike_search_text">Nur Fahrten mit Fahrradmitnahme.</string>
+    <string name="bike_chip">Mit Fahrrad</string>
+    <string name="ticket_filter_off">Ausschalten</string>
+    <string name="search_options_chip">Optionen</string>
+    <string name="search_options_title">Suchoptionen</string>
+    <!-- Störungen -->
+    <string name="disruptions_title">Störungen</string>
+    <string name="disruptions_all">Alle aktuellen Störungen</string>
+    <string name="disruptions_none">Gerade keine Störungsmeldungen.</string>
+    <string name="disruptions_failed">Störungen konnten nicht geladen werden. Tippen, um es erneut zu versuchen.</string>
+    <string name="disruptions_loading">Störungen werden geladen…</string>
+    <string name="disruptions_other">Regionalzüge und Fähren</string>
+    <string name="disruptions_stations">Stationen</string>
+    <string name="disruption_valid_range">Gültig %1$s – %2$s</string>
+    <string name="disruption_valid_from">Gültig ab %1$s</string>
+    <string name="disruption_valid_until">Gültig bis %1$s</string>
+    <string name="disruption_reported_at">Gemeldet an: %1$s</string>
+    <string name="disruption_minimap">Karte des Orts der Meldung</string>
+    <string name="disruption_link_more">Mehr</string>
+    <string name="disruption_link_map">Karte</string>
+    <string name="disruption_link_bvg_map">Umleitungskarte (BVG)</string>
+    <string name="disruption_link_other">Link</string>
+    <string name="disruptions_source">Meldungen der BVG/VBB-Fahrplanauskunft, wie sie mit den Abfahrten der großen Bahnhöfe und der Enden deiner gespeicherten Strecken kommen. Deine Linien zuerst.</string>
+    <string name="disruption_channel">Störungen</string>
+    <string name="disruption_notification_title">Störung: %1$s → %2$s</string>
+    <string name="disruption_cancelled">Eine Fahrt auf dieser Strecke fällt aus</string>
+    <string name="disruption_bell_on">Störungen dieser Route melden</string>
+    <plurals name="ways_disruptions_title">
+        <item quantity="one">%1$d Störung auf deinen Wegen</item>
+        <item quantity="other">%1$d Störungen auf deinen Wegen</item>
+    </plurals>
+    <string name="ways_all_normal">Auf deinen Wegen alles normal</string>
+    <string name="place_disruptions_title">Störungen rund um %1$s</string>
+    <string name="place_disruptions_stops">Haltestellen in der Nähe: %1$s</string>
+    <string name="place_disruptions_source">Meldungen der BVG/VBB-Fahrplanauskunft, die im Umkreis um diesen Ort liegen, gefunden in den Abfahrten der Haltestellen in der Nähe. Deine Linien zuerst.</string>
+    <string name="disruption_check_title">Störungs-Prüfung</string>
+    <string name="disruption_check_text">Jeden Tag zu diesen Zeiten auf den Routen mit Glocke (und den Orten, falls eingeschaltet) nach Störungen suchen und melden, was neu ist.</string>
+    <string name="disruption_check_off">Aus</string>
+    <string name="disruption_check_add">+ Uhrzeit</string>
+    <string name="disruption_check_remove">%1$s entfernen</string>
+    <string name="disruption_check_apply">Hinzufügen</string>
+    <string name="setup_disruption_bell_hint">Die Zeiten gelten für gemerkte Routen mit Glocke – tippe bei „Meine Wege“ auf die Glocke einer Route – und für deine Orte, wenn du das einschaltest.</string>
+    <string name="setup_disruption_short">Next Stop sucht zu festen Zeiten nach Störungen auf deinen gespeicherten Strecken und meldet, was neu ist.</string>
+    <string name="setup_access_short">Brauchst du barrierefreie Verbindungen oder mehr Zeit für Fußwege? Beides kannst du später in den Einstellungen ändern.</string>
+    <!-- Aufzüge -->
+    <string name="lift_group">Aufzüge</string>
+    <string name="lift_ac_title">accessibility.cloud (brokenlifts.org)</string>
+    <string name="lift_ac_text">Aufzüge der BVG-, S-Bahn- und DB-Stationen in Berlin und Brandenburg. Braucht ein kostenloses App-Token von accessibility.cloud (nicht kommerzielle Nutzung). Es bleibt auf diesem Handy.</string>
+    <string name="lift_ac_placeholder">App-Token</string>
+    <string name="lift_db_title">DB FaSta (DB API Marketplace)</string>
+    <string name="lift_db_text">Aufzüge der DB-Stationen, S-Bahn inklusive. Braucht Client-ID und API-Key von developers.deutschebahn.com. Sie bleiben auf diesem Handy.</string>
+    <string name="lift_db_client_placeholder">Client-ID</string>
+    <string name="lift_db_key_placeholder">API-Key</string>
+    <string name="lift_journey_title">Aufzug außer Betrieb auf dieser Fahrt</string>
+    <string name="lift_out_count">%1$s: %2$d Aufzug/Aufzüge außer Betrieb</string>
+    <string name="lift_out_which">%1$s: %2$s außer Betrieb</string>
+    <string name="lift_station_prefix">Aufzüge</string>
+    <string name="lift_all_working">Alle Aufzüge in Betrieb</string>
+    <!-- Live-Link: der Vorname auf der Live-Seite -->
+    <string name="live_name_title">Dein Name in geteilten Fahrten</string>
+    <string name="live_name_text">Wer deinen Live-Link öffnet, sieht „&lt;Name&gt; ist unterwegs nach …“. Leer: „Unterwegs nach …“. Bleibt auf diesem Handy und steht nur im Link, nie auf einem Server.</string>
+    <string name="live_name_placeholder">Vorname (optional)</string>
+    <string name="live_name_ask_text">Optional. Wer den Link öffnet, sieht „&lt;Name&gt; ist unterwegs nach …“. Später änderbar unter Einstellungen → Live-Link.</string>
+    <string name="live_name_ask_share">Teilen</string>
+    <string name="live_name_ask_skip">Ohne Namen</string>
+    <string name="setup_live_name_title">Dein Name für geteilte Fahrten</string>
+    <string name="setup_live_name_text">Wenn du eine Fahrt als Live-Link teilst, sehen die Empfänger „&lt;Name&gt; ist unterwegs nach …“. Der Name bleibt nur auf deinem Handy und im Link, nie auf einem Server. Optional – einfach leer lassen und weiter.</string>
+    <!-- In die App eingebaute Schlüssel (secrets.properties, siehe docs/keys.md) -->
+    <string name="builtin_key_active">Integrierter Schlüssel aktiv</string>
+    <string name="builtin_key_overridden">Dein Schlüssel ersetzt den integrierten</string>
+    <!-- "Meine Wege": die Pille neben dem Titel, und leere Abschnitte als eine Zeile. -->
+    <plurals name="ways_pill_disruptions">
+        <item quantity="one">%1$d Störung</item>
+        <item quantity="other">%1$d Störungen</item>
+    </plurals>
+    <string name="ways_pill_clear">Alles läuft</string>
+    <string name="ways_empty_patterns">Noch keine – merken über ⋮ in den Details</string>
+    <string name="ways_empty_routes">Noch keine – merken auf der Karte</string>
+    <string name="ways_empty_places">Noch keine – Ort auf der Karte markieren</string>
+    <string name="ways_empty_stops">Noch keine – unter Abfahrten hinzufügen</string>
+    <!-- Störungswächter: Einstellungen, die Glocke einmal erklärt -->
+    <string name="dwatch_group_title">Störungswächter</string>
+    <string name="dwatch_explain">Next Stop sucht nach neuen Störungen auf dem, was du hier wählst, und meldet sie per Mitteilung. Jede Meldung nur einmal.</string>
+    <string name="dwatch_nothing">Gerade wird nichts geprüft – schalte bei einer Route die Glocke ein</string>
+    <string name="dwatch_open_ways">Zu Meine Wege</string>
+    <string name="dwatch_what">Was wird geprüft</string>
+    <string name="dwatch_no_routes">Noch keine gemerkten Routen.</string>
+    <string name="dwatch_places_title">Auch Orte prüfen</string>
+    <string name="dwatch_places_text">Zuhause, Arbeit und deine gemerkten Orte: Störungen im Umkreis um sie</string>
+    <string name="dwatch_radius_title">Umkreis um Orte und Wege</string>
+    <string name="dwatch_radius_text">Störungen so nah an deinen Orten und an Start, Ziel und Umstiegen deiner Wege zählen für sie</string>
+    <string name="radius_km">%1$d km</string>
+    <plurals name="disruptions_within">
+        <item quantity="one">%1$d Störung im Umkreis von %2$s</item>
+        <item quantity="other">%1$d Störungen im Umkreis von %2$s</item>
+    </plurals>
+    <string name="ways_sheet_route_radius">Auf den Fahrten und im Umkreis von %1$s um Start, Ziel und Umstiege</string>
+    <string name="dwatch_period_title">Unterwegs prüfen</string>
+    <string name="dwatch_period_text">Wie oft zwischendurch</string>
+    <string name="dwatch_period_off">Aus</string>
+    <string name="dwatch_period_minutes">%1$d Min.</string>
+    <string name="dwatch_times_title">Feste Uhrzeiten</string>
+    <string name="dwatch_when_both">Geprüft wird alle %1$d Minuten und um %2$s.</string>
+    <string name="dwatch_when_period">Geprüft wird alle %1$d Minuten.</string>
+    <string name="dwatch_when_times">Geprüft wird um %1$s.</string>
+    <string name="dwatch_when_none">Noch ist keine Prüfung eingestellt: wähle, wie oft oder zu welchen Zeiten.</string>
+    <string name="bell_sheet_title">Störungen dieser Route melden</string>
+    <string name="bell_sheet_text">Du bekommst eine Mitteilung, wenn auf dieser Route eine neue Störung auftaucht. Jede Meldung kommt nur einmal.</string>
+    <string name="bell_sheet_settings">Zeiten einstellen</string>
+    <string name="bell_sheet_ok">OK</string>
+    <string name="disruption_notification_place_title">Störung rund um %1$s</string>
+    <!-- The map at the top of "My routes". -->
+    <string name="ways_map_description">Karte deiner Orte; öffnet die Karte</string>
+    <string name="ways_map_minutes">%1$d′</string>
+    <string name="ways_map_hint">Merke dir Orte, um sie hier zu sehen</string>
+    <!-- Störungen auf den Hauptkarten. -->
+    <string name="map_notices_title">Störungen auf der Karte</string>
+    <string name="map_notices_text">Ein Warnzeichen an Haltestellen, die eine bekannte Störung betrifft: Aufzüge, verlegte Haltestellen, Haltestellen, die eine Meldung nennt. Meldungen einer ganzen Linie ohne Ort bekommen keins.</string>
+    <string name="map_notice_hide">Auf der Karte ausblenden</string>
+    <plurals name="map_notices_here">
+        <item quantity="one">%1$d Störung hier</item>
+        <item quantity="other">%1$d Störungen hier</item>
+    </plurals>
+    <string name="hidden_notices_row">Ausgeblendete Störungen (%1$d)</string>
+    <string name="hidden_notices_title">Ausgeblendete Störungen</string>
+    <string name="hidden_notices_subtitle">Nur auf den Karten ausgeblendet: Auf Meine Wege zählen sie weiter.</string>
+    <string name="hidden_notice_show">Wieder anzeigen</string>
+    <string name="hidden_notices_show_all">Alle wieder anzeigen</string>
+</resources>

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#F5F7FC" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0B1124" media="(prefers-color-scheme: dark)">
+  <!-- A static page: no scripts, nothing from other hosts. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Datenschutzerklärung – Next Stop</title>
+  <meta name="description" content="Datenschutzerklärung der ÖPNV-App Next Stop für Android und Wear OS: kein Konto, kein eigener Server, keine Analyse. Welche Daten an welche Dienste gehen und warum.">
+  <link rel="canonical" href="https://nextstop.bapo.me/datenschutz/">
+  <link rel="alternate" hreflang="de" href="https://nextstop.bapo.me/datenschutz/">
+  <link rel="alternate" hreflang="en" href="https://nextstop.bapo.me/en/privacy/">
+  <link rel="icon" href="../site/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../site/apple-touch-icon.png">
+  <link rel="preload" href="../shared/fonts/google_sans_flex_800.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="../site/site.css">
+</head>
+<body>
+<!--
+  OWNER, bitte prüfen:
+  1. Impressum: Für eine Website in Deutschland kann eine Anbieterkennung mit ladungsfähiger (Post-)Anschrift
+     nötig sein (§ 5 DDG), auch bei einem privaten Open-Source-Projekt, wenn es nicht rein privat/familiär ist.
+     Das ist offen. In dieser Seite steht bewusst keine Anschrift; der Footer verweist weiter auf bapo.me/impressum.
+  2. Die Kontaktadresse steht als Bild da (site/img/contact-mail.svg, Text als Pfade), damit sie nicht ausgelesen werden kann.
+  3. Mit Ausnahme der markierten Stellen ist der Text eine ehrliche Beschreibung des Codes, keine Rechtsberatung.
+-->
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<header class="top">
+  <div class="wrap glass">
+    <a class="logo" href="../"><img src="../site/favicon.svg" alt="" width="34" height="34">Next Stop</a>
+    <nav aria-label="Bereiche"><a href="../#funktionen">Funktionen</a><a href="../#so-gehts">So geht’s</a><a href="../#open-source">Open Source</a><a href="../#faq">FAQ</a></nav>
+    <div class="lang" role="group" aria-label="Sprache"><span aria-current="page">DE</span><a href="../en/privacy/" hreflang="en" lang="en">EN</a></div>
+  </div>
+</header>
+<main id="main" class="legal">
+  <div class="wrap">
+    <h1>Datenschutzerklärung</h1>
+    <p class="stand">Stand: 14.11.2026</p>
+    <p>Diese Erklärung gilt für die App <strong>Next Stop</strong> (Android und Wear OS) und für diese Website. Kurz gesagt: Next Stop hat kein Konto, keinen eigenen Server, keine Werbung, kein Tracking, keine Analyse und keine Absturzberichte. Ich erhalte keine Daten von dir. Was die App an andere Dienste schickt, steht unten.</p>
+
+    <h2>1. Verantwortlicher</h2>
+    <p>Joel Barriga Polzin<br>E-Mail: <img class="mail" src="../site/img/contact-mail.svg" alt="E-Mail-Adresse (als Bild)" width="177" height="22"></p>
+    <p>Next Stop ist ein privates Open-Source-Projekt (GPL-3.0) und kein Angebot der BVG, des VBB oder der Deutschen Bahn. Den Quellcode kannst du auf <a href="https://github.com/jnbp/next-stop">GitHub</a> prüfen.</p>
+    <!-- Einschätzung: Die App baut Anfragen auf dem Gerät und schickt sie direkt an die Dienste in Abschnitt 3; der Entwickler sieht sie nicht. Deshalb ist er für diese Übermittlungen vermutlich nicht der "Empfänger" und die Dienste sind jeweils selbst verantwortlich. Ob das rechtlich so trägt, ist nicht abschließend geklärt. -->
+
+    <h2>2. Was bei mir nicht passiert</h2>
+    <ul>
+      <li>Kein Konto, keine Anmeldung, keine Registrierung.</li>
+      <li>Kein eigener Server, auf dem Daten von dir landen.</li>
+      <li>Keine Analyse, keine Werbung, keine Werbe-ID, kein Tracking, keine Absturzberichte.</li>
+      <li>Einstellungen, Favoriten, gespeicherte Orte und Wege und letzte Ziele bleiben auf deinem Gerät.</li>
+    </ul>
+
+    <h2>3. Welche Dienste Anfragen erhalten</h2>
+    <p>Damit die App Fahrpläne, Karten und Suche zeigen kann, schickt dein Gerät (Handy oder Uhr) Anfragen direkt an die folgenden öffentlichen Dienste. Jede Anfrage enthält technisch bedingt deine IP-Adresse; die App sendet außerdem eine Kennung wie <em>NextStop/Version</em> und die Programmversion, aber keine Gerätekennung. Alle Verbindungen sind per HTTPS verschlüsselt.</p>
+    <div class="tablewrap glass">
+      <table class="data">
+        <thead><tr><th scope="col">Dienst</th><th scope="col">Wofür</th><th scope="col">Was dorthin geht</th></tr></thead>
+        <tbody>
+          <tr><td>Transitous (api.transitous.org)</td><td>Fahrpläne und Echtzeit in ganz Europa, Verbindungen, Abfahrten, Störungen</td><td>Start, Ziel und Haltestellen, Koordinaten, Zeiten</td></tr>
+          <tr><td>BVG REST (v6.bvg.transport.rest)</td><td>Fahrpläne, Echtzeit, Störungen in Berlin</td><td>wie oben</td></tr>
+          <tr><td>VBB HAFAS (fahrinfo.vbb.de)</td><td>Fahrpläne und Echtzeit Berlin und Brandenburg</td><td>wie oben</td></tr>
+          <tr><td>routing.openstreetmap.de (OSRM)</td><td>Fuß- und Radwege</td><td>Koordinaten von Start und Ziel des Wegs</td></tr>
+          <tr><td>Photon (photon.komoot.io)</td><td>Ortssuche und Adressen</td><td>Suchtext; als Suchumgebung deine auf etwa 1 km gerundete Position</td></tr>
+          <tr><td>OpenFreeMap (tiles.openfreemap.org)</td><td>Kartenkacheln, auch für Kartenbilder in „Meine Wege“ und kleine Wegkarten</td><td>der sichtbare Kartenausschnitt, nicht deine genaue Position</td></tr>
+          <tr><td>accessibility.cloud und DB FaSta (apis.deutschebahn.com)</td><td>Zustand von Aufzügen an Bahnhöfen</td><td>Anfrage nach Aufzügen einer Station</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Diese Dienste sind unabhängige Dritte mit eigenen Bedingungen und Datenschutzerklärungen; ich habe keinen Einfluss darauf, wie lange sie Anfragen speichern. Die Daten selbst (z. B. Karten) stammen von OpenStreetMap-Mitwirkenden (ODbL).</p>
+    <p><strong>Eigener Server:</strong> In den Einstellungen kannst du statt des öffentlichen BVG-REST-Dienstes eine eigene Serveradresse eintragen. Diese Anfragen (auch im Hintergrund und in Widgets) gehen dann an den von dir gewählten Server. Für ihn bist du selbst verantwortlich.</p>
+    <p>Die OpenStreetMap-Stationsdaten für Berlin und weitere Bundesländer sind in der App enthalten bzw. werden vom Gerät gelesen; die App lädt dafür nichts von einem Server nach. Das Liniennetz für die Stadtkarte baut die App selbst aus Echtzeitabfragen an die Fahrplandienste auf.</p>
+
+    <h2>4. Standort</h2>
+    <p>Die App nutzt den Standort (genau oder ungefähr, du kannst „ungefähr“ wählen) nur, <strong>solange sie geöffnet ist</strong>: für Haltestellen in der Nähe, die Karte, „von hier“ und Wege zu Fuß. Die Koordinaten gehen dabei in die Anfragen an die Dienste aus Abschnitt 3. Ohne Standortfreigabe funktioniert die App weiter und zeigt den Alexanderplatz als Ausgangspunkt. Es gibt <strong>keinen Standortzugriff im Hintergrund</strong>.</p>
+    <ul>
+      <li><strong>Widgets</strong> aktualisieren Abfahrten mit der letzten Position, die die App beim Benutzen gespeichert hat (nur auf dem Gerät); die App fragt dafür nicht im Hintergrund nach dem Standort. Diese Position geht an die Fahrplandienste.</li>
+      <li><strong>Störungswächter</strong> (optional, von dir eingeschaltet): Ein Hintergrundauftrag (WorkManager) prüft in einem von dir gewählten Takt oder zu gewählten Uhrzeiten gespeicherte Wege mit eingeschalteter Glocke und, wenn du es einschaltest, gespeicherte Orte auf Störungen. Dafür verwendet er <strong>nur die gespeicherten Haltestellen und Koordinaten</strong> dieser Wege und Orte, nicht deinen aktuellen Standort, und schickt sie an die Fahrplandienste. Ist nichts eingeschaltet, läuft nichts. Meldungen, die schon angezeigt wurden, merkt sich die App einige Tage auf dem Gerät.</li>
+      <li><strong>Fahrtbegleiter</strong>: Der Vordergrunddienst aktualisiert die von dir gestartete Fahrt (Abfahrtszeiten, Verspätungen) und zeigt sie in einer dauerhaften Benachrichtigung. Er verwendet keinen Standort, kein Mikrofon und keine Kamera und endet fünf Minuten nach der Ankunft oder wenn du die Fahrt beendest.</li>
+    </ul>
+
+    <h2>5. Kontakte und Kalender (optional)</h2>
+    <p>Beide Berechtigungen sind freiwillig; die App funktioniert ohne sie vollständig. <strong>Kontakte:</strong> Wenn du in der Suche „Kontakte“ öffnest, liest die App die Postanschriften deiner Kontakte, solange die Liste offen ist; nichts wird gespeichert oder protokolliert. Tippst du einen Kontakt an, wird seine Anschrift wie ein getippter Suchtext an Photon und die Fahrplandienste geschickt. Bei erlaubtem Zugriff können Kontakte mit Anschrift auch an die gekoppelte Uhr kopiert werden (Gerät zu Gerät, ohne Dritte). <strong>Kalender:</strong> Die App liest bei Bedarf die nächsten Termine mit Ort (7 Tage, höchstens 4) und speichert sie nicht; nur der Ort des Termins, den du auswählst, wird als Ziel gesucht. „Zum Kalender hinzufügen“ übergibt einen Termin nur an deine Kalender-App.</p>
+    <!-- Einschätzung: Adresse eines vom Nutzer angetippten Kontakts bzw. Terminorts wird wie ein Suchtext behandelt (nutzergesteuerte Suchanfrage). Das ist im Play-Console-Formular als "nicht erfasst" geführt, mit Rückfall auf "Adresse, geteilt". -->
+
+    <h2>6. Benachrichtigungen</h2>
+    <p>Die App sendet Benachrichtigungen lokal auf deinem Gerät (Fahrtbegleiter, Aussteigehinweis, Störungen). Es gibt keinen Push-Dienst und keinen Server, der Benachrichtigungen schickt. Die Berechtigung ist freiwillig; unter Android 16 und neuer kann die Fahrt als „Live-Update“ erscheinen.</p>
+
+    <h2>7. Android-Datensicherung</h2>
+    <p>Android kann Einstellungen, Favoriten, gespeicherte Orte und Wege und letzte Ziele in die Google-Datensicherung deines Kontos aufnehmen oder auf ein neues Gerät übertragen. Das steuerst du in den Systemeinstellungen; die Cloud-Sicherung wird nur genutzt, wenn sie auf dem Gerät verschlüsselt werden kann (Bildschirmsperre gesetzt). Zugangsschlüssel für Datendienste, Zwischenspeicher und der Zustand von Widgets sind ausgenommen. Auf diese Sicherung habe ich keinen Zugriff; es gelten die Bedingungen von Google.</p>
+
+    <h2>8. Live-Link und „So kommst du hin“</h2>
+    <p>Du kannst eine Fahrt oder Verbindung als Link teilen. Die Fahrt steckt im <strong>Teil des Links nach dem „#“ (Fragment)</strong>; Browser schicken diesen Teil nie an einen Server. Die Seite des Empfängers (<a href="../live/">Live-Seite</a>, <a href="../route/">Route-Seite</a>) fragt die öffentlichen Fahrplandienste (BVG REST, Transitous) und OpenFreeMap vom Browser des Empfängers aus ab; dort werden daher IP-Adresse und Anfrage an diese Dienste übertragen. Die Seiten laden außerdem die Kartenbibliothek MapLibre von unpkg.com. Die Seiten zeigen die <strong>geplante Fahrt mit Echtzeitdaten, nicht den GPS-Standort deines Handys</strong>. Den Namen, den ein Live-Link anzeigt, legst du selbst fest; er ist optional. Die Adresse der Live-Seite lässt sich in den Einstellungen ändern.</p>
+
+    <h2>9. Uhr-App (Wear OS)</h2>
+    <p>Handy und Uhr tauschen Fahrten, Favoriten und ggf. Kontaktadressen über die Wearable Data Layer von Google Play-Diensten direkt zwischen den Geräten aus. Die Uhr-App kann außerdem eigenständig Anfragen an die Dienste aus Abschnitt 3 senden und nutzt dafür ihren eigenen Standort, nur solange sie in Gebrauch ist.</p>
+
+    <h2>10. Diese Website</h2>
+    <p>Die Website ist statisch, setzt keine Cookies, enthält kein Tracking und lädt auf dieser Seite nichts von Dritten. Sie liegt bei Cloudflare Pages; der Hoster protokolliert technisch bedingt Anfragen (z. B. IP-Adresse, Zeit, abgerufene Seite, Browserkennung). Ich habe darauf nur begrenzt Zugriff und werte sie nicht aus.</p>
+    <!-- OWNER: Hoster-Angabe stimmt mit dem Footer der Startseite überein (Cloudflare Pages). Falls ein Auftragsverarbeitungsvertrag/Drittlandtransfer relevant ist, bitte prüfen. -->
+
+    <h2>11. Rechtsgrundlagen</h2>
+    <ul>
+      <li><strong>Anfragen an Fahrplan-, Routing-, Such- und Kartendienste</strong> (Abschnitte 3, 4, 8): Sie erfolgen, um die Funktion zu liefern, die du in der App aufrufst, also zur Erfüllung der Nutzung der App (Art. 6 Abs. 1 lit. b DSGVO) und in meinem und deinem berechtigten Interesse an einer funktionierenden App (Art. 6 Abs. 1 lit. f DSGVO).</li>
+      <li><strong>Standort, Kontakte, Kalender, Benachrichtigungen:</strong> Deine Einwilligung durch die Berechtigung im System (Art. 6 Abs. 1 lit. a DSGVO, für den Zugriff auf das Gerät auch § 25 Abs. 2 Nr. 2 TDDDG). Du kannst sie jederzeit in den Android-Einstellungen widerrufen; die App funktioniert dann ohne.</li>
+      <li><strong>Website-Protokolle beim Hoster:</strong> berechtigtes Interesse an Betrieb und Sicherheit (Art. 6 Abs. 1 lit. f DSGVO).</li>
+    </ul>
+    <!-- Einschätzung: Zuordnung der Rechtsgrundlagen ist eine nach bestem Wissen getroffene Auswahl. Bitte bei Bedarf rechtlich prüfen lassen. -->
+
+    <h2>12. Deine Rechte</h2>
+    <p>Du hast nach der DSGVO das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch sowie das Recht, erteilte Einwilligungen zu widerrufen. Ich speichere keine Daten von dir: Es gibt kein Konto und keinen Server, daher kann ich hierzu nur bestätigen, dass nichts vorliegt. Die lokalen Daten löschst du, indem du in den Android-Einstellungen den Speicher der App leerst oder sie deinstallierst. Für Daten bei den Diensten aus Abschnitt 3 wende dich an den jeweiligen Anbieter. Bei Fragen schreib an <img class="mail" src="../site/img/contact-mail.svg" alt="E-Mail-Adresse (als Bild)" width="177" height="22">.</p>
+
+    <h2>13. Beschwerde bei der Aufsichtsbehörde</h2>
+    <p>Du kannst dich bei einer Datenschutzaufsichtsbehörde beschweren, zum Beispiel bei der Berliner Beauftragten für Datenschutz und Informationsfreiheit (<a href="https://www.datenschutz-berlin.de">datenschutz-berlin.de</a>).</p>
+
+    <h2>14. Änderungen</h2>
+    <p>Wenn sich ändert, welche Daten die App sendet, passe ich diese Erklärung an. Das Datum oben zeigt den Stand. Frühere Fassungen stehen in der Versionsgeschichte des Quellcodes auf GitHub.</p>
+  </div>
+</main>
+<footer>
+  <div class="wrap">
+    <div>
+      <p><strong>Next Stop – ein privates Open-Source-Projekt. Kein Angebot der BVG, des VBB oder der Deutschen Bahn.</strong></p>
+      <p>Diese Seite setzt keine Cookies, lädt nichts von Dritten und nutzt kein Tracking. Sie liegt bei Cloudflare Pages; der Hoster protokolliert Anfragen (z. B. IP-Adresse, Zeit) technisch bedingt.</p>
+      <p>© 2026 Next Stop · GPL-3.0 · Kartendaten © OpenStreetMap</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="https://github.com/jnbp/next-stop">Quellcode</a>
+      <a href="https://bapo.me/impressum" hreflang="de">Impressum</a>
+      <a href="./" aria-current="page">Datenschutz</a>
+      <a href="#main">Nach oben</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

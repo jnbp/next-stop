@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Lets the notification of a trip be shown as a Live Update from Android 16 on. -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.NextStop">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.NextStop.Main"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- The shortcuts of the launcher icon (see AppShortcuts). -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+            <!-- Links of the app (see AppLinks): nextstop://open from the watch ("Open Next Stop on the
+                 phone", RemoteActivityHelper allows only VIEW + BROWSABLE), /route from web/route and
+                 the launcher shortcuts, /departures from the shortcuts and stops on the home screen. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="open"
+                    android:scheme="nextstop" />
+            </intent-filter>
+            <!-- A place shared by another app (a maps app, a message): the destination of a new
+                 search, to confirm (see AppLinks.sharedPlace). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <!-- "Navigate here" of other apps: the connection from where the user is to the place
+                 a link names (see AppLinks.navigateTo and data/NavLinks.kt). geo: and the
+                 navigation links of Google Maps (google.navigation:q=…). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="geo" />
+                <data android:scheme="google.navigation" />
+            </intent-filter>
+            <!-- Links of Google Maps, without autoVerify: the app cannot verify Google's domains,
+                 so it is offered where Android lets the user choose ("Open with"), and the user can
+                 allow these links for it in the app's settings ("Open by default"). Hosts whose
+                 every path is a map, and the short links (followed first, see followShortMapLink). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="maps.google.com" />
+                <data android:host="maps.google.de" />
+                <data android:host="maps.app.goo.gl" />
+            </intent-filter>
+            <!-- Hosts where only the paths under /maps are maps (goo.gl/maps/… are short links). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="www.google.com" />
+                <data android:host="google.com" />
+                <data android:host="www.google.de" />
+                <data android:host="google.de" />
+                <data android:host="goo.gl" />
+                <data android:pathPrefix="/maps" />
+            </intent-filter>
+        </activity>
+        <!-- Keeps a followed trip current with the screen off and shows its next step. It uses
+             no location, so none of the other types fits: the trip companion is its special use. -->
+        <service
+            android:name=".ui.TripService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Live trip companion: refreshes the public transport journey the user started and shows its next step in an ongoing notification until the trip ends." />
+        </service>
+        <!-- The buttons Take it / Ignore of the notification of a faster connection. -->
+        <receiver
+            android:name=".ui.FasterReceiver"
+            android:exported="false" />
+        <!-- The alarm of the next reminder to get off during a followed trip. -->
+        <receiver
+            android:name=".ui.AlightReceiver"
+            android:exported="false" />
+        <!-- Home screen widgets (Jetpack Glance). Each has its own receiver and picture in the
+             picker; one activity sets them all up. -->
+        <receiver
+            android:name=".widget.DeparturesWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_departures_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_departures_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.FavoriteWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_favorite_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_favorite_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.TripWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_trip_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_trip_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.MiniWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_mini_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_mini_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.AppointmentWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_appointment_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_appointment_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.AutoWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_auto_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_auto_info" />
+        </receiver>
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true"
+            android:label="@string/widget_config_title"
+            android:theme="@style/Theme.NextStop">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <!-- Messages of the Wear OS app (sync, start a trip found on the watch); see wear/PhoneBridge.kt. -->
+        <service
+            android:name=".wear.PhoneBridgeService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:pathPrefix="/nextstop"
+                    android:scheme="wear" />
+            </intent-filter>
+            <!-- The watch's own copy of its settings (PhoneBridge.PATH_WATCH_SETTINGS_WATCH). -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data
+                    android:host="*"
+                    android:pathPrefix="/nextstop/watch-settings-w"
+                    android:scheme="wear" />
+            </intent-filter>
+        </service>
+        <!-- The redraw of the widgets at the start of a minute while something leaves soon. -->
+        <receiver
+            android:name=".widget.WidgetTickReceiver"
+            android:exported="false" />
+    </application>
+
+</manifest>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A house: the way home. The 24 units of the glyph sit in the middle 48 of the 108 of an adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2"
+        android:scaleY="2"
+        android:translateX="30"
+        android:translateY="30">
+        <path
+            android:fillColor="@color/trip_blue"
+            android:fillType="evenOdd"
+            android:pathData="M12,3L2.5,11.5H5.5V20H10V14.5H14V20H18.5V11.5H21.5Z" />
+    </group>
+</vector>

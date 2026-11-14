@@ -1,0 +1,1 @@
+Erste Testversion von Next Stop: Verbindungen mit Umstiegsstufen, Reisebegleiter mit Live-Benachrichtigung, Einsteigehinweise, Abkürzungs-Alarm, Karte mit Stationsdetails und die Wear-OS-App mit Kacheln und Komplikation. Über Rückmeldungen freue ich mich.

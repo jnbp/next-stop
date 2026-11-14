@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Wie Verspätungen angezeigt werden (DelayDisplay). -->
+    <string name="delay_display_title">Verspätungen</string>
+    <string name="delay_display_text">So sieht eine verspätete Abfahrt überall in der App aus.</string>
+    <string name="delay_display_realtime">Neue Zeit + Verspätung</string>
+    <string name="delay_display_realtime_text">Die erwartete Zeit, die Verspätung steht daneben.</string>
+    <string name="delay_display_planned">Planzeit + Verspätung</string>
+    <string name="delay_display_planned_text">Die Zeit laut Fahrplan, die Verspätung steht daneben.</string>
+    <string name="delay_display_only">Nur neue Zeit</string>
+    <string name="delay_display_only_text">Nur die erwartete Zeit: rot bei Verspätung, grün wenn pünktlich.</string>
+    <string name="delay_sample_destination">Wannsee</string>
+    <!-- Die Gruppen der Einstellungen. -->
+    <string name="settings_group_appearance">Darstellung</string>
+    <string name="settings_group_map">Karte</string>
+    <string name="settings_group_connections">Verbindungen &amp; Umstiege</string>
+    <string name="settings_group_on_the_way">Unterwegs &amp; Benachrichtigungen</string>
+    <string name="settings_group_start">Startseite</string>
+    <string name="settings_group_accessibility">Barrierefreiheit</string>
+    <string name="settings_advanced">Erweitert</string>
+    <string name="settings_advanced_text">Datenquellen, API-Schlüssel, eigener Server, Live-Seite und Entwickleroptionen</string>
+    <string name="settings_live_page">Live-Seite</string>
+    <string name="setup_restart_short">Farben, Ansicht, Umstiege und Benachrichtigungen – Schritt für Schritt mit Vorschau.</string>
+    <!-- Die Einrichtung: Sprint-Hinweis, Fahrzeuge auf der Strecke, die beiden „schneller“-Funktionen. -->
+    <string name="setup_sprint_note">Sprint (0–1 Min.): nur rennend oder mit Glück – oft unrealistisch.</string>
+    <string name="setup_vehicles_timetable_legend">Ohne Punkt: Fahrplan</string>
+    <string name="setup_tag_remembered">Einstellung, gilt für jede Fahrt</string>
+    <string name="setup_tag_per_trip">Pro Fahrt, in einer Verbindung einschalten</string>
+    <string name="setup_shortcut_short">Während du einer Fahrt folgst, meldet sich die App, wenn sich seit deiner Wahl etwas geändert hat – etwa ein schnellerer Weg.</string>
+    <string name="setup_shortcut_when">Wann</string>
+    <string name="setup_shortcut_when_text">Nur bei Bedarf: wenn du ihn bei einer Fahrt einschaltest oder mit „Jede Minute zählt“. Immer an: bei jeder Fahrt.</string>
+    <string name="setup_every_minute_short">Schalte es für eine Fahrt in einer Verbindung ein: Es aktiviert Sprint-Umstiege und den Abkürzungs-Alarm für diese Fahrt.</string>
+    <string name="setup_level_relaxed">Entspannt: viel Puffer, gemütlich gehen.</string>
+    <string name="setup_level_normal">Normal: normales Gehtempo.</string>
+    <string name="setup_level_risky">Knapp: zügig gehen.</string>
+</resources>

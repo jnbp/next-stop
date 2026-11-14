@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#1B4FD8">
+  <!-- Only the origin goes along with requests; the fragment with the connection never leaves the browser. -->
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com; img-src 'self' data: blob: https://tiles.openfreemap.org; connect-src https://v6.bvg.transport.rest https://api.transitous.org https://tiles.openfreemap.org; worker-src blob:; child-src blob:; font-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Next Stop · So kommst du hin</title>
+  <link rel="preload" href="../shared/fonts/google_sans_flex_400.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.css"
+        integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="col" id="col">
+    <header class="top glass" id="top">
+      <div class="hero-top">
+        <span class="brand">Next Stop</span>
+        <span id="live" class="live loading" aria-live="polite"><i class="pulse" aria-hidden="true"></i><span id="fresh"></span></span>
+      </div>
+      <h1 id="title">…</h1>
+      <p id="dest" class="dest"></p>
+      <div class="when">
+        <span id="day" class="day"></span>
+        <span id="times" class="times"></span>
+      </div>
+      <p class="lead"><span id="countdown" class="countdown"></span></p>
+      <p id="summary" class="summary"></p>
+    </header>
+    <div id="banner" class="banner glass" role="status" hidden>
+      <p id="banner-text"></p>
+      <div id="banner-actions" class="actions"></div>
+    </div>
+    <div class="map-wrap" id="map-wrap"><div id="map" class="map glass" aria-hidden="true"></div></div>
+    <ol id="steps" class="steps"></ol>
+    <section id="later" class="later glass">
+      <h2 id="later-title"></h2>
+      <p id="later-route" class="later-route"></p>
+      <div id="later-actions" class="actions"></div>
+    </section>
+    <footer class="foot">
+      <p id="disclaimer" class="foot-strong"></p>
+      <p>Next Stop · <span id="src-label"></span>:
+        <a href="https://www.bvg.de/" target="_blank" rel="noopener noreferrer">BVG</a>/<a href="https://www.vbb.de/" target="_blank" rel="noopener noreferrer">VBB</a>,
+        <a href="https://transitous.org/sources/" target="_blank" rel="noopener noreferrer">Transitous</a> ·
+        <a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer">OpenFreeMap</a>,
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap</a></p>
+      <p><span id="oss-label">Open Source (GPL-3.0)</span> ·
+        <a href="https://github.com/jnbp/next-stop" target="_blank" rel="noopener noreferrer" id="code-link">Quellcode auf GitHub</a></p>
+      <p id="note"></p>
+      <p><a href="../datenschutz/">Datenschutz</a> · <a href="../en/privacy/">Privacy</a></p>
+    </footer>
+  </main>
+  <div id="demo-bar" class="demo-bar glass" hidden>
+    <span id="demo-label"></span>
+    <button id="demo-forward" class="button primary" type="button"></button>
+  </div>
+  <script src="https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.js"
+          integrity="sha384-nXMl9YiLoSG5KBPTFgvxVuIqQQcqIvo0bFrvoEaGJC6r7IibIzF1S36Zbf/sKBtL" crossorigin="anonymous"></script>
+  <script src="../shared/core.js"></script>
+  <script src="../shared/ui.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

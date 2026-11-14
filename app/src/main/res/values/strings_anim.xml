@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The setup: one or two short sentences per step, the details behind "Learn more". -->
+    <string name="setup_progress">Step %1$d of %2$d</string>
+    <!-- On the fade at the bottom of a step that holds more than fits. -->
+    <string name="setup_more_below">more ↓</string>
+    <string name="setup_more_below_action">Scroll down</string>
+    <string name="setup_welcome_short">A few steps and the app rides the way you like. Everything can be changed later.</string>
+    <string name="setup_colors_short">Tap a colour and see it at once.</string>
+    <string name="setup_delay_short">How should a delay look?</string>
+    <string name="setup_delay_sample_line">S1 Wannsee</string>
+    <string name="setup_transfers_short">How tight may a change be? Move the bar and watch the examples.</string>
+    <string name="setup_transfers_examples">Example changes</string>
+    <string name="setup_example_shown">shown</string>
+    <string name="setup_example_hidden">hidden</string>
+    <string name="setup_live_name_short">Optional: how others see your live link.</string>
+    <string name="setup_live_name_preview">%1$s is on the way to %2$s</string>
+    <string name="setup_live_name_preview_none">On the way to %1$s</string>
+    <string name="setup_sample_destination">Alexanderplatz</string>
+    <string name="setup_sample_appointment">14:00 Dentist · Alexanderplatz</string>
+    <string name="setup_sample_leave">leave in 12 min · U8 at 13:41</string>
+    <string name="setup_vehicles_short">A green dot means: live data.</string>
+    <string name="setup_map_style_short">Tap a style, the map follows.</string>
+    <string name="setup_notifications_short">Your trip in the status bar, with a reminder to get off.</string>
+    <string name="setup_faster_short">Let the app look for faster ways while you ride.</string>
+    <string name="setup_watch_short">Your next step on the wrist, even without the phone.</string>
+    <!-- A disruption card: the quiet links under a closed one, and what a tap on it does. -->
+    <string name="disruption_details">Details</string>
+    <string name="disruption_expand">Show details</string>
+    <string name="disruption_collapse">Hide details</string>
+</resources>

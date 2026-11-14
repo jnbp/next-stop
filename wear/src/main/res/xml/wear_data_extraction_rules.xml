@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    What Android's backup (Wear OS 4 / Android 13 and later) takes of the watch app. The watch
+    keeps everything in SharedPreferences (shared_prefs/):
+    - wear-store.xml (WatchStore): the watch's own settings (map style, change time and alerts
+      where switched on the watch, the target of the tile) and the copy of the phone's
+      favourites, saved places and recent destinations.
+    - contact-usage.xml (ContactUsage): the contacts used last as a destination.
+    - usual-lines.xml (UsualLines): the lines of the last connection started to each
+      destination, shown on the favourites of the start page.
+    - departure-cache.xml (DepartureCache): departures as last loaded; out, they are old by
+      the time a backup is restored and load again.
+    The map pictures lie in the cache folder, which is never backed up. With an <include> only
+    what is included is backed up. The watch stores no keys.
+-->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <include domain="sharedpref" path="." />
+        <exclude domain="sharedpref" path="departure-cache.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="." />
+        <exclude domain="sharedpref" path="departure-cache.xml" />
+    </device-transfer>
+</data-extraction-rules>

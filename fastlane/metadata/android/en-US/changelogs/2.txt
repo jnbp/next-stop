@@ -1,0 +1,1 @@
+Version 0.1.1: fixed a crash at start. New: paste from the clipboard in search and "navigate here" links from other apps (geo: and Google Maps links).

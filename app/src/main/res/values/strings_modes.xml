@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kinds of transport (long-distance trains, coaches) and the bike combo. -->
+<resources>
+    <string name="product_coach">Coach</string>
+    <string name="bike_combo_title">Bike combo</string>
+    <string name="bike_combo_text">Cycle to the first stop and from the last one, and take the bike on S-Bahn, U-Bahn, tram and regional trains. Coaches and buses that do not carry bikes are left out: their stretches are cycled. Can also be switched under Search options; that then counts for the next searches.</string>
+    <string name="bike_combo_search_text">By bike to and from the trains, the bike on board.</string>
+    <string name="bike_combo_chip">Bike combo</string>
+    <string name="cycle_to">Cycle %1$d min to %2$s</string>
+    <string name="cycle_minutes">By bike, %1$d min</string>
+    <string name="cycle_focus_title">By bike to %1$s</string>
+    <string name="cycle_focus_minutes">%1$d min by bike</string>
+    <string name="cycle_distance">%1$s km by bike</string>
+</resources>

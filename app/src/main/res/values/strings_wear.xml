@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings of the bridge to the Wear OS app (wear/PhoneBridge.kt), apart from strings.xml to keep merges simple. -->
+<resources>
+    <string name="wear_channel">Watch</string>
+    <string name="wear_trip_started">Trip started on the watch</string>
+    <string name="wear_trip_started_text">Tap to follow it here.</string>
+    <!-- Settings › Watch: the settings of the watch app, edited on the phone. -->
+    <string name="watch_settings_pending">Watch not connected – changes are sent as soon as it is.</string>
+    <string name="watch_live_departures_title">Live departures on the start page</string>
+    <string name="watch_live_departures_text">The next departures of the nearest stop right on the watch\'s start page. Off: the button “Departures nearby” as before.</string>
+    <string name="watch_animations_title">Animations on the watch</string>
+    <string name="watch_animations_text">Rows that slide in, rolling minutes, the moving ring. Off for an older or slower watch: everything is simply there.</string>
+    <string name="watch_map_style_title">Watch map style</string>
+    <string name="watch_map_style_text">How the map pictures on the watch look. Automatic is dark on the watch\'s black screen.</string>
+    <string name="watch_tile_title">Destination of the tile</string>
+    <string name="watch_tile_text">The tile “To a favourite” shows the next connection to this place.</string>
+    <string name="watch_tile_home">Home (automatic)</string>
+    <string name="watch_reminder_text">The watch vibrates before you get off. The same setting as on the phone.</string>
+    <string name="watch_comfort_title">Change time on the watch</string>
+    <string name="watch_comfort_text">The watch searches with the change time of the phone: %1$s. Change it under “Connections &amp; changes”.</string>
+</resources>

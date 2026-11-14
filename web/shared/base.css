@@ -1,0 +1,143 @@
+/* Next Stop web pages: the design both pages share (fonts, colours, glass, badges, live dot, delays, motion). */
+@font-face { font-family: "Google Sans Flex"; src: url("fonts/google_sans_flex_400.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Google Sans Flex"; src: url("fonts/google_sans_flex_600.ttf") format("truetype"); font-weight: 500 600; font-display: swap; }
+@font-face { font-family: "Google Sans Flex"; src: url("fonts/google_sans_flex_800.ttf") format("truetype"); font-weight: 700 900; font-display: swap; }
+
+:root {
+  --blue: #1B4FD8;
+  --lime: #C8F16B;
+  --ink: #171A21;
+  --muted: #5b6680;
+  --faint: #a7afc0;
+  --glass: rgba(255, 255, 255, 0.80);
+  --glass-strong: rgba(255, 255, 255, 0.92);
+  --glass-line: rgba(255, 255, 255, 0.7);
+  --chip: rgba(27, 79, 216, 0.08);
+  --ok: #12805c;
+  --ok-bg: rgba(18, 128, 92, 0.12);
+  --warn: #a35a00;
+  --warn-bg: rgba(230, 140, 0, 0.16);
+  --bad: #c4361b;
+  --bad-bg: rgba(196, 54, 27, 0.12);
+  --track: rgba(27, 79, 216, 0.12);
+  --shadow: 0 12px 32px rgba(15, 22, 38, 0.16), 0 2px 6px rgba(15, 22, 38, 0.08);
+  --radius: 28px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  font-family: "Google Sans Flex", "Google Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --blue: #3D6AF2;
+    --ink: #E7E9F0;
+    --muted: #a3adc6;
+    --faint: #4b5468;
+    --glass: rgba(18, 24, 40, 0.76);
+    --glass-strong: rgba(18, 24, 40, 0.9);
+    --glass-line: rgba(255, 255, 255, 0.08);
+    --chip: rgba(200, 241, 107, 0.10);
+    --ok: #7fe0b5;
+    --ok-bg: rgba(127, 224, 181, 0.14);
+    --warn: #ffc069;
+    --warn-bg: rgba(255, 192, 105, 0.14);
+    --bad: #ff8a6b;
+    --bad-bg: rgba(255, 138, 107, 0.14);
+    --track: rgba(255, 255, 255, 0.10);
+    --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; color: var(--ink); background: #dfe5f2; }
+@media (prefers-color-scheme: dark) { html, body { background: #0b1020; } }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+a { color: var(--blue); text-decoration: none; font-weight: 600; }
+a:hover { text-decoration: underline; }
+@media (prefers-color-scheme: dark) { a { color: var(--lime); } }
+
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+}
+
+.brand { font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--blue); }
+@media (prefers-color-scheme: dark) { .brand { color: var(--lime); } }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.pulse { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.live.fresh .pulse { background: #2fbf71; }
+.live.fresh .pulse::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 50%;
+  border: 2px solid #2fbf71; opacity: 0; animation: ping 2.4s var(--ease) infinite;
+}
+.live.stale .pulse, .live.none .pulse { background: #e8a33a; }
+.live.stale, .live.none { color: var(--warn); font-weight: 600; }
+.live.loading .pulse { animation: blink 1s ease-in-out infinite; }
+@keyframes ping { 0% { transform: scale(0.6); opacity: 0.9; } 100% { transform: scale(1.8); opacity: 0; } }
+@keyframes blink { 50% { opacity: 0.3; } }
+
+.delay { font-size: 13px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; align-self: center; }
+.delay.ok { color: var(--ok); background: var(--ok-bg); }
+.delay.warn { color: var(--warn); background: var(--warn-bg); }
+.delay.bad { color: var(--bad); background: var(--bad-bg); }
+.delay.small { font-size: 11px; padding: 1px 6px; }
+
+.badge {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 42px; height: 26px; padding: 0 8px; border-radius: 8px;
+  font-weight: 800; font-size: 14px; letter-spacing: -0.01em;
+  background: #5A6072; color: #fff;
+}
+.badge.walk { background: var(--chip); color: var(--ink); min-width: 42px; }
+.badge svg { width: 18px; height: 18px; }
+
+/* ----- Footer ----- */
+.foot { padding: 14px 10px 4px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.foot p { margin: 0 0 4px; }
+.foot-strong { font-weight: 700; color: var(--ink); }
+
+.marker-dest { position: relative; width: 30px; height: 38px; filter: drop-shadow(0 4px 8px rgba(15, 22, 38, 0.35)); }
+.marker-dest::before {
+  content: ""; position: absolute; left: 3px; top: 0; width: 24px; height: 24px;
+  background: var(--blue); border: 3px solid #fff; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); transform-origin: center;
+}
+.marker-dest i { position: absolute; left: 11px; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--lime); }
+
+:root {
+  /* A spring with a little overshoot, and a softer one for things that settle. */
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --settle: cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+/* Cards come in with a spring; rows one after the other. */
+@keyframes hero-in { from { opacity: 0; transform: translateY(-18px) scale(0.94); } }
+@keyframes row-in { from { opacity: 0; transform: translateY(18px); } }
+
+/* Rolling numbers: the old one leaves, the new one comes in, stacked in one cell. */
+.rolling > span { grid-area: 1 / 1; }
+.roll-in.up { animation: roll-in-up 0.5s var(--spring) both; }
+.roll-in.down { animation: roll-in-down 0.5s var(--spring) both; }
+.roll-out.up { animation: roll-out-up 0.3s ease-in both; }
+.roll-out.down { animation: roll-out-down 0.3s ease-in both; }
+@keyframes roll-in-up { from { transform: translateY(70%); opacity: 0; } }
+@keyframes roll-in-down { from { transform: translateY(-70%); opacity: 0; } }
+@keyframes roll-out-up { to { transform: translateY(-70%); opacity: 0; } }
+@keyframes roll-out-down { to { transform: translateY(70%); opacity: 0; } }
+
+/* The arrival: a lime check that pops and draws itself. */
+.check { display: inline-flex; width: 44px; height: 44px; margin-bottom: 4px; flex: none; }
+.check[hidden] { display: none; }
+.check svg { width: 100%; height: 100%; overflow: visible; }
+.check circle { fill: var(--lime); }
+.check path { fill: none; stroke: #14210A; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 40; stroke-dashoffset: 0; }
+.check.pop svg { animation: check-pop 0.6s var(--spring) both; }
+.check.pop path { animation: check-draw 0.45s ease-out 0.25s both; }
+@keyframes check-pop { from { transform: scale(0.2); opacity: 0; } }
+@keyframes check-draw { from { stroke-dashoffset: 40; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .live.fresh .pulse::after, .live.loading .pulse { animation: none; }
+  .roll-in, .roll-out, .check.pop svg, .check.pop path { animation: none; }
+}

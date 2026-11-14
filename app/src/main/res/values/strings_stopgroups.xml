@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Favourites of several stops shown together on the departures tab. -->
+    <string name="stop_group_title">Save these stops as a favourite</string>
+    <string name="stop_group_text">Their departures together, under one name.</string>
+    <string name="stop_group_ok">OK</string>
+    <string name="stop_group_removed">Stop combination removed from favourites</string>
+    <string name="stop_group_on">Remove this stop combination from favourites</string>
+    <string name="stop_group_off">Save this stop combination as a favourite</string>
+    <!-- The sign beside the stop on top while the notice line is folded away above the list. -->
+    <plurals name="departures_notice_count">
+        <item quantity="one">%d notice, show it</item>
+        <item quantity="other">%d notices, show them</item>
+    </plurals>
+</resources>

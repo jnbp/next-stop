@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The rules of Android's backup before Android 12 (android:fullBackupContent). The app needs
+    Android 12, which reads data_extraction_rules.xml instead; this file keeps the same rules
+    for any tool that still reads it. See data_extraction_rules.xml for what is kept and why.
+-->
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+    <!-- Access keys of data backends stay on the device (AppPrefs.KEYS_PREFS_NAME). -->
+    <exclude domain="sharedpref" path="source_keys.xml" />
+    <!-- The keys of the lift sources belong to this device (see data/LiftStatus.kt). -->
+    <exclude domain="sharedpref" path="lift_keys.xml" />
+    <!-- Which widget previews were published to this device's launcher (Widgets.publishOnce). -->
+    <exclude domain="sharedpref" path="next-stop-widgets.xml" />
+</full-backup-content>

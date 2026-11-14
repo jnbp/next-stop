@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 500" width="1024" height="500" role="img" aria-label="Next Stop – ÖPNV für Berlin und ganz Deutschland, auf Handy und Uhr">
+  <!-- Play feature graphic, 1024 x 500. Export as 24-bit PNG without alpha: see docs/play-release.md. -->
+  <title>Next Stop</title>
+  <style>text{font-family:'Google Sans Flex','Google Sans',Roboto,'Helvetica Neue',Arial,sans-serif}</style>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1B4FD8"/>
+      <stop offset="1" stop-color="#123AAA"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.45" r="0.55">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="500" fill="url(#bg)"/>
+  <rect width="1024" height="500" fill="url(#glow)"/>
+
+  <!-- Route lines in the style of the README hero -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">
+    <path d="M470 520C470 360 560 150 760 120C930 96 1050 210 1050 300" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="10"/>
+    <path d="M540 450H620L720 350H800" stroke="#C8F16B" stroke-width="12"/>
+    <path d="M700 -20V110L770 180V520" stroke="#FFFFFF" stroke-opacity="0.45" stroke-width="12"/>
+    <path d="M520 560L640 430H850L930 340V-20" stroke="#FFFFFF" stroke-opacity="0.28" stroke-width="12"/>
+  </g>
+  <g fill="#FFFFFF" stroke="#0E1A3A" stroke-width="4">
+    <circle cx="620" cy="450" r="9"/>
+    <circle cx="720" cy="350" r="9"/>
+    <circle cx="700" cy="110" r="9"/>
+  </g>
+
+  <!-- Watch with a countdown ring, right side -->
+  <g transform="translate(850 250)">
+    <circle r="112" fill="#05070D"/>
+    <circle r="102" fill="none" stroke="#1E2436" stroke-width="8"/>
+    <path d="M0 -102A102 102 0 1 1 -72 72" fill="none" stroke="#C8F16B" stroke-width="8" stroke-linecap="round"/>
+    <text y="-30" font-size="16" fill="#9EA9C8" font-weight="600" text-anchor="middle">12:14</text>
+    <text y="22" font-size="50" fill="#FFFFFF" font-weight="800" text-anchor="middle" letter-spacing="-1">4 min</text>
+    <rect x="-24" y="38" width="48" height="24" rx="8" fill="#224F86"/>
+    <text y="56" font-size="15" fill="#FFFFFF" font-weight="700" text-anchor="middle">U8</text>
+    <text y="82" font-size="12" fill="#C8F16B" font-weight="600" text-anchor="middle">vorne einsteigen</text>
+  </g>
+
+  <!-- Icon mark, title and line, left side (kept clear of the edges) -->
+  <g transform="translate(72 118) scale(1.5) translate(-18 -18)">
+    <rect x="18" y="18" width="72" height="72" rx="20" fill="#FFFFFF"/>
+    <g transform="translate(-3 0) translate(54 54) scale(0.82) translate(-54 -54)">
+      <path d="M27,54H48" stroke="#1B4FD8" stroke-width="8" stroke-linecap="round" fill="none"/>
+      <path d="M41,42L53,54L41,66" stroke="#1B4FD8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <circle cx="74" cy="54" r="14" fill="#C8F16B"/>
+      <circle cx="74" cy="54" r="5.9" fill="#1B4FD8"/>
+    </g>
+  </g>
+  <text x="70" y="292" font-size="76" fill="#FFFFFF" font-weight="800" letter-spacing="-2">Next Stop</text>
+  <text x="74" y="338" font-size="26" fill="#DCE6FF" font-weight="500">ÖPNV für Berlin und ganz Deutschland –</text>
+  <text x="74" y="372" font-size="26" fill="#DCE6FF" font-weight="500">auf dem Handy und auf der Uhr</text>
+  <rect x="74" y="406" width="340" height="34" rx="17" fill="#C8F16B"/>
+  <text x="244" y="429" font-size="14" fill="#0E1A3A" font-weight="700" text-anchor="middle">Open Source · ohne Konto · ohne Tracking</text>
+</svg>

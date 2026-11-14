@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Startbildschirm-Verknüpfungen, geteilte Orte, Ersatzverkehr, Ortsnamen, Links in Hinweisen. -->
+<resources>
+    <!-- Verknüpfungen des App-Symbols -->
+    <string name="launcher_home">Nach Hause</string>
+    <string name="launcher_work">Zur Arbeit</string>
+    <string name="launcher_to_place">Nach %1$s</string>
+    <string name="launcher_departures_here">Abfahrten</string>
+    <string name="launcher_departures_here_long">Abfahrten hier</string>
+    <string name="launcher_departures_of">Abfahrten %1$s</string>
+    <string name="pin_to_home">Auf Startbildschirm legen</string>
+    <!-- Schienenersatzverkehr (RailReplacement) -->
+    <string name="rail_replacement">Ersatzverkehr</string>
+    <string name="rail_replacement_for">statt %1$s</string>
+    <!-- Abfahrten mehrerer Haltestellen zugleich, Hinweise der gezeigten Haltestellen -->
+    <string name="departures_add_stop">Zusammen anzeigen</string>
+    <string name="departures_stop_plus">%1$s +%2$d</string>
+    <plurals name="disruptions_here">
+        <item quantity="one">%d Störung hier</item>
+        <item quantity="other">%d Störungen hier</item>
+    </plurals>
+</resources>

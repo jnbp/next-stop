@@ -1,0 +1,51 @@
+Next Stop does not stop caring once you pick a connection. It tells you how tight a change really is, where to board, when a faster way turns up and when to get off – on your phone, on your watch and on a page your friends can follow.
+
+Berlin first, all of Europe on board: timetables for Berlin and Brandenburg from VBB and BVG, the rest including long-distance trains from Transitous (focus on Germany). Station details are available in Germany, based on OpenStreetMap.
+
+PLAN
+• Transfer levels: every change is rated by the walking pace it needs – relaxed, normal, tight or sprint. You choose how tight you go.
+• Exact transfer walks: measured on OpenStreetMap footways – stairs, lifts and platforms. With luggage, a pram or a walking aid every walk counts 1.3 times as long.
+• Through-runs: when your train continues as another line, the app tells you to stay seated.
+• Choose means of transport: S-Bahn, U-Bahn, tram, bus, ferry, regional, long-distance and coach. One switch hides long-distance for the Deutschlandticket.
+• Bike combo: cycle the first and last mile, take the train in between.
+• When to leave: the app tells you when to set off, also for the next appointment in your calendar.
+• Paste from the clipboard in search; "navigate here" links from other apps (geo:, Google Maps) open Next Stop directly.
+• Results as a chart on a time axis or as a list.
+
+ON THE MOVE
+• Trip companion: next step, countdown and stops left with live times – in the app and as a live notification.
+• Boarding hints: "board at the front, middle or rear".
+• Shortcut alert: keeps searching while you ride and speaks up when a faster way turns up.
+• Get-off reminders with sound and vibration; the way is recomputed if you leave the planned walk.
+
+MAP, STATIONS, DEPARTURES
+• Vehicles around you from real-time data, with direction. Rail replacement services (SEV) are marked.
+• Stations up close: entrances, lifts with their status, stop positions.
+• Departures for several stops at once, with walking time per stop; save combinations as a favourite. Stop names without the city qualifier, street stops keep their own sign.
+• Place search with OpenStreetMap, saved places, recent destinations.
+
+DISRUPTIONS
+• Notices on the main maps as markers you can hide.
+• "My routes": a map of your places, a status pill and a notice line on each card.
+• Disruption watch: a bell per route, places check (radius 250 m to 2 km), your own check times and interval.
+• Notices in the app's language, grouped by line, with details, mini map and links.
+
+WEAR OS
+• Tiles for the next departure and favourites, a complication for the watch face.
+• Companion pages, get-off alerts, a map of the stops nearby, destination search by keyboard or voice.
+• The watch app works without the phone.
+
+SHARE
+• Live link: friends follow your trip in any browser, no app needed.
+• Route link: a connection becomes a step-by-step page with live times, also as text.
+• Share to Next Stop from other apps, app shortcuts and widgets for departures, favourites, the trip and the next appointment.
+
+PRIVACY
+• No account, no ads, no analytics, no tracking, no crash reporting.
+• No server of ours in between: requests go straight from your device to the timetable, map and search services.
+• Permissions for features only: location, notifications; contacts and calendar only if you allow them, and never stored.
+
+OPEN SOURCE
+Next Stop is free software under the GPL-3.0. The source code is at https://github.com/jnbp/next-stop, where you can also report bugs and suggest ideas.
+
+Note: Next Stop is an independent app and not affiliated with BVG, VBB or Deutsche Bahn. Timetable data comes from public services and may differ. Map data © OpenStreetMap contributors.

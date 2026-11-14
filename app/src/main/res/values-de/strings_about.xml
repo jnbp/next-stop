@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The folding categories of the settings (SettingsCategory): a summary of their state. -->
+    <string name="settings_sum_on">%1$s: an</string>
+    <string name="settings_sum_off">%1$s: aus</string>
+    <string name="settings_sum_products">%1$d von %2$d Verkehrsmitteln</string>
+    <string name="settings_sum_no_name">Kein Name eingetragen</string>
+    <string name="settings_category_show">Diese Einstellungen zeigen</string>
+    <string name="settings_category_hide">Diese Einstellungen ausblenden</string>
+
+    <!-- "About Next Stop" at the end of the settings (AboutUi). -->
+    <string name="about_title">Über Next Stop</string>
+    <string name="about_version">Version %1$s (%2$d)</string>
+    <string name="about_summary">Version %1$s · %2$s</string>
+    <string name="about_tagline">Kostenlos und Open Source. Keine Werbung, kein Tracking.</string>
+    <string name="about_source">Quellcode auf GitHub</string>
+    <string name="about_privacy">Datenschutzerklärung</string>
+    <string name="about_report">Problem melden</string>
+    <string name="about_open_link">Öffnet im Browser</string>
+    <string name="about_license">Lizenz</string>
+    <string name="about_license_text">%1$s mit App-Store-Erlaubnis</string>
+    <string name="about_libraries">Open-Source-Lizenzen</string>
+    <string name="about_libraries_text">Die Bibliotheken und Schriften in Next Stop</string>
+    <string name="about_sources">Datenquellen &amp; Namensnennung</string>
+    <string name="about_sources_text">Fahrpläne, Karte und Orte: woher sie kommen</string>
+
+    <!-- The sheet of the license, in plain words. -->
+    <string name="license_sheet_title">GNU General Public License, Version 3</string>
+    <string name="license_summary_use">Next Stop ist freie Software: Du darfst sie für jeden Zweck nutzen, ihren Code lesen und ändern und sie weitergeben, verändert oder nicht.</string>
+    <string name="license_summary_share">Wer sie weitergibt, gibt auch den Quellcode weiter, unter derselben Lizenz – so bleibt sie für alle frei.</string>
+    <string name="license_summary_stores">Eine zusätzliche Erlaubnis lässt Next Stops eigenen Code auch in App-Stores anbieten, solange sein Quellcode frei verfügbar bleibt. Die Bibliotheken behalten ihre eigenen Lizenzen.</string>
+    <string name="license_summary_warranty">Next Stop kommt ohne jede Gewährleistung. Dies ist eine Zusammenfassung; verbindlich ist nur der Lizenztext.</string>
+    <string name="license_full_text">Vollständiger Lizenztext</string>
+    <string name="license_store_permission">App-Store-Erlaubnis</string>
+
+    <!-- The sheet of the libraries and fonts. -->
+    <string name="libraries_intro">Next Stop baut auf diesen Projekten auf. Tippe eines an, um mehr zu lesen.</string>
+    <string name="libraries_group">Bibliotheken</string>
+    <string name="libraries_fonts">Schriften</string>
+
+    <!-- The sheet of the data sources. -->
+    <string name="sources_intro">Next Stop hat keinen eigenen Server: Es fragt diese Dienste direkt. Danke an alle, die die Daten pflegen.</string>
+    <string name="sources_provider_terms">Nach den Nutzungsbedingungen des Anbieters</string>
+    <string name="sources_osm_use">Kartendaten, Stationen, Haltepositionen, Eingänge und Umsteigepositionen</string>
+    <string name="sources_tiles_use">Kartenkacheln und Kartenstile</string>
+    <string name="sources_transitous_use">Fahrpläne und Echtzeit für Deutschland und darüber hinaus</string>
+    <string name="sources_transitous_terms">Jeder Datensatz unter eigener Lizenz: Liste per Tippen</string>
+    <string name="sources_vbb_use">Fahrpläne und Echtzeit für Berlin und Brandenburg</string>
+    <string name="sources_bvg_use">Fahrpläne, Echtzeit und Störungen der BVG</string>
+    <string name="sources_pte_use">Fahrpläne der BVG über die Bibliothek von Öffi</string>
+    <string name="sources_photon_use">Ortssuche</string>
+    <string name="sources_routing_use">Fuß- und Radwege</string>
+    <string name="sources_change_use">Wo du für einen schnellen Umstieg einsteigst</string>
+    <string name="sources_lifts_use">Aufzüge außer Betrieb</string>
+    <string name="sources_fasta_use">Aufzüge an Bahnhöfen der Deutschen Bahn</string>
+    <string name="map_info_button">Kartendaten und Quellen</string>
+</resources>

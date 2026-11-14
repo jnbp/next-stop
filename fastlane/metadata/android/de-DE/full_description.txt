@@ -1,0 +1,51 @@
+Next Stop begleitet dich nicht nur bei der Suche, sondern auf der ganzen Fahrt: Es sagt dir, wie knapp ein Umstieg wirklich ist, wo du einsteigen solltest, wann es einen schnelleren Weg gibt und wann du aussteigen musst. Auf dem Handy, auf der Uhr und auf einer Seite, der deine Freunde folgen können.
+
+Berlin zuerst, ganz Europa an Bord: Fahrpläne für Berlin und Brandenburg von VBB und BVG, für den Rest inklusive Fernverkehr von Transitous (Schwerpunkt Deutschland). Stationsdetails gibt es in Deutschland, aus OpenStreetMap.
+
+PLANEN
+• Umstiegsstufen: Jeder Umstieg wird nach dem Gehtempo bewertet, das er braucht – entspannt, normal, knapp oder Sprint. Du bestimmst, wie knapp.
+• Exakte Umstiegswege: gemessen auf den Fußwegen aus OpenStreetMap, mit Treppen, Aufzügen und Bahnsteigen. Mit Gepäck, Kinderwagen oder Gehhilfe zählt jeder Weg 1,3-mal so lang.
+• Durchbindungen: Fährt dein Zug als andere Linie weiter, sagt die App „sitzen bleiben“.
+• Verkehrsmittel wählen: S-Bahn, U-Bahn, Tram, Bus, Fähre, Regional-, Fernverkehr und Fernbus. Ein Schalter blendet für das Deutschlandticket Fernverkehr aus.
+• Fahrrad-Kombi: Erste und letzte Meile mit dem Rad, dazwischen Bahn.
+• Abfahrtszeit-Hinweis: Die App sagt, wann du losgehen solltest, auch für den nächsten Termin.
+• Einfügen aus der Zwischenablage in der Suche; „Hierher navigieren“-Links aus anderen Apps (geo:, Google Maps) öffnen direkt Next Stop.
+• Ergebnisse als Diagramm mit Zeitachse oder als Liste.
+
+UNTERWEGS
+• Reisebegleiter: Nächster Schritt, Countdown und verbleibende Halte mit Live-Zeiten – in der App und als Live-Benachrichtigung.
+• Einsteigehinweise: „Vorne, in der Mitte oder hinten einsteigen“.
+• Abkürzungs-Alarm: Die App sucht während der Fahrt weiter und meldet einen schnelleren Weg.
+• Aussteige-Erinnerung mit Ton und Vibration; Neuberechnung, wenn du den Fußweg verlässt.
+
+KARTE, STATIONEN, ABFAHRTEN
+• Fahrzeuge in deiner Nähe aus Echtzeitdaten, mit Fahrtrichtung. Ersatzverkehr (SEV) ist gekennzeichnet.
+• Stationen im Detail: Eingänge, Aufzüge samt Störungsstatus, Haltepositionen.
+• Abfahrten für mehrere Haltestellen auf einmal, mit Gehzeit je Haltestelle; Kombinationen als Favorit speichern. Haltestellennamen ohne Ortszusatz, Straßenhaltestellen behalten ihr eigenes Schild.
+• Ortssuche mit OpenStreetMap, gespeicherte Orte, letzte Ziele.
+
+STÖRUNGEN
+• Meldungen auf den Hauptkarten als Markierungen, die du ausblenden kannst.
+• „Meine Wege“: Karte deiner Orte, Statusanzeige und Hinweiszeile je Karte.
+• Störungswächter: Glocke je Weg, Orte prüfen (Radius 250 m bis 2 km), eigene Prüfzeiten und Intervall.
+• Meldungen in der App-Sprache, nach Linie gruppiert, mit Details, Minikarte und Links.
+
+WEAR OS
+• Kacheln für nächste Abfahrt und Favoriten, Komplikation fürs Zifferblatt.
+• Aussteige-Alarm, Karte der Haltestellen, Zielsuche per Tastatur oder Sprache.
+• Die Uhr-App funktioniert auch ohne Handy.
+
+TEILEN
+• Live-Link: Freunde verfolgen deine Fahrt im Browser, ohne App.
+• Routen-Link: Eine Verbindung wird zur Schritt-für-Schritt-Seite mit Live-Zeiten, auch als Text.
+• Teilen an Next Stop aus anderen Apps, App-Shortcuts und Widgets für Abfahrten, Favoriten, Fahrt und Termin.
+
+DATENSCHUTZ
+• Kein Konto, keine Werbung, keine Analyse, kein Tracking, keine Absturzberichte.
+• Kein Server von uns dazwischen: Anfragen gehen direkt von deinem Gerät an die Fahrplan-, Karten- und Suchdienste.
+• Berechtigungen nur für Funktionen: Standort, Benachrichtigungen; Kontakte und Kalender nur, wenn du sie freigibst, und ohne sie zu speichern.
+
+OPEN SOURCE
+Next Stop ist freie Software unter der GPL-3.0. Den Quellcode findest du auf https://github.com/jnbp/next-stop – dort kannst du auch Fehler melden und Ideen einbringen.
+
+Hinweis: Next Stop ist eine unabhängige App und steht in keiner Verbindung zu BVG, VBB oder der Deutschen Bahn. Fahrplandaten kommen von öffentlichen Diensten und können abweichen. Kartendaten © OpenStreetMap-Mitwirkende.

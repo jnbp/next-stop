@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72" width="160" height="160">
+  <!-- Next Stop launcher icon, from app/src/main/res/drawable/ic_launcher_*.xml (visible area of the adaptive icon). -->
+  <rect x="18" y="18" width="72" height="72" rx="20" fill="#1B4FD8"/>
+  <g transform="translate(-3 0) translate(54 54) scale(0.82) translate(-54 -54)">
+    <path d="M27,54H48" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" fill="none"/>
+    <path d="M41,42L53,54L41,66" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="74" cy="54" r="14" fill="#C8F16B"/>
+    <circle cx="74" cy="54" r="5.9" fill="#1B4FD8"/>
+  </g>
+</svg>

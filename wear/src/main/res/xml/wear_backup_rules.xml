@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The rules of Android's backup before Android 12 (Wear OS 3), the same as in
+    wear_data_extraction_rules.xml: the watch's preferences without the cached departures.
+-->
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+    <exclude domain="sharedpref" path="departure-cache.xml" />
+</full-backup-content>

@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fare zones, ticket filters, disruptions and lifts. -->
+<resources>
+    <!-- Fare zones (VBB A/B/C) -->
+    <string name="fare_abc_chip" translatable="false">ABC</string>
+    <string name="fare_abc_description">Reaches fare zone C: Berlin ABC ticket needed</string>
+    <string name="fare_abc_note">This journey reaches fare zone C (e.g. Potsdam, BER). A Berlin AB ticket is not enough: you need ABC, or the Deutschlandticket.</string>
+    <!-- Deutschlandticket and bicycle -->
+    <string name="settings_ticket">Ticket</string>
+    <string name="local_only_title">Only Deutschlandticket</string>
+    <string name="local_only_text">Switches off long-distance trains (ICE, IC, EC …) and coaches under Means of transport, which the Deutschlandticket does not cover; off again switches them back on. On whenever both are off.</string>
+    <string name="local_only_search_text">Switches long-distance trains and coaches off (or back on).</string>
+    <string name="local_only_chip">Deutschlandticket</string>
+    <string name="bike_title">With bicycle</string>
+    <string name="bike_text">Only connections whose rides take a bicycle along. Can also be switched under Search options; that then counts for the next searches.</string>
+    <string name="bike_search_text">Only rides that take a bicycle.</string>
+    <string name="bike_chip">With bicycle</string>
+    <string name="ticket_filter_off">Switch off</string>
+    <string name="search_options_chip">Options</string>
+    <string name="search_options_title">Search options</string>
+    <!-- Disruptions -->
+    <string name="disruptions_title">Disruptions</string>
+    <string name="disruptions_all">All current disruptions</string>
+    <string name="disruptions_none">No disruption notices right now.</string>
+    <string name="disruptions_failed">Could not load the disruptions. Tap to try again.</string>
+    <string name="disruptions_loading">Loading disruptions…</string>
+    <string name="disruptions_other">Regional trains and ferries</string>
+    <string name="disruptions_stations">Stations</string>
+    <string name="disruption_valid_range">Valid %1$s – %2$s</string>
+    <string name="disruption_valid_from">Valid from %1$s</string>
+    <string name="disruption_valid_until">Valid until %1$s</string>
+    <string name="disruption_reported_at">Reported at: %1$s</string>
+    <string name="disruption_minimap">Map of the place of the notice</string>
+    <string name="disruption_link_more">More</string>
+    <string name="disruption_link_map">Map</string>
+    <string name="disruption_link_bvg_map">Diversion map (BVG)</string>
+    <string name="disruption_link_other">Link</string>
+    <string name="disruptions_source">Notices of the BVG/VBB timetable information, as they come with the departures of the large stations and the ends of your saved routes. Your lines first.</string>
+    <string name="disruption_channel">Disruptions</string>
+    <string name="disruption_notification_title">Disruption: %1$s → %2$s</string>
+    <string name="disruption_cancelled">A journey on this route is cancelled</string>
+    <string name="disruption_bell_on">Report disruptions on this route</string>
+    <plurals name="ways_disruptions_title">
+        <item quantity="one">%1$d disruption on your routes</item>
+        <item quantity="other">%1$d disruptions on your routes</item>
+    </plurals>
+    <string name="ways_all_normal">All normal on your routes</string>
+    <string name="place_disruptions_title">Disruptions around %1$s</string>
+    <string name="place_disruptions_stops">Stops nearby: %1$s</string>
+    <string name="place_disruptions_source">Notices of the BVG/VBB timetable information that lie within the radius around this place, found on the departures of the stops nearby. Your lines first.</string>
+    <string name="disruption_check_title">Disruption check</string>
+    <string name="disruption_check_text">Every day at these times, look for disruptions on the routes with the bell on (and the places, if switched on) and report what is new.</string>
+    <string name="disruption_check_off">Off</string>
+    <string name="disruption_check_add">+ Time</string>
+    <string name="disruption_check_remove">Remove %1$s</string>
+    <string name="disruption_check_apply">Add</string>
+    <string name="setup_disruption_bell_hint">The times apply to saved routes with the bell on – tap the bell on a route under My routes – and to your places, if you switch that on.</string>
+    <string name="setup_disruption_short">Next Stop looks for disruptions on your saved routes at fixed times and tells you what is new.</string>
+    <string name="setup_access_short">Do you need step-free journeys, or more time for walks? You can change both later in the settings.</string>
+    <!-- Lifts -->
+    <string name="lift_group">Lifts</string>
+    <string name="lift_ac_title">accessibility.cloud (brokenlifts.org)</string>
+    <string name="lift_ac_text">Lifts of BVG, S-Bahn and DB stations in Berlin and Brandenburg. Needs a free app token from accessibility.cloud (non-commercial use). It stays on this phone.</string>
+    <string name="lift_ac_placeholder">App token</string>
+    <string name="lift_db_title">DB FaSta (DB API Marketplace)</string>
+    <string name="lift_db_text">Lifts of DB stations, S-Bahn included. Needs a client ID and API key from developers.deutschebahn.com. They stay on this phone.</string>
+    <string name="lift_db_client_placeholder">Client ID</string>
+    <string name="lift_db_key_placeholder">API key</string>
+    <string name="lift_journey_title">Lift out of order on this journey</string>
+    <string name="lift_out_count">%1$s: %2$d lift(s) out of order</string>
+    <string name="lift_out_which">%1$s: %2$s out of order</string>
+    <string name="lift_station_prefix">Lifts</string>
+    <string name="lift_all_working">All lifts working</string>
+    <!-- Live link: the first name shown on the live page -->
+    <string name="live_name_title">Your name in shared trips</string>
+    <string name="live_name_text">Whoever opens your live link sees \u201c&lt;Name&gt; is on the way to \u2026\u201d. Empty: \u201cOn the way to \u2026\u201d. Stays on this phone and only travels inside the link, never to a server.</string>
+    <string name="live_name_placeholder">First name (optional)</string>
+    <string name="live_name_ask_text">Optional. Whoever opens the link sees \u201c&lt;Name&gt; is on the way to \u2026\u201d. You can change it later in Settings \u2192 Live link.</string>
+    <string name="live_name_ask_share">Share</string>
+    <string name="live_name_ask_skip">Without name</string>
+    <string name="setup_live_name_title">Your name for shared trips</string>
+    <string name="setup_live_name_text">When you share a trip as a live link, the people you send it to see \u201c&lt;Name&gt; is on the way to \u2026\u201d. The name is only stored on your phone and in the link, never on a server. Optional: leave it empty and go on.</string>
+    <!-- Keys built into the app (secrets.properties, see docs/keys.md) -->
+    <string name="builtin_key_active">Built-in key active</string>
+    <string name="builtin_key_overridden">Your key replaces the built-in one</string>
+    <!-- "My routes": the pill beside the title, and empty sections as one line. -->
+    <plurals name="ways_pill_disruptions">
+        <item quantity="one">%1$d disruption</item>
+        <item quantity="other">%1$d disruptions</item>
+    </plurals>
+    <string name="ways_pill_clear">All running</string>
+    <string name="ways_empty_patterns">None yet – remember one with ⋮ in its details</string>
+    <string name="ways_empty_routes">None yet – save one on the map</string>
+    <string name="ways_empty_places">None yet – mark a place on the map</string>
+    <string name="ways_empty_stops">None yet – add one under Departures</string>
+    <!-- Disruption watch: settings group, the bell explained once -->
+    <string name="dwatch_group_title">Disruption watch</string>
+    <string name="dwatch_explain">Next Stop looks for new disruptions on what you choose here and sends a notification. Each notice only once.</string>
+    <string name="dwatch_nothing">Nothing is checked right now – turn on the bell on a route</string>
+    <string name="dwatch_open_ways">To My routes</string>
+    <string name="dwatch_what">What is checked</string>
+    <string name="dwatch_no_routes">No saved routes yet.</string>
+    <string name="dwatch_places_title">Also check places</string>
+    <string name="dwatch_places_text">Home, Work and your saved places: disruptions within the radius around them</string>
+    <string name="dwatch_radius_title">Radius around places and routes</string>
+    <string name="dwatch_radius_text">Disruptions this close to your places, and to the start, destination and changes of your routes, count for them</string>
+    <string name="radius_km">%1$d km</string>
+    <plurals name="disruptions_within">
+        <item quantity="one">%1$d disruption within %2$s</item>
+        <item quantity="other">%1$d disruptions within %2$s</item>
+    </plurals>
+    <string name="ways_sheet_route_radius">On its rides, and within %1$s of its start, destination and changes</string>
+    <string name="dwatch_period_title">Check on the way</string>
+    <string name="dwatch_period_text">How often in between</string>
+    <string name="dwatch_period_off">Off</string>
+    <string name="dwatch_period_minutes">%1$d min</string>
+    <string name="dwatch_times_title">Fixed times</string>
+    <string name="dwatch_when_both">Checked every %1$d minutes and at %2$s.</string>
+    <string name="dwatch_when_period">Checked every %1$d minutes.</string>
+    <string name="dwatch_when_times">Checked at %1$s.</string>
+    <string name="dwatch_when_none">No check is set yet: choose how often or at which times.</string>
+    <string name="bell_sheet_title">Report disruptions on this route</string>
+    <string name="bell_sheet_text">You get a notification when a new disruption appears on this route. Each notice comes only once.</string>
+    <string name="bell_sheet_settings">Set times</string>
+    <string name="bell_sheet_ok">OK</string>
+    <string name="disruption_notification_place_title">Disruption near %1$s</string>
+    <!-- The map at the top of "My routes". -->
+    <string name="ways_map_description">Map of your places; opens the map</string>
+    <string name="ways_map_minutes">%1$d′</string>
+    <string name="ways_map_hint">Save places to see them here</string>
+    <!-- Disruptions on the main maps. -->
+    <string name="map_notices_title">Disruptions on the map</string>
+    <string name="map_notices_text">A warning sign at stops a known disruption is about: lifts, moved stops, stops a notice names. Notices of a whole line without a place get none.</string>
+    <string name="map_notice_hide">Hide on map</string>
+    <plurals name="map_notices_here">
+        <item quantity="one">%1$d disruption here</item>
+        <item quantity="other">%1$d disruptions here</item>
+    </plurals>
+    <string name="hidden_notices_row">Hidden disruptions (%1$d)</string>
+    <string name="hidden_notices_title">Hidden disruptions</string>
+    <string name="hidden_notices_subtitle">Hidden on the maps only: they still count on My routes.</string>
+    <string name="hidden_notice_show">Show again</string>
+    <string name="hidden_notices_show_all">Show all again</string>
+</resources>

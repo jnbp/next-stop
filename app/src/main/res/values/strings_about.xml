@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The folding categories of the settings (SettingsCategory): a summary of their state. -->
+    <string name="settings_sum_on">%1$s: on</string>
+    <string name="settings_sum_off">%1$s: off</string>
+    <string name="settings_sum_products">%1$d of %2$d means of transport</string>
+    <string name="settings_sum_no_name">No name set</string>
+    <string name="settings_category_show">Show these settings</string>
+    <string name="settings_category_hide">Hide these settings</string>
+
+    <!-- "About Next Stop" at the end of the settings (AboutUi). -->
+    <string name="about_title">About Next Stop</string>
+    <string name="about_version">Version %1$s (%2$d)</string>
+    <string name="about_summary">Version %1$s · %2$s</string>
+    <string name="about_tagline">Free and open source. No ads, no tracking.</string>
+    <string name="about_source">Source code on GitHub</string>
+    <string name="about_privacy">Privacy policy</string>
+    <string name="about_report">Report a problem</string>
+    <string name="about_open_link">Opens in the browser</string>
+    <string name="about_license">License</string>
+    <string name="about_license_text">%1$s with app store permission</string>
+    <string name="about_libraries">Open-source licenses</string>
+    <string name="about_libraries_text">The libraries and fonts in Next Stop</string>
+    <string name="about_sources">Data sources &amp; attribution</string>
+    <string name="about_sources_text">Timetables, map and places: where they come from</string>
+
+    <!-- The sheet of the license, in plain words. -->
+    <string name="license_sheet_title">GNU General Public License, version 3</string>
+    <string name="license_summary_use">Next Stop is free software: you may use it for any purpose, read and change its code, and pass it on, changed or not.</string>
+    <string name="license_summary_share">Whoever passes it on passes on the source code too, under the same license, so it stays free for everyone.</string>
+    <string name="license_summary_stores">An additional permission lets Next Stop\'s own code be offered in app stores, as long as its source code stays freely available. The libraries keep their own licenses.</string>
+    <string name="license_summary_warranty">Next Stop comes without any warranty. This is a summary; only the license text is binding.</string>
+    <string name="license_full_text">Full license text</string>
+    <string name="license_store_permission">App store permission</string>
+
+    <!-- The sheet of the libraries and fonts. -->
+    <string name="libraries_intro">Next Stop is built on these projects. Tap one to read more.</string>
+    <string name="libraries_group">Libraries</string>
+    <string name="libraries_fonts">Fonts</string>
+
+    <!-- The sheet of the data sources. -->
+    <string name="sources_intro">Next Stop has no server of its own: it asks these services directly. Thank you to everyone who keeps the data.</string>
+    <string name="sources_provider_terms">Under the provider\'s terms of use</string>
+    <string name="sources_osm_use">Map data, stations, stop positions, entrances and change positions</string>
+    <string name="sources_tiles_use">Map tiles and map styles</string>
+    <string name="sources_transitous_use">Timetables and real time for Germany and beyond</string>
+    <string name="sources_transitous_terms">Each feed under its own license: tap for the list</string>
+    <string name="sources_vbb_use">Timetables and real time for Berlin and Brandenburg</string>
+    <string name="sources_bvg_use">Timetables, real time and disruptions of BVG</string>
+    <string name="sources_pte_use">Timetables of BVG through the library of Öffi</string>
+    <string name="sources_photon_use">Place search</string>
+    <string name="sources_routing_use">Walking and cycling paths</string>
+    <string name="sources_change_use">Where to board for a quick change</string>
+    <string name="sources_lifts_use">Lifts out of order</string>
+    <string name="sources_fasta_use">Lifts at stations of Deutsche Bahn</string>
+    <string name="map_info_button">Map data and sources</string>
+</resources>

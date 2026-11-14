@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher shortcuts, shared places, rail replacement service, town names, links in notices. -->
+<resources>
+    <!-- Launcher shortcuts (res/xml/shortcuts.xml, AppShortcuts) -->
+    <string name="launcher_home">Home</string>
+    <string name="launcher_work">To work</string>
+    <string name="launcher_to_place">To %1$s</string>
+    <string name="launcher_departures_here">Departures</string>
+    <string name="launcher_departures_here_long">Departures here</string>
+    <string name="launcher_departures_of">Departures %1$s</string>
+    <string name="pin_to_home">Add to home screen</string>
+    <!-- Rail replacement service (RailReplacement) -->
+    <string name="rail_replacement">Rail replacement</string>
+    <string name="rail_replacement_for">replaces %1$s</string>
+    <!-- Departures of several stops at once, notices of the shown stops -->
+    <string name="departures_add_stop">Show together</string>
+    <string name="departures_stop_plus">%1$s +%2$d</string>
+    <plurals name="disruptions_here">
+        <item quantity="one">%d notice here</item>
+        <item quantity="other">%d notices here</item>
+    </plurals>
+</resources>

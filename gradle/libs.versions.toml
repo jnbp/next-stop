@@ -1,0 +1,83 @@
+[versions]
+agp = "9.5.1"
+coreKtx = "1.10.1"
+junit = "4.13.2"
+junitVersion = "1.1.5"
+espressoCore = "3.5.1"
+lifecycleRuntimeKtx = "2.6.1"
+# 1.10+ for LocalActivity (rememberAmbientModeManager of Wear Compose 1.6+); 1.11+ is built against API 36.
+fragment = "1.8.5"
+activityCompose = "1.13.0"
+kotlin = "2.2.10"
+composeBom = "2026.02.01"
+coroutines = "1.10.2"
+maplibre = "11.8.0"
+glance = "1.2.0"
+work = "2.12.0"
+# Wear OS (module wear) and the Data Layer bridge of the phone app.
+wearCompose = "1.7.1"
+wearTiles = "1.6.2"
+wearProtolayout = "1.4.2"
+wearWatchface = "1.3.0"
+playServicesWearable = "20.0.1"
+wearInput = "1.2.0"
+wearOngoing = "1.1.0"
+wearRemoteInteractions = "1.2.0"
+# ListenableFuture of RemoteActivityHelper; declared directly so it is surely on the compile
+# classpath (a full Guava, if ever added, replaces it with its empty 9999.0 artifact).
+listenableFuture = "1.0"
+# public-transport-enabler (Öffi's library, GPL-3.0) is not published to Maven Central: JitPack
+# builds it from the GitHub repository, pinned to a commit (master of 2026-09-11).
+publicTransportEnabler = "74ca2f7c6bb6116b9bdfb90af5012faba8851d02"
+# OkHttp comes in twice: public-transport-enabler asks for 5.4.0 (okhttp + logging-interceptor),
+# MapLibre 11.8.0 for 4.12.0 (runtime). Gradle would pick 5.4.0 anyway; the BOM makes that one
+# explicit for every OkHttp artifact, so okhttp, okhttp-android and logging-interceptor never mix
+# versions (also in builds without the library). OkHttp 5 keeps the public API of 4.x that
+# MapLibre uses (OkHttpClient, Request, Call, Callback, Response); keep it in step with the
+# library when its pin moves.
+okhttp = "5.4.0"
+
+[libraries]
+public-transport-enabler = { group = "com.github.schildbach", name = "public-transport-enabler", version.ref = "publicTransportEnabler" }
+okhttp-bom = { group = "com.squareup.okhttp3", name = "okhttp-bom", version.ref = "okhttp" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
+androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-fragment = { group = "androidx.fragment", name = "fragment", version.ref = "fragment" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+maplibre-android = { group = "org.maplibre.gl", name = "android-sdk", version.ref = "maplibre" }
+androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
+androidx-glance-material3 = { group = "androidx.glance", name = "glance-material3", version.ref = "glance" }
+androidx-work-runtime = { group = "androidx.work", name = "work-runtime", version.ref = "work" }
+
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
+play-services-wearable = { group = "com.google.android.gms", name = "play-services-wearable", version.ref = "playServicesWearable" }
+androidx-wear-compose-material3 = { group = "androidx.wear.compose", name = "compose-material3", version.ref = "wearCompose" }
+androidx-wear-compose-foundation = { group = "androidx.wear.compose", name = "compose-foundation", version.ref = "wearCompose" }
+androidx-wear-compose-navigation = { group = "androidx.wear.compose", name = "compose-navigation", version.ref = "wearCompose" }
+androidx-wear-input = { group = "androidx.wear", name = "wear-input", version.ref = "wearInput" }
+androidx-wear-ongoing = { group = "androidx.wear", name = "wear-ongoing", version.ref = "wearOngoing" }
+androidx-wear-remote-interactions = { group = "androidx.wear", name = "wear-remote-interactions", version.ref = "wearRemoteInteractions" }
+guava-listenablefuture = { group = "com.google.guava", name = "listenablefuture", version.ref = "listenableFuture" }
+androidx-wear-tiles = { group = "androidx.wear.tiles", name = "tiles", version.ref = "wearTiles" }
+androidx-wear-protolayout = { group = "androidx.wear.protolayout", name = "protolayout", version.ref = "wearProtolayout" }
+androidx-wear-protolayout-expression = { group = "androidx.wear.protolayout", name = "protolayout-expression", version.ref = "wearProtolayout" }
+androidx-wear-protolayout-material3 = { group = "androidx.wear.protolayout", name = "protolayout-material3", version.ref = "wearProtolayout" }
+androidx-wear-complications-data-source-ktx = { group = "androidx.wear.watchface", name = "watchface-complications-data-source-ktx", version.ref = "wearWatchface" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+

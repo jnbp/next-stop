@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Verkehrsmittel (Fernverkehr, Fernbus) und Fahrrad-Kombi. -->
+<resources>
+    <string name="product_coach">Fernbus</string>
+    <string name="bike_combo_title">Fahrrad-Kombi</string>
+    <string name="bike_combo_text">Mit dem Rad zur ersten Haltestelle und von der letzten weg, unterwegs das Rad in S-Bahn, U-Bahn, Tram und Regionalzug mitnehmen. Fernbusse und Busse ohne Fahrradmitnahme fallen weg: Diese Stücke fährst du mit dem Rad. Auch unter Suchoptionen umstellbar, das gilt dann für die nächsten Suchen.</string>
+    <string name="bike_combo_search_text">Mit dem Rad zu den Zügen und weiter, das Rad fährt mit.</string>
+    <string name="bike_combo_chip">Fahrrad-Kombi</string>
+    <string name="cycle_to">Mit dem Rad %1$d min nach %2$s</string>
+    <string name="cycle_minutes">Rad, %1$d min</string>
+    <string name="cycle_focus_title">Mit dem Rad zu %1$s</string>
+    <string name="cycle_focus_minutes">%1$d min mit dem Rad</string>
+    <string name="cycle_distance">%1$s km mit dem Rad</string>
+</resources>

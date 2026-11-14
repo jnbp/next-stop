@@ -1,0 +1,30 @@
+Next Stop
+=========
+
+Next Stop is licensed under the GNU General Public License, version 3 (GPL-3.0),
+see LICENSE. Its own code also carries an additional permission under GPLv3
+section 7 for distribution through app stores, see LICENSE-EXCEPTION.md. That
+permission does not apply to the third-party components below.
+
+Third-party components
+----------------------
+
+public-transport-enabler
+  Copyright the respective authors (Andreas Schildbach and contributors)
+  License: GPL-3.0
+  Source: https://github.com/schildbach/public-transport-enabler
+  Used through JitPack (com.github.schildbach:public-transport-enabler), pinned to
+  a commit in gradle/libs.versions.toml.
+
+Google Sans Flex (font, bundled in app/src/main/res/font and web/shared/fonts)
+  Copyright 2015 Google LLC
+  License: SIL Open Font License 1.1, see docs/licenses/GoogleSansFlex-OFL.txt
+
+Data
+----
+
+Timetable data comes from the sources chosen in the settings (VBB, BVG REST,
+public-transport-enabler, Transitous); their attributions are shown in the app.
+Transitous lists its data sources at https://transitous.org/sources/.
+Change positions: vbb-change-positions, ODbL. Map and station data: © OpenStreetMap
+contributors, ODbL (https://www.openstreetmap.org/copyright); map tiles: OpenFreeMap.

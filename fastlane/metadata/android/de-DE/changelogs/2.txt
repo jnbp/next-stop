@@ -1,0 +1,1 @@
+Version 0.1.1: Absturz beim Start behoben. Neu: Einfügen aus der Zwischenablage in der Suche und „Hierher navigieren“-Links aus anderen Apps (geo:- und Google-Maps-Links).

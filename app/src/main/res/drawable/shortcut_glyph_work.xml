@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A briefcase: the way to work. The 24 units of the glyph sit in the middle 48 of the 108 of an adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2"
+        android:scaleY="2"
+        android:translateX="30"
+        android:translateY="30">
+        <path
+            android:fillColor="@color/trip_blue"
+            android:fillType="evenOdd"
+            android:pathData="M10,3.5H14A2,2 0,0 1,16 5.5V7H20A2,2 0,0 1,22 9V18.5A2,2 0,0 1,20 20.5H4A2,2 0,0 1,2 18.5V9A2,2 0,0 1,4 7H8V5.5A2,2 0,0 1,10 3.5ZM10,5.5V7H14V5.5Z" />
+    </group>
+</vector>

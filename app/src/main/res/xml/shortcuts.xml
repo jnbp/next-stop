@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The static shortcut of the launcher icon: the departures where the user is. Home, work and
+    recent destinations are dynamic (AppShortcuts). Android needs the package of the app here;
+    it must follow a change of the applicationId in app/build.gradle.kts.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_departures"
+        android:shortcutId="departures_here"
+        android:shortcutLongLabel="@string/launcher_departures_here_long"
+        android:shortcutShortLabel="@string/launcher_departures_here">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="nextstop://open/departures"
+            android:targetClass="io.github.jnbp.nextstop.MainActivity"
+            android:targetPackage="io.github.jnbp.nextstop" />
+    </shortcut>
+</shortcuts>

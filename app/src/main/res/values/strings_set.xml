@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- How delays are shown (DelayDisplay). -->
+    <string name="delay_display_title">Delays</string>
+    <string name="delay_display_text">How a late departure looks everywhere in the app.</string>
+    <string name="delay_display_realtime">New time + delay</string>
+    <string name="delay_display_realtime_text">The expected time, with the delay beside it.</string>
+    <string name="delay_display_planned">Planned time + delay</string>
+    <string name="delay_display_planned_text">The timetable time, with the delay beside it.</string>
+    <string name="delay_display_only">New time only</string>
+    <string name="delay_display_only_text">The expected time alone: red when late, green when on time.</string>
+    <string name="delay_sample_destination">Wannsee</string>
+    <!-- The groups of the settings. -->
+    <string name="settings_group_appearance">Appearance</string>
+    <string name="settings_group_map">Map</string>
+    <string name="settings_group_connections">Connections &amp; changes</string>
+    <string name="settings_group_on_the_way">On the way &amp; notifications</string>
+    <string name="settings_group_start">Start page</string>
+    <string name="settings_group_accessibility">Accessibility</string>
+    <string name="settings_advanced">Advanced</string>
+    <string name="settings_advanced_text">Data sources, API keys, own server, live page and developer options</string>
+    <string name="settings_live_page">Live page</string>
+    <string name="setup_restart_short">Colours, view, changes and notifications, step by step with previews.</string>
+    <!-- The setup: sprint note, vehicles on the track, the two "faster" features. -->
+    <string name="setup_sprint_note">Sprint (0–1 min): only by running or with luck – often unrealistic.</string>
+    <string name="setup_vehicles_timetable_legend">No dot: timetable</string>
+    <string name="setup_tag_remembered">Setting, for every trip</string>
+    <string name="setup_tag_per_trip">Per trip, switched on in a connection</string>
+    <string name="setup_shortcut_short">While you follow a trip, the app alerts you when something changed since your choice, for example a faster way.</string>
+    <string name="setup_shortcut_when">When</string>
+    <string name="setup_shortcut_when_text">Only when needed: when you switch it on for a trip, or with “Every minute counts”. Always on: for every trip.</string>
+    <string name="setup_every_minute_short">Switch it on for one trip in a connection: it turns on sprint changes and the shortcut alert for that trip.</string>
+    <string name="setup_level_relaxed">Relaxed: plenty of buffer, stroll.</string>
+    <string name="setup_level_normal">Normal: normal walking pace.</string>
+    <string name="setup_level_risky">Tight: brisk walking.</string>
+</resources>

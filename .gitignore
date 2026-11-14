@@ -1,0 +1,56 @@
+# Android / Gradle
+.gradle/
+build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.keystore
+*.jks
+keystore.properties
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+
+# Raw Overpass answers of tools/fetch_osm_stations.py
+tools/osm-cache/
+
+# OSM extract of tools/fetch_osm_stations.py (raw, ODbL, not committed)
+tools/osm-stations.json
+
+# OpenStreetMap extracts for tools/extract_osm_pbf.py, and its backup of the previous output
+tools/osm-pbf/
+.extract-cache/
+*.osm.pbf
+tools/osm-stations.json.bak
+# The walking network around the stations of tools/walk_graph.py (raw, ODbL, not committed)
+tools/osm-walk-graph.json
+
+# Assets of other regions and the per-state packs of tools/build_station_asset.py
+tools/osm-packs/
+
+# Python
+__pycache__/
+
+# Local keys, never committed (see secrets.properties.example)
+secrets.properties
+
+# Local build and device logs
+build.log
+logcat-*.txt
+
+# Release outputs of the signing wizard (bundles and R8 mapping files)
+app/release/
+wear/release/
+
+# Kotlin 2.x session files, heap dumps, keys
+.kotlin/
+*.hprof
+*.pem
+google-services.json

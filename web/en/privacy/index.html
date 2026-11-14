@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#F5F7FC" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0B1124" media="(prefers-color-scheme: dark)">
+  <!-- A static page: no scripts, nothing from other hosts. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Privacy policy – Next Stop</title>
+  <meta name="description" content="Privacy policy of the public transport app Next Stop for Android and Wear OS: no account, no own server, no analytics. Which data goes to which services and why.">
+  <link rel="canonical" href="https://nextstop.bapo.me/en/privacy/">
+  <link rel="alternate" hreflang="de" href="https://nextstop.bapo.me/datenschutz/">
+  <link rel="alternate" hreflang="en" href="https://nextstop.bapo.me/en/privacy/">
+  <link rel="icon" href="../../site/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../../site/apple-touch-icon.png">
+  <link rel="preload" href="../../shared/fonts/google_sans_flex_800.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="../../site/site.css">
+</head>
+<body>
+<!--
+  OWNER, please review:
+  1. Imprint: for a website in Germany a provider identification with a postal address may be required (section 5 DDG),
+     even for a private open-source project if it is not purely personal. This is an open question. No address is
+     given on this page on purpose; the footer keeps linking to bapo.me/impressum.
+  2. The contact address is shown as an image (site/img/contact-mail.svg, text as outlines) so it can't be scraped.
+  3. Apart from the marked places the text is an honest description of the code, not legal advice.
+-->
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="wrap glass">
+    <a class="logo" href="../"><img src="../../site/favicon.svg" alt="" width="34" height="34">Next Stop</a>
+    <nav aria-label="Sections"><a href="../#features">Features</a><a href="../#how">How it works</a><a href="../#open-source">Open source</a><a href="../#faq">FAQ</a></nav>
+    <div class="lang" role="group" aria-label="Language"><a href="../../datenschutz/" hreflang="de" lang="de">DE</a><span aria-current="page">EN</span></div>
+  </div>
+</header>
+<main id="main" class="legal">
+  <div class="wrap">
+    <h1>Privacy policy</h1>
+    <p class="stand">Last updated: 14 November 2026 (German: “Stand: 14.11.2026”)</p>
+    <p>This policy covers the app <strong>Next Stop</strong> (Android and Wear OS) and this website. In short: Next Stop has no account, no own server, no ads, no tracking, no analytics and no crash reports. I do not receive any data from you. What the app sends to other services is listed below. The German version is the primary one.</p>
+
+    <h2>1. Controller</h2>
+    <p>Joel Barriga Polzin<br>E-mail: <img class="mail" src="../../site/img/contact-mail.svg" alt="E-mail address (as an image)" width="177" height="22"></p>
+    <p>Next Stop is a private open-source project (GPL-3.0) and not an offering of BVG, VBB or Deutsche Bahn. You can check the source code on <a href="https://github.com/jnbp/next-stop">GitHub</a>.</p>
+    <!-- Judgement: the app builds requests on the device and sends them straight to the services in section 3; the developer never sees them. So he is probably not the "recipient" of these transfers and the services are each responsible themselves. Whether this holds legally is not settled. -->
+
+    <h2>2. What does not happen</h2>
+    <ul>
+      <li>No account, no sign-in, no registration.</li>
+      <li>No own server that receives data from you.</li>
+      <li>No analytics, no ads, no advertising ID, no tracking, no crash reporting.</li>
+      <li>Settings, favourites, saved places and routes and recent destinations stay on your device.</li>
+    </ul>
+
+    <h2>3. Which services receive requests</h2>
+    <p>To show timetables, maps and search, your device (phone or watch) sends requests directly to the following public services. Every request technically carries your IP address; the app also sends an identifier like <em>NextStop/version</em> with the app version, but no device identifier. All connections use HTTPS.</p>
+    <div class="tablewrap glass">
+      <table class="data">
+        <thead><tr><th scope="col">Service</th><th scope="col">Purpose</th><th scope="col">What is sent</th></tr></thead>
+        <tbody>
+          <tr><td>Transitous (api.transitous.org)</td><td>Timetables and real-time data across Europe, connections, departures, disruptions</td><td>Origin, destination and stops, coordinates, times</td></tr>
+          <tr><td>BVG REST (v6.bvg.transport.rest)</td><td>Timetables, real-time data, disruptions in Berlin</td><td>as above</td></tr>
+          <tr><td>VBB HAFAS (fahrinfo.vbb.de)</td><td>Timetables and real-time data for Berlin and Brandenburg</td><td>as above</td></tr>
+          <tr><td>routing.openstreetmap.de (OSRM)</td><td>Walking and cycling routes</td><td>Coordinates of the start and end of the route</td></tr>
+          <tr><td>Photon (photon.komoot.io)</td><td>Place and address search</td><td>The search text; as a search bias your position rounded to about 1 km</td></tr>
+          <tr><td>OpenFreeMap (tiles.openfreemap.org)</td><td>Map tiles, also for the map images in “My routes” and small walk maps</td><td>The visible map area, not your exact position</td></tr>
+          <tr><td>accessibility.cloud and DB FaSta (apis.deutschebahn.com)</td><td>Lift status at stations</td><td>A request for the lifts of a station</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>These services are independent third parties with their own terms and privacy policies; I have no influence on how long they keep requests. The data itself (such as maps) comes from OpenStreetMap contributors (ODbL).</p>
+    <p><strong>Own server:</strong> In the settings you can enter your own server address in place of the public BVG REST service. Those requests (also in the background and in widgets) then go to the server you chose. You are responsible for that server.</p>
+    <p>The OpenStreetMap station data for Berlin and further German states is part of the app or is read from the device; the app does not download it from a server. The line network for the city map is built by the app itself from real-time queries to the timetable services.</p>
+
+    <h2>4. Location</h2>
+    <p>The app uses your location (precise or approximate; you can choose approximate) only <strong>while it is open</strong>: for nearby stops, the map, “from here” and walking routes. The coordinates go into the requests to the services in section 3. Without location permission the app keeps working and starts at Alexanderplatz. There is <strong>no background location access</strong>.</p>
+    <ul>
+      <li><strong>Widgets</strong> refresh departures with the last position the app recorded while you used it (kept on the device only); the app does not ask for location in the background. That position is sent to the timetable services.</li>
+      <li><strong>Disruption watch</strong> (optional, switched on by you): a background job (WorkManager) checks, at an interval or at times you choose, saved routes with the bell on and, if you switch it on, saved places for disruptions. It uses <strong>only the saved stops and coordinates</strong> of those routes and places, not your current location, and sends them to the timetable services. If nothing is switched on, nothing runs. Notices already shown are remembered on the device for a few days.</li>
+      <li><strong>Trip companion:</strong> the foreground service refreshes the trip you started (departure times, delays) and shows it in an ongoing notification. It uses no location, microphone or camera and ends five minutes after arrival or when you end the trip.</li>
+    </ul>
+
+    <h2>5. Contacts and calendar (optional)</h2>
+    <p>Both permissions are optional; the app works fully without them. <strong>Contacts:</strong> when you open “contacts” in the search, the app reads the postal addresses of your contacts while the list is open; nothing is stored or logged. If you tap a contact, its address is sent like a typed search text to Photon and the timetable services. If allowed, contacts with an address can also be copied to the paired watch (device to device, no third party). <strong>Calendar:</strong> the app reads the next appointments with a location on demand (7 days, at most 4) and does not store them; only the location of the appointment you pick is searched as a destination. “Add to calendar” only hands an event to your calendar app.</p>
+    <!-- Judgement: the address of a contact or appointment location tapped by the user is treated like a typed search query. In the Play Console form this is "not collected", with a fallback of "address, shared". -->
+
+    <h2>6. Notifications</h2>
+    <p>The app posts notifications locally on your device (trip companion, get-off reminder, disruptions). There is no push service and no server that sends notifications. The permission is optional; on Android 16 and later the trip can appear as a “Live Update”.</p>
+
+    <h2>7. Android backup</h2>
+    <p>Android can include settings, favourites, saved places and routes and recent destinations in the Google backup of your account or transfer them to a new device. You control this in the system settings; the cloud backup is only used where it can be encrypted on the device (a screen lock is set). Access keys for data services, caches and widget state are excluded. I have no access to this backup; Google’s terms apply.</p>
+
+    <h2>8. Live link and “route” link</h2>
+    <p>You can share a trip or a connection as a link. The trip sits in the <strong>part of the link after the “#” (fragment)</strong>, which browsers never send to a server. The recipient’s page (<a href="../../live/">live page</a>, <a href="../../route/">route page</a>) queries the public timetable services (BVG REST, Transitous) and OpenFreeMap from the recipient’s own browser, so their IP address and request go to those services. The pages also load the map library MapLibre from unpkg.com. The pages show the <strong>planned trip with real-time data, not the GPS position of your phone</strong>. The name a live link shows is set by you and is optional. The address of the live page can be changed in the settings.</p>
+
+    <h2>9. Watch app (Wear OS)</h2>
+    <p>Phone and watch exchange trips, favourites and, if used, contact addresses directly between the devices through the Wearable Data Layer of Google Play services. The watch app can also send requests on its own to the services in section 3 and uses its own location for that, only while it is in use.</p>
+
+    <h2>10. This website</h2>
+    <p>The website is static, sets no cookies, contains no tracking and loads nothing from third parties on this page. It is hosted on Cloudflare Pages; the host logs requests for technical reasons (such as IP address, time, page requested, browser identifier). I have only limited access to these logs and do not evaluate them.</p>
+    <!-- OWNER: the host matches the footer of the home page (Cloudflare Pages). If a data processing agreement / third-country transfer matters, please check. -->
+
+    <h2>11. Legal bases</h2>
+    <ul>
+      <li><strong>Requests to timetable, routing, search and map services</strong> (sections 3, 4, 8): made to deliver the function you call up in the app, i.e. to provide the use of the app (Art. 6(1)(b) GDPR), and in the legitimate interest in a working app (Art. 6(1)(f) GDPR).</li>
+      <li><strong>Location, contacts, calendar, notifications:</strong> your consent through the system permission (Art. 6(1)(a) GDPR; for access to the device also section 25(2) no. 2 TDDDG). You can withdraw it at any time in the Android settings; the app then works without it.</li>
+      <li><strong>Website logs at the host:</strong> legitimate interest in operation and security (Art. 6(1)(f) GDPR).</li>
+    </ul>
+    <!-- Judgement: the allocation of legal bases is a best-effort choice. Have it checked legally if needed. -->
+
+    <h2>12. Your rights</h2>
+    <p>Under the GDPR you have the right of access, rectification, erasure, restriction of processing, data portability and objection, and the right to withdraw consent. I store no data about you: there is no account and no server, so all I can do is confirm that nothing is held. You delete local data by clearing the app’s storage in the Android settings or by uninstalling it. For data held by the services in section 3, contact the respective provider. For questions write to <img class="mail" src="../../site/img/contact-mail.svg" alt="E-mail address (as an image)" width="177" height="22">.</p>
+
+    <h2>13. Complaints to a supervisory authority</h2>
+    <p>You can complain to a data protection supervisory authority, for example the Berlin Commissioner for Data Protection and Freedom of Information (<a href="https://www.datenschutz-berlin.de">datenschutz-berlin.de</a>).</p>
+
+    <h2>14. Changes</h2>
+    <p>If what the app sends changes, I will update this policy. The date above shows the version. Earlier versions are in the version history of the source code on GitHub.</p>
+  </div>
+</main>
+<footer>
+  <div class="wrap">
+    <div>
+      <p><strong>Next Stop – a private open-source project. Not affiliated with BVG, VBB or Deutsche Bahn.</strong></p>
+      <p>This site sets no cookies, loads nothing from third parties and uses no tracking. It is hosted on Cloudflare Pages; the host logs requests (such as IP address and time) for technical reasons.</p>
+      <p>© 2026 Next Stop · GPL-3.0 · Map data © OpenStreetMap</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="https://github.com/jnbp/next-stop">Source code</a>
+      <a href="https://bapo.me/impressum" hreflang="de">Imprint (German)</a>
+      <a href="./" aria-current="page">Privacy</a>
+      <a href="#main">Back to top</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

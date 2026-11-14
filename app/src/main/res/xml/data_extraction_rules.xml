@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    What Android's backup (Android 12 and later) takes of the app: the user's settings and
+    lists, nothing that can be loaded again, no keys. See
+    https://developer.android.com/identity/data/autobackup
+
+    Everything the user sets up lives in SharedPreferences (shared_prefs/):
+    - next-stop.xml (AppPrefs): settings, favourites, saved places, "Meine Wege" (saved
+      routes and patterns), recent searches and destinations.
+    - disruptions.xml (DisruptionWatch): the watched routes, "my lines", the morning check.
+    - watch-settings.xml (WatchSettings): the settings of the watch app as edited on the
+      phone and merged with the watch's (live departures, animations, map style, tile target).
+    With an <include> only what is included is backed up, so these stay out without a rule:
+    - files/osm-regions/ (OpenStreetMap packs, downloaded again on demand),
+      files/rapid-network-*.json (a cache), files/datastore/ (state of the home-screen
+      widgets, whose ids belong to this device), the tile cache of MapLibre in files/
+      (mbgl-offline.db) and databases/ (the jobs of WorkManager). The cache folders are
+      never backed up.
+    A new file with user data outside shared_prefs/ needs an <include> of its own here and
+    in backup_rules.xml.
+-->
+<data-extraction-rules>
+    <!-- Only where the backup can be encrypted on the device (a screen lock is set). -->
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <include domain="sharedpref" path="." />
+        <!-- Access keys of data backends stay on the device (AppPrefs.KEYS_PREFS_NAME). -->
+        <exclude domain="sharedpref" path="source_keys.xml" />
+        <!-- The keys of the lift sources belong to this device (see data/LiftStatus.kt). -->
+        <exclude domain="sharedpref" path="lift_keys.xml" />
+        <!-- Which widget previews were published to this device's launcher (Widgets.publishOnce). -->
+        <exclude domain="sharedpref" path="next-stop-widgets.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="." />
+        <exclude domain="sharedpref" path="source_keys.xml" />
+        <exclude domain="sharedpref" path="lift_keys.xml" />
+        <exclude domain="sharedpref" path="next-stop-widgets.xml" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The lime box of the minutes until the next step, as in the banner of the app. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/trip_lime" />
+    <corners android:radius="14dp" />
+</shape>

@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The logo of the splash screen, animated (under 1 s): the lime stop pops up, the arrow glides
+    in from the left, overshoots a little into the stop and settles; the stop gives a small
+    bounce when the arrow lands. Ends in exactly the shapes of the launcher icon.
+-->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="108dp"
+            android:height="108dp"
+            android:viewportWidth="108"
+            android:viewportHeight="108">
+            <group
+                android:pivotX="54"
+                android:pivotY="54"
+                android:scaleX="0.82"
+                android:scaleY="0.82"
+                android:translateX="-3">
+                <group
+                    android:name="arrow"
+                    android:translateX="-30">
+                    <path
+                        android:name="shaft"
+                        android:pathData="M27,54H48"
+                        android:strokeAlpha="0"
+                        android:strokeColor="#FFFFFF"
+                        android:strokeLineCap="round"
+                        android:strokeWidth="8" />
+                    <path
+                        android:name="head"
+                        android:pathData="M41,42L53,54L41,66"
+                        android:strokeAlpha="0"
+                        android:strokeColor="#FFFFFF"
+                        android:strokeLineCap="round"
+                        android:strokeLineJoin="round"
+                        android:strokeWidth="8" />
+                </group>
+                <group
+                    android:name="stop"
+                    android:pivotX="74"
+                    android:pivotY="54"
+                    android:scaleX="0"
+                    android:scaleY="0">
+                    <path
+                        android:fillColor="#C8F16B"
+                        android:pathData="M74,40a14,14 0,1 0,0.01,0z" />
+                    <path
+                        android:fillColor="#1B4FD8"
+                        android:pathData="M74,48.1a5.9,5.9 0,1 0,0.01,0z" />
+                </group>
+            </group>
+        </vector>
+    </aapt:attr>
+    <!-- The stop: pops up, then bounces when the arrow arrives (at about 540 ms). -->
+    <target android:name="stop">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator
+                    android:duration="260"
+                    android:interpolator="@android:interpolator/overshoot"
+                    android:propertyName="scaleX"
+                    android:valueFrom="0"
+                    android:valueTo="1"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="260"
+                    android:interpolator="@android:interpolator/overshoot"
+                    android:propertyName="scaleY"
+                    android:valueFrom="0"
+                    android:valueTo="1"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="110"
+                    android:interpolator="@android:interpolator/decelerate_quad"
+                    android:propertyName="scaleX"
+                    android:startOffset="540"
+                    android:valueFrom="1"
+                    android:valueTo="1.14"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="110"
+                    android:interpolator="@android:interpolator/decelerate_quad"
+                    android:propertyName="scaleY"
+                    android:startOffset="540"
+                    android:valueFrom="1"
+                    android:valueTo="1.14"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="220"
+                    android:interpolator="@android:interpolator/overshoot"
+                    android:propertyName="scaleX"
+                    android:startOffset="650"
+                    android:valueFrom="1.14"
+                    android:valueTo="1"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="220"
+                    android:interpolator="@android:interpolator/overshoot"
+                    android:propertyName="scaleY"
+                    android:startOffset="650"
+                    android:valueFrom="1.14"
+                    android:valueTo="1"
+                    android:valueType="floatType" />
+            </set>
+        </aapt:attr>
+    </target>
+    <!-- The arrow: glides in, runs 4 units into the stop, and settles back. -->
+    <target android:name="arrow">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator
+                    android:duration="420"
+                    android:interpolator="@android:interpolator/decelerate_cubic"
+                    android:propertyName="translateX"
+                    android:startOffset="120"
+                    android:valueFrom="-30"
+                    android:valueTo="4"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="240"
+                    android:interpolator="@android:interpolator/overshoot"
+                    android:propertyName="translateX"
+                    android:startOffset="540"
+                    android:valueFrom="4"
+                    android:valueTo="0"
+                    android:valueType="floatType" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="shaft">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="200"
+                android:propertyName="strokeAlpha"
+                android:startOffset="120"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:valueType="floatType" />
+        </aapt:attr>
+    </target>
+    <target android:name="head">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="200"
+                android:propertyName="strokeAlpha"
+                android:startOffset="120"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:valueType="floatType" />
+        </aapt:attr>
+    </target>
+</animated-vector>

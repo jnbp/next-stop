@@ -1,0 +1,1 @@
+First test version of Next Stop: connections with transfer levels, trip companion with live notification, boarding hints, shortcut alert, map with station details and the Wear OS app with tiles and complication. Feedback is welcome.

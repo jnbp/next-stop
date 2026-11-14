@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#F5F7FC" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0B1124" media="(prefers-color-scheme: dark)">
+  <!-- A static page: no scripts, nothing from other hosts. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Next Stop – public transport for Android and Wear OS that rides along</title>
+  <meta name="description" content="Next Stop is a free public transport app for Android and Wear OS: transfers rated by walking pace, exact walks inside stations, a trip companion, boarding hints and a live link. Berlin first, all of Germany. Open source, no ads, no tracking.">
+  <link rel="canonical" href="https://nextstop.bapo.me/en/">
+  <link rel="alternate" hreflang="de" href="https://nextstop.bapo.me/">
+  <link rel="alternate" hreflang="en" href="https://nextstop.bapo.me/en/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Next Stop">
+  <meta property="og:description" content="Next Stop is a free public transport app for Android and Wear OS: transfers rated by walking pace, exact walks inside stations, a trip companion, boarding hints and a live link. Berlin first, all of Germany. Open source, no ads, no tracking.">
+  <meta property="og:url" content="https://nextstop.bapo.me/en/">
+  <meta property="og:image" content="https://nextstop.bapo.me/site/img/og.png">
+  <link rel="icon" href="../site/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../site/apple-touch-icon.png">
+  <link rel="preload" href="../shared/fonts/google_sans_flex_800.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="../site/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="wrap glass">
+    <a class="logo" href="#top"><img src="../site/favicon.svg" alt="" width="34" height="34">Next Stop</a>
+    <nav aria-label="Sections"><a href="#features">Features</a><a href="#how">How it works</a><a href="#open-source">Open source</a><a href="#faq">FAQ</a></nav>
+    <div class="lang" role="group" aria-label="Language"><a href="../" hreflang="de" lang="de">DE</a><span aria-current="page">EN</span></div>
+  </div>
+</header>
+<main id="main">
+  <div class="hero" id="top">
+    <svg class="net" viewBox="0 0 1200 640" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+      <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="10" opacity=".55">
+        <path d="M640 660C640 470 780 250 1000 236C1180 226 1260 330 1260 420" stroke="#A9493A"/>
+        <path d="M560 420H720L840 300H1260" stroke="#EB7405"/>
+        <path d="M960 -20V230L1040 310V680" stroke="#224F86"/>
+        <path d="M600 700L780 520H1070L1190 400V-20" stroke="#DA421E"/>
+        <path d="M700 -20L800 80H1100L1210 190H1260" stroke="#528DBA"/>
+      </g>
+      <g fill="#fff" stroke="#0E1A3A" stroke-width="4" opacity=".7">
+        <circle cx="840" cy="300" r="9"/><circle cx="1040" cy="310" r="9"/><circle cx="780" cy="520" r="9"/><circle cx="1070" cy="520" r="9"/><circle cx="1100" cy="80" r="9"/>
+      </g>
+    </svg>
+    <div class="wrap">
+      <div>
+        <span class="eyebrow glass"><i class="dot" aria-hidden="true"></i>In development · open source</span>
+        <h1>Rides <span class="mark">along</span>.</h1>
+        <p class="lead"><strong>Next Stop</strong> is a public transport app for Android and Wear OS. It knows how long a change really takes, where to board, when a faster way turns up and when to get off. <strong>Berlin first, all of Germany on board.</strong></p>
+        <div class="cta">
+          <a class="btn primary" href="https://github.com/jnbp/next-stop"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>View on GitHub</a>
+          <a class="btn ghost" href="../live/#demo">Try the live link<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M12 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+        </div>
+        <ul class="pills"><li>Android 12+</li><li>Wear OS 3+</li><li>GPL-3.0</li><li class="lime">No account · no ads · no tracking</li></ul>
+        <p class="note">No release yet – the app, the watch app and the live and route pages already work.</p>
+        <!-- Google Play badge: enable once the app is published. Use the official badge artwork,
+             saved under site/img/ (no hotlinking), and check the app id.
+        <p class="store"><a href="https://play.google.com/store/apps/details?id=io.github.jnbp.nextstop"><img src="../site/img/google-play-badge-en.png" alt="Get it on Google Play" width="200" height="59"></a></p>
+        -->
+      </div>
+      <div class="trip glass" role="img" aria-label="Example connection: Hauptbahnhof → Hermannplatz, 12:04 – 12:27 · 23 min · 1 change">
+        <h2>Hauptbahnhof → Hermannplatz</h2>
+        <p class="sub">12:04 – 12:27 · 23 min · 1 change</p>
+        <div class="leg c-s5">
+          <div class="rail"></div>
+          <div>
+            <div class="stop"><b>12:04</b><span>Hauptbahnhof</span></div>
+            <div class="mid"><span class="badge c-s5">S5</span>towards Strausberg Nord</div>
+            <div class="stop end"><b>12:11</b><span>Alexanderplatz</span></div>
+          </div>
+        </div>
+        <div class="change"><span class="tag">Normal · 3 min to spare</span>3 min walk</div>
+        <div class="leg c-u8">
+          <div class="rail"></div>
+          <div>
+            <div class="stop"><b>12:18</b><span>Alexanderplatz</span></div>
+            <div class="mid"><span class="badge c-u8">U8</span>towards Hermannstr.</div>
+            <div class="stop end"><b>12:27</b><span>Hermannplatz</span></div>
+          </div>
+        </div>
+        <div class="board"><span class="cars"><i></i><i></i><i></i><i></i><i></i></span>Board at the front</div>
+        <div class="watch">
+          <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="45" fill="none" stroke="#1E2436" stroke-width="5"/><path d="M50 5A45 45 0 0 1 92.8 36.1" fill="none" stroke="#2FA866" stroke-width="5" stroke-linecap="round"/></svg>
+          <div><small>12:14</small><strong>4 min</strong><br><span class="badge c-u8">U8</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <span class="kicker"><span class="badge c-s1">S1</span>Features</span>
+      <h2 class="title">What makes Next Stop different</h2>
+      <p class="intro">Most journey planners stop caring the moment you pick a connection. Next Stop keeps going – built on open data, with no account and no server of its own.</p>
+      <div class="grid">
+        <article class="feature glass c-relaxed"><img src="../site/img/icon-levels.svg" alt="" width="46" height="46"><h3>Transfers by walking pace</h3><p>Every change is relaxed, normal, tight (brisk pace) or sprint (only running or with luck) – from live times and the real walk. You set how tight you go.</p></article>
+        <article class="feature glass c-u8"><img src="../site/img/icon-walks.svg" alt="" width="46" height="46"><h3>Exact transfer walks</h3><p>Measured on the station’s OpenStreetMap footways: stairs, lifts and platforms – not straight lines.</p></article>
+        <article class="feature glass c-s5"><img src="../site/img/icon-companion.svg" alt="" width="46" height="46"><h3>Trip companion</h3><p>Next step, countdown and stops left with live times – in the app and as a live notification.</p></article>
+        <article class="feature glass c-s1"><img src="../site/img/icon-boarding.svg" alt="" width="46" height="46"><h3>Boarding hints</h3><p>“Board at the front, middle or rear” – and be first at the stairs for your connection.</p></article>
+        <article class="feature glass c-u2"><img src="../site/img/icon-shortcut.svg" alt="" width="46" height="46"><h3>Shortcut alert</h3><p>Keeps searching while you ride and speaks up when a faster way turns up.</p></article>
+        <article class="feature glass c-u7"><img src="../site/img/icon-watch.svg" alt="" width="46" height="46"><h3>Made for Wear OS</h3><p>Tiles, a complication, companion pages, a map and standalone search on the wrist – with a get-off buzz.</p></article>
+        <article class="feature glass c-u6"><img src="../site/img/icon-link.svg" alt="" width="46" height="46"><h3>Live and route links</h3><p>Friends follow your trip in any browser – or get a connection as steps to travel themselves.</p></article>
+        <article class="feature glass c-u1"><img src="../site/img/icon-packs.svg" alt="" width="46" height="46"><h3>All of Germany</h3><p>Station data for all 16 states from OpenStreetMap, timetables nationwide through Transitous – long-distance and coaches included.</p></article>
+        <article class="feature glass c-s41"><img src="../site/img/icon-privacy.svg" alt="" width="46" height="46"><h3>Private by design</h3><p>No account, no ads, no tracking – and no server of ours in between.</p></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <span class="kicker"><span class="badge c-u8">U8</span>How it works</span>
+      <h2 class="title">Drawn, not dressed up</h2>
+      <p class="intro">The ideas behind the app in a few pictures – the way they look in the app, too.</p>
+      <div class="stack">
+        <figure class="figure glass"><picture><source media="(prefers-color-scheme: dark)" srcset="../site/img/diagram-transfer-levels-dark.svg"><img src="../site/img/diagram-transfer-levels.svg" alt="Transfer levels by walking pace: Relaxed with 5 or more minutes to spare, Normal with 2 to 4, Tight when it works at a brisk pace, Sprint only running or with luck" width="960" height="560" loading="lazy" decoding="async"></picture><figcaption>A change needs 1 min on the same platform, 3 to another, 5 at large stations – or its walk plus 1 min. “Slower on the move” counts every walk ×1.3.</figcaption></figure>
+        <figure class="figure glass"><picture><source media="(prefers-color-scheme: dark)" srcset="../site/img/diagram-chart-dark.svg"><img src="../site/img/diagram-chart.svg" alt="Five connections as columns on a time axis, one coloured block per ride, the change minutes between them coloured by the wait" width="960" height="680" loading="lazy" decoding="async"></picture><figcaption>Connections as a chart: green comfortable, grey normal, red tight, magenta sprint, amber long wait. Or as a classic list.</figcaption></figure>
+        <figure class="figure glass"><picture><source media="(prefers-color-scheme: dark)" srcset="../site/img/diagram-setup-dark.svg"><img src="../site/img/diagram-setup.svg" alt="Setup sketches: four mini maps for the map style, the transfer level bar, three ways to show a delay, and two vehicles on a loop track" width="960" height="800" loading="lazy" decoding="async"></picture><figcaption>Set up in a minute: map style, transfer time, delays (“12:09 +2”), vehicles on the map. Everything else lives under “Advanced”.</figcaption></figure>
+        <div class="split">
+          <figure class="figure glass"><picture><source media="(prefers-color-scheme: dark)" srcset="../site/img/preview-live-page-dark.svg"><img src="../site/img/preview-live-page.svg" alt="Live page on a phone: arrival time, countdown, progress and the U8 on the map" width="960" height="700" loading="lazy" decoding="async"></picture><figcaption><a href="../live/#demo">Open the live demo</a></figcaption></figure>
+          <figure class="figure glass"><picture><source media="(prefers-color-scheme: dark)" srcset="../site/img/preview-route-page-dark.svg"><img src="../site/img/preview-route-page.svg" alt="Route page on a phone: start time, the route on a map and the first steps" width="960" height="700" loading="lazy" decoding="async"></picture><figcaption><a href="../route/#demo">Open the route demo</a></figcaption></figure>
+        </div>
+        <p class="intro flush">Both pages are static. The trip lives in the link fragment, which browsers never send to a server.</p>
+      </div>
+      <h3 class="subtitle">Little motions</h3>
+      <p class="intro">Short, soft and never in the way – and off when your system asks for reduced motion.</p>
+      <div class="motions">
+        <figure><picture><source media="(prefers-color-scheme: dark)" srcset="../site/img/anim-train-loader-dark.svg"><img src="../site/img/anim-train-loader.svg" alt="A small train glides over a dashed track" width="360" height="120" loading="lazy" decoding="async"></picture><figcaption>Loading</figcaption></figure>
+        <figure><picture><source media="(prefers-color-scheme: dark)" srcset="../site/img/anim-stop-hop-dark.svg"><img src="../site/img/anim-stop-hop.svg" alt="A stop hops and its stop positions pop in" width="360" height="220" loading="lazy" decoding="async"></picture><figcaption>Picking a stop</figcaption></figure>
+        <figure><picture><source media="(prefers-color-scheme: dark)" srcset="../site/img/anim-arrival-dark.svg"><img src="../site/img/anim-arrival.svg" alt="A check mark and a short burst of confetti on arrival" width="360" height="220" loading="lazy" decoding="async"></picture><figcaption>Arrival</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="open-source">
+    <div class="wrap">
+      <div class="oss">
+        <svg class="lines" viewBox="0 0 300 300" aria-hidden="true" focusable="false"><g fill="none" stroke-width="14" stroke-linecap="round"><path d="M20 280C40 140 140 40 290 30" stroke="#C8F16B"/><path d="M80 300L300 80" stroke="#EB7405"/><path d="M150 0V300" stroke="#DE4DA4"/></g></svg>
+        <div>
+          <span class="kicker on-blue"><span class="badge c-u2">U2</span>Open source</span>
+          <h2 class="title">Open. Free. For everyone.</h2>
+          <p>Next Stop is licensed under the GNU GPL 3.0. All of the code – the app, the watch app, the web pages and the OpenStreetMap pipeline – is public on GitHub. Report bugs, bring ideas, build along: welcome.</p>
+          <a class="btn lime" href="https://github.com/jnbp/next-stop"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Code on GitHub</a>
+        </div>
+        <ul><li><b>Kotlin</b> · Jetpack Compose · MapLibre</li><li><b>Wear OS</b> · tiles, complication, Data Layer</li><li><b>Web</b> · static, no build, no framework</li><li><b>Data</b> · OpenStreetMap, Transitous, VBB/BVG</li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <span class="kicker"><span class="badge c-u7">U7</span>FAQ</span>
+      <h2 class="title">Questions</h2>
+      <div class="faq">
+        <details class="glass"><summary>Is it free?</summary><p>Yes. The app is free and open source (GPL-3.0) – no ads, no in-app purchases, no subscription.</p></details>
+        <details class="glass"><summary>Which regions does it cover?</summary><p>Berlin and Brandenburg in the most depth (VBB/BVG, boarding hints, lifts). Timetables cover all of Germany through Transitous, long-distance trains and coaches included; station data for all 16 states comes from OpenStreetMap.</p></details>
+        <details class="glass"><summary>Which data does it use?</summary><p>Timetables and real time from VBB and BVG and from Transitous (a community service built on open timetable data), maps and stations from OpenStreetMap, map tiles from OpenFreeMap, place search from Photon.</p></details>
+        <details class="glass"><summary>What about my privacy?</summary><p>Nothing reaches us: there is no account, no analytics, no crash reporting and no server of our own. Requests go straight from your device to the timetable, map and search services you use. A shared live link carries the trip in the link fragment, which browsers never send to a server.</p></details>
+        <details class="glass"><summary>When will it be on Google Play?</summary><p>When it is ready. Until then you can build it yourself from the code – the README on GitHub explains how.</p></details>
+        <details class="glass"><summary>Do I need a smartwatch?</summary><p>No. The watch app is an extra; the phone app does everything on its own.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section id="data">
+    <div class="wrap">
+      <span class="kicker"><span class="badge c-u1">U1</span>Data</span>
+      <h2 class="title">Standing on open data</h2>
+      <div class="tablewrap glass">
+        <table class="data">
+          <thead><tr><th scope="col">Data</th><th scope="col">Source</th><th scope="col">Licence</th></tr></thead>
+          <tbody>
+            <tr><td>Map and station data</td><td>© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a></td><td>ODbL 1.0</td></tr>
+            <tr><td>Map tiles</td><td><a href="https://openfreemap.org">OpenFreeMap</a></td><td>OSM data, ODbL</td></tr>
+            <tr><td>Timetables, Germany</td><td><a href="https://transitous.org">Transitous</a> – <a href="https://transitous.org/sources/">sources</a></td><td>per feed</td></tr>
+            <tr><td>Timetables, Berlin/Brandenburg</td><td>VBB HAFAS, BVG REST (<a href="https://v6.bvg.transport.rest">v6.bvg.transport.rest</a>)</td><td>provider terms</td></tr>
+            <tr><td>Place search</td><td><a href="https://photon.komoot.io">Photon</a> (komoot)</td><td>OSM data, ODbL</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+<footer>
+  <div class="wrap">
+    <div>
+      <p><strong>Next Stop – a private open-source project. Not affiliated with BVG, VBB or Deutsche Bahn.</strong></p>
+      <p>This site sets no cookies, loads nothing from third parties and uses no tracking. It is hosted on Cloudflare Pages; the host logs requests (such as IP address and time) for technical reasons.</p>
+      <p>© 2026 Next Stop · GPL-3.0 · Map data © OpenStreetMap</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="https://github.com/jnbp/next-stop">Source code</a>
+      <a href="https://bapo.me/impressum" hreflang="de">Imprint (German)</a>
+      <a href="privacy/">Privacy</a>
+      <a href="#top">Back to top</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

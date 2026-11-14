@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Die Einrichtung: ein, zwei kurze Sätze je Schritt, Details hinter „Mehr erfahren“. -->
+    <string name="setup_progress">Schritt %1$d von %2$d</string>
+    <!-- Auf dem Verlauf unten an einem Schritt, der mehr enthält, als hineinpasst. -->
+    <string name="setup_more_below">mehr ↓</string>
+    <string name="setup_more_below_action">Nach unten blättern</string>
+    <string name="setup_welcome_short">Ein paar Schritte, und die App fährt, wie du magst. Alles lässt sich später ändern.</string>
+    <string name="setup_colors_short">Tipp eine Farbe an und sieh sie sofort.</string>
+    <string name="setup_delay_short">Wie soll eine Verspätung aussehen?</string>
+    <string name="setup_delay_sample_line">S1 Wannsee</string>
+    <string name="setup_transfers_short">Wie knapp darf ein Umstieg sein? Schieb den Regler und sieh dir die Beispiele an.</string>
+    <string name="setup_transfers_examples">Beispiel-Umstiege</string>
+    <string name="setup_example_shown">wird gezeigt</string>
+    <string name="setup_example_hidden">ausgeblendet</string>
+    <string name="setup_live_name_short">Optional: So sehen andere deinen Live-Link.</string>
+    <string name="setup_live_name_preview">%1$s ist unterwegs nach %2$s</string>
+    <string name="setup_live_name_preview_none">Unterwegs nach %1$s</string>
+    <string name="setup_sample_destination">Alexanderplatz</string>
+    <string name="setup_sample_appointment">14:00 Zahnarzt · Alexanderplatz</string>
+    <string name="setup_sample_leave">los in 12 min · U8 ab 13:41</string>
+    <string name="setup_vehicles_short">Ein grüner Punkt heißt: Live-Daten.</string>
+    <string name="setup_map_style_short">Tipp einen Stil an, die Karte folgt.</string>
+    <string name="setup_notifications_short">Deine Fahrt in der Statusleiste, mit Erinnerung ans Aussteigen.</string>
+    <string name="setup_faster_short">Lass die App unterwegs nach schnelleren Wegen suchen.</string>
+    <string name="setup_watch_short">Dein nächster Schritt am Handgelenk, auch ohne Handy.</string>
+    <!-- A disruption card: the quiet links under a closed one, and what a tap on it does. -->
+    <string name="disruption_details">Details</string>
+    <string name="disruption_expand">Details zeigen</string>
+    <string name="disruption_collapse">Details ausblenden</string>
+</resources>
