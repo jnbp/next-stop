@@ -8,6 +8,17 @@ const val ALIGHT_APPROACH_SECONDS = 60L
 // Without the stops of a ride, the first reminder comes this long before its arrival.
 private const val ALIGHT_EARLY_SECONDS = 180L
 
+/**
+ * Within this time before the arrival at the stop to get off, "next stop: get off" is said
+ * (reminder, watch buzz); farther ahead, on a long hop of a night coach or an ICE, the time
+ * left is told instead ("Get off in 2 h 58 min").
+ */
+const val GET_OFF_SOON_SECONDS = 600L
+
+/** True when the arrival at [arrival] is at most [GET_OFF_SOON_SECONDS] after [now]: time for "next stop: get off". */
+fun getOffSoon(arrival: OffsetDateTime, now: OffsetDateTime): Boolean =
+    !arrival.isAfter(now.plusSeconds(GET_OFF_SOON_SECONDS))
+
 // A reminder whose time passed longer ago than this is not sent late any more.
 const val ALIGHT_STALE_SECONDS = 150L
 
@@ -28,7 +39,8 @@ data class AlightEvent(val key: String, val at: OffsetDateTime, val legIndex: In
  * of as it sets off. Staying on board to a ride of the same
  * vehicle needs no reminder. The times are the plausible ones (see [Journey.plausible]): where
  * the provider lets a late vehicle catch up faster than it can, the estimate counts, so the
- * reminder does not come too early; the keys stay those of the provider's times. Sorted by time.
+ * reminder does not come too early; the keys stay those of the provider's times. The first one
+ * comes at most [GET_OFF_SOON_SECONDS] before the arrival (a long last hop). Sorted by time.
  */
 fun alightEvents(journey: Journey): List<AlightEvent> {
     val events = mutableListOf<AlightEvent>()
@@ -42,10 +54,12 @@ fun alightEvents(journey: Journey): List<AlightEvent> {
         val approach = leg.arrival.minusSeconds(ALIGHT_APPROACH_SECONDS).let { if (it.isBefore(leg.departure)) leg.departure else it }
         val stops = leg.stopovers
         val before = if (stops.size >= 2) stops[stops.size - 2] else null
-        val early = when {
+        val stopBefore = when {
             before != null -> (before.departure ?: before.arrival)?.let { if (it.isBefore(leg.departure)) leg.departure else it }
             else -> leg.arrival.minusSeconds(ALIGHT_EARLY_SECONDS).takeIf { !it.isBefore(leg.departure) }
         }
+        // "Next stop: get off" never comes hours ahead on a long hop: at most this long before the arrival.
+        val early = stopBefore?.let { if (getOffSoon(leg.arrival, it)) it else leg.arrival.minusSeconds(GET_OFF_SOON_SECONDS) }
         val earlyEstimated = if (before != null) before.estimated else leg.arrivalEstimated
         if (early != null && early.isBefore(approach.minusSeconds(60))) {
             events.add(AlightEvent("early|$base", early, index, early = true, estimated = earlyEstimated))

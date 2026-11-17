@@ -70,18 +70,7 @@ fun replanPoint(journey: Journey, now: OffsetDateTime): ReplanPoint? {
 fun cutLeg(leg: Leg, index: Int): Leg {
     val stop = leg.stopovers[index]
     val arrival = stop.arrival ?: stop.departure ?: leg.arrival
-    val position = stop.place?.position
-    val path = if (position == null || leg.path.size < 2) {
-        leg.path
-    } else {
-        val scale = cos(Math.toRadians(position.first))
-        val nearest = leg.path.indices.minByOrNull { point ->
-            val north = leg.path[point].first - position.first
-            val east = (leg.path[point].second - position.second) * scale
-            north * north + east * east
-        } ?: leg.path.lastIndex
-        leg.path.take(nearest + 1)
-    }
+    val path = pathUpTo(leg.path, stop.place?.position)
     return leg.copy(
         to = stop.name,
         toPlace = stop.place,
@@ -91,6 +80,57 @@ fun cutLeg(leg: Leg, index: Int): Leg {
         stopovers = leg.stopovers.take(index + 1),
         path = path,
     )
+}
+
+/** [path] up to its point nearest to [position]; all of it without a position. */
+private fun pathUpTo(path: List<Pair<Double, Double>>, position: Pair<Double, Double>?): List<Pair<Double, Double>> {
+    if (position == null || path.size < 2) return path
+    val scale = cos(Math.toRadians(position.first))
+    val nearest = path.indices.minByOrNull { point ->
+        val north = path[point].first - position.first
+        val east = (path[point].second - position.second) * scale
+        north * north + east * east
+    } ?: path.lastIndex
+    return path.take(nearest + 1)
+}
+
+/** The widest a later part of a ride may have moved in time and still be the same run (see [withoutSeamOverlap]). */
+private const val SAME_RUN_DRIFT_MINUTES = 15L
+
+/**
+ * [head] and then [tail] as the two parts of a journey whose last ride of [head] goes on into
+ * the first ride of [tail] (see [JourneySplit.tailJoined]). Where the last leg of [head] already
+ * holds that ride too (a joined leg kept as it was known, because the fresh first part did not
+ * name the stop it was cut at), it is cut back to where the second part starts, so the ride is
+ * there once: at that stop among its stops, else by the time of the junction.
+ */
+fun withoutSeamOverlap(head: List<Leg>, tail: List<Leg>): List<Leg> {
+    val last = head.lastOrNull() ?: return head
+    val first = tail.firstOrNull()?.takeIf { !it.walking } ?: return head
+    val runIndex = last.throughRuns.indexOfFirst { run ->
+        (run.tripId != null && run.tripId == first.tripId) || (
+            sameStation(run.at, run.atName, first.fromPlace, first.from) &&
+                rapidLineName(run.line, last.product) == rapidLineName(first.line, first.product) &&
+                kotlin.math.abs(java.time.Duration.between(run.departure, first.departure).toMinutes()) <= SAME_RUN_DRIFT_MINUTES
+            )
+    }
+    if (runIndex < 0) return head
+    val run = last.throughRuns[runIndex]
+    val index = last.stopovers.indexOfLast { sameStation(it.place, it.name, run.at, run.atName) }
+    val cut = if (index > 0) {
+        cutLeg(last, index)
+    } else {
+        last.copy(
+            to = run.atName,
+            toPlace = run.at,
+            arrival = run.departure,
+            plannedArrival = null,
+            arrivalPlatform = null,
+            stopovers = last.stopovers.filter { stop -> stop.time?.isAfter(run.departure) != true },
+            path = pathUpTo(last.path, run.at?.position),
+        )
+    }
+    return head.dropLast(1) + cut.copy(throughRuns = last.throughRuns.take(runIndex))
 }
 
 /**
@@ -103,18 +143,21 @@ fun spliceAt(journey: Journey, point: ReplanPoint, option: Journey): Journey {
     val before = journey.split
     val headToken = when {
         before == null -> journey.refreshToken
+        before.tailJoined && keep >= before.headLegs -> null
         keep <= before.headLegs -> before.headToken
         else -> null
     }
-    return Journey(
-        legs = point.kept + option.legs,
-        split = JourneySplit(
-            headLegs = keep,
-            headToken = headToken,
-            tailToken = option.refreshToken,
-            headCut = point.kept.last().to,
+    return mergeThroughRuns(
+        Journey(
+            legs = point.kept + option.legs,
+            split = JourneySplit(
+                headLegs = keep,
+                headToken = headToken,
+                tailToken = option.refreshToken,
+                headCut = point.kept.last().to,
+            ),
+            via = splicedVia(journey, keep, option),
         ),
-        via = splicedVia(journey, keep, option),
     )
 }
 
@@ -131,6 +174,54 @@ fun shortcutComfort(everyMinute: Boolean, userLevel: TransferComfort): TransferC
 
 /** True where [option] asks no tighter changes than [level] allows (see journeyComfort). */
 fun withinLevel(option: Journey, level: TransferComfort): Boolean = journeyComfort(option).ordinal <= level.ordinal
+
+/**
+ * When the chosen [journey] goes on from [point], by the live and by the planned time: on board
+ * the arrival at the stop where the traveller could get off, otherwise the departure of the
+ * next leg (the ride waited for, or the walk to it).
+ */
+fun chosenDepartureAt(journey: Journey, point: ReplanPoint): Pair<OffsetDateTime, OffsetDateTime> {
+    val onBoard = point.kept.lastOrNull()?.takeIf { point.onBoard }
+    if (onBoard != null) return onBoard.arrival to (onBoard.plannedArrival ?: onBoard.arrival)
+    val next = journey.legs.getOrNull(point.kept.size) ?: return point.time to point.time
+    return next.departure to (next.plannedDeparture ?: next.departure)
+}
+
+/**
+ * True when [option] leaves [point] no earlier than the chosen [journey] does there, both by
+ * the live and by the planned time (see [chosenDepartureAt]): a ride that is only later because
+ * it is late, but was planned before the chosen one, is no way the traveller planned for.
+ */
+fun leavesNoEarlier(journey: Journey, point: ReplanPoint, option: Journey): Boolean {
+    val (live, planned) = chosenDepartureAt(journey, point)
+    val first = option.legs.firstOrNull() ?: return false
+    val optionPlanned = first.plannedDeparture ?: first.departure
+    return !first.departure.isBefore(live) && !optionPlanned.isBefore(planned)
+}
+
+/**
+ * [option] joined to the way the traveller comes to [point] on: the last ride of the kept legs
+ * (and a walk after it), so the change at [point] is rated as well, with its walk and change
+ * time. Without a ride before (the start of the trip) [option] as it is.
+ */
+fun joinedAtPoint(point: ReplanPoint, option: Journey): Journey {
+    val lastRide = point.kept.indexOfLast { !it.walking }
+    if (lastRide < 0) return option
+    return mergeThroughRuns(Journey(legs = point.kept.drop(lastRide) + option.legs, foundLevel = option.foundLevel))
+}
+
+/**
+ * True when every change of [option] from [point] on can be made: the change at [point] (from
+ * the ride the traveller comes on, see [joinedAtPoint]) included, and at [level] at most as
+ * tight as that level allows. Even a Sprint never takes a ride that leaves before the one
+ * before it arrives (plus its walk).
+ */
+fun reachableAt(point: ReplanPoint, option: Journey, level: TransferComfort): Boolean {
+    val joined = joinedAtPoint(point, option)
+    val changes = journeyChangesOf(joined)
+    if (changes.any { change -> change.arriving.arrival.plusMinutes(change.walkMinutes).isAfter(change.next.departure) }) return false
+    return withinLevel(joined, level)
+}
 
 /** How many seconds sooner [option] reaches the destination than [current], by the live times. */
 fun gainSeconds(current: Journey, option: Journey): Long = Duration.between(option.arrival, current.arrival).seconds

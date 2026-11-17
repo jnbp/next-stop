@@ -34,6 +34,7 @@ fun lineArgb(line: String?, product: String, color: Long? = null): Long {
     return when {
         kind == "ICE" -> 0xFFEC0016
         kind == "FLX" -> 0xFF97D700
+        (product == "coach" || product == "bus") && kind == "FLIXBUS" -> 0xFF97D700
         else -> when (product) {
             "subway" -> 0xFF115D91
             "suburban" -> 0xFF2D8B3C

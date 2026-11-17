@@ -18,8 +18,22 @@ class LineNamesTest {
     fun longDistanceKeepsItsNumber() {
         assertEquals("ICE 29", shortLine("ICE 29"))
         assertEquals("IC 2041", shortLine("IC  2041"))
-        assertEquals("ICE", compactLine("ICE 29"))
+        assertEquals("ICE 29", compactLine("ICE 29"))
         assertEquals(null, fullLineName("ICE 29"))
+    }
+
+    @Test
+    fun trainsAlwaysShowKindAndNumber() {
+        // The kind in words becomes its code, so the number keeps its place on every badge.
+        assertEquals("RJ 174", shortLine("Railjet 174"))
+        assertEquals("RJ 174", badgeLine("Railjet 174"))
+        assertEquals("EC 171", badgeLine("EuroCity 171"))
+        // Narrow chart blocks keep the number of a train, too.
+        assertEquals("RJ 174", compactLine("RJ 174"))
+        assertEquals("IC 2433", compactLine("IC 2433"))
+        assertEquals("EC 171", compactLine("EuroCity 171"))
+        assertEquals("Railjet 174", fullLineName("Railjet 174"))
+        assertEquals(null, modeHint("RJ 174", "express"))
     }
 
     @Test

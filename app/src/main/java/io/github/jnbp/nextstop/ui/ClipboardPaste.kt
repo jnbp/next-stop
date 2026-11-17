@@ -148,3 +148,48 @@ fun ClipboardPasteButton(onPaste: (String) -> Unit, modifier: Modifier = Modifie
         }
     }
 }
+
+/**
+ * The ✕ at the end of a text field, beside the paste button: shown, with the same short pop,
+ * only while there is text; a tap runs [onClear] (empty the field, the keyboard stays).
+ */
+@Composable
+fun FieldClearButton(visible: Boolean, onClear: () -> Unit, modifier: Modifier = Modifier) {
+    val animate = rememberAnimationsOn()
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = if (animate) {
+            fadeIn(Motion.fadeIn()) + scaleIn(Motion.pop(), initialScale = PASTE_HIDDEN_SCALE)
+        } else {
+            EnterTransition.None
+        },
+        exit = if (animate) {
+            fadeOut(Motion.fadeOut()) + scaleOut(Motion.quick(), targetScale = PASTE_HIDDEN_SCALE)
+        } else {
+            ExitTransition.None
+        },
+    ) {
+        val description = stringResource(R.string.clear_field)
+        val interactions = remember { MutableInteractionSource() }
+        Box(
+            modifier = Modifier
+                .semantics { contentDescription = description }
+                .springPress(interactions)
+                .clip(CircleShape)
+                .clickable(
+                    interactionSource = interactions,
+                    indication = LocalIndication.current,
+                    role = Role.Button,
+                    onClick = onClear,
+                )
+                .size(PASTE_BUTTON_SIZE),
+            contentAlignment = Alignment.Center,
+        ) {
+            GlyphIcon(Glyph.Close, color = AppColors.Muted, size = CLEAR_GLYPH_SIZE)
+        }
+    }
+}
+
+// The ✕ is drawn a little smaller than the clipboard, so both look the same weight.
+private val CLEAR_GLYPH_SIZE = 16.dp

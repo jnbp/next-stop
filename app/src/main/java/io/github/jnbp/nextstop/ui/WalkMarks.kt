@@ -174,9 +174,13 @@ private fun drawPassageSigns(
         when (passage.kind) {
             PassageKind.Entrance -> drawEntranceSign(canvas, x, y, passage.label, passage.throughBuilding, density)
             PassageKind.Lift, PassageKind.Escalator -> {
+                // The escalator up to an exit lies at its door (see withClimbToExit): the door's sign says it.
+                if (details.passages.any { it.kind == PassageKind.Entrance && it.position == passage.position }) continue
                 val broken = passage.kind == PassageKind.Lift && brokenLifts.any { liftMeters(it, passage.position) <= 15.0 }
                 drawLiftSign(canvas, x, y, passage.kind == PassageKind.Escalator, broken, density)
             }
+            // The stairs up to an exit lie at its door: its sign says it.
+            PassageKind.Stairs -> Unit
         }
     }
 }

@@ -1,12 +1,48 @@
 package io.github.jnbp.nextstop.ui
 
-import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.Stable
+import kotlinx.coroutines.CoroutineScope
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.ui.graphics.TransformOrigin
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.coroutineContext
+import androidx.compose.animation.core.FloatSpringSpec
+import androidx.compose.ui.MotionDurationScale
+import androidx.compose.foundation.layout.wrapContentHeight
+import kotlinx.coroutines.flow.filterNotNull
+import androidx.compose.runtime.State
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
+import androidx.compose.ui.unit.offset
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
@@ -56,6 +92,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -74,11 +112,18 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.IntState
+import androidx.compose.runtime.MutableIntState
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -135,7 +180,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.shownWalkMinutes
+import io.github.jnbp.nextstop.data.ChartTotalTime
+import io.github.jnbp.nextstop.data.ChartShortLegs
+import io.github.jnbp.nextstop.data.ChangeMapKind
 import io.github.jnbp.nextstop.data.Journey
+import io.github.jnbp.nextstop.data.ALT_CHANGE_SWITCH
+import io.github.jnbp.nextstop.data.switchToAltChange
 import io.github.jnbp.nextstop.data.SearchOptions
 import io.github.jnbp.nextstop.data.TicketFilter
 import io.github.jnbp.nextstop.data.ticketFilters
@@ -146,6 +196,7 @@ import io.github.jnbp.nextstop.data.townedStopName
 import io.github.jnbp.nextstop.data.OsmStations
 import io.github.jnbp.nextstop.data.Stop
 import io.github.jnbp.nextstop.data.Tightness
+import io.github.jnbp.nextstop.data.ratingSettingsVersion
 import io.github.jnbp.nextstop.data.TransferComfort
 import io.github.jnbp.nextstop.data.Via
 import io.github.jnbp.nextstop.data.briefStopName
@@ -165,7 +216,17 @@ import io.github.jnbp.nextstop.data.WaitTone
 import io.github.jnbp.nextstop.data.waitTone
 import io.github.jnbp.nextstop.data.changeNeed
 import io.github.jnbp.nextstop.data.tone
+import io.github.jnbp.nextstop.data.alertingWarnings
+import io.github.jnbp.nextstop.data.quietWarnings
+import io.github.jnbp.nextstop.data.warningAlerts
 import io.github.jnbp.nextstop.ui.theme.AppColors
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.foundation.gestures.scrollBy
+import kotlin.math.roundToInt
 
 // Share of the height the detail card takes: small at first, larger once a journey is picked.
 private const val DETAIL_START = 0.34f
@@ -196,6 +257,49 @@ class ConnectionsState {
     val chartUpDown = ScrollState(0)
     // True while the picked journey is shown on its own page (connections in full screen).
     var detailPage by mutableStateOf(false)
+    // True from a tap on a column until its page opens a moment later (see warmJourneyPage):
+    // the chart already stands still meanwhile, as it does under the page.
+    var opening by mutableStateOf(false)
+    // Where each row of the list lies in it (by journey id) and how high the list is in view,
+    // so another transfer level can keep the list on the same connection.
+    val rowTops = mutableMapOf<String, Int>()
+    var listViewport = 0
+    // What was in view when another transfer level was chosen; taken once the new list is laid out.
+    var levelHold: LevelHold? = null
+}
+
+/**
+ * What the overview showed when another transfer level was chosen: the journey in front
+ * ([current], the picked one or the default), the journey to keep in place ([anchor], the
+ * picked one while it is in view, else the first one in view) and how far [anchor] was from the
+ * start of the view, in pixels.
+ */
+class LevelHold(val current: Journey, val anchor: Journey, val offset: Int)
+
+/** [LevelHold] of the overview of [state] as it was laid out with [before], the journeys of the level before. */
+private fun levelHoldOf(
+    state: ConnectionsState,
+    before: List<Journey>,
+    time: TimeChoice?,
+    now: OffsetDateTime,
+    listView: Boolean,
+): LevelHold? {
+    val current = before.firstOrNull { it.id == state.selectedId } ?: defaultJourney(before, time, now) ?: return null
+    if (!listView) {
+        val info = state.chartState.layoutInfo
+        val items = info.visibleItemsInfo
+        val item = items.firstOrNull { it.key == current.id } ?: items.firstOrNull() ?: return LevelHold(current, current, 0)
+        val anchor = before.firstOrNull { it.id == item.key } ?: current
+        return LevelHold(current, anchor, item.offset - info.viewportStartOffset)
+    }
+    val scroll = state.listScroll.value
+    val ids = before.map { it.id }.toSet()
+    val tops = state.rowTops.filterKeys { it in ids }
+    val currentTop = tops[current.id]
+    val inView = currentTop != null && currentTop >= scroll && currentTop < scroll + state.listViewport.coerceAtLeast(1)
+    val anchorId = if (inView) current.id else tops.filterValues { it >= scroll }.minByOrNull { it.value }?.key
+    val anchor = before.firstOrNull { it.id == anchorId } ?: current
+    return LevelHold(current, anchor, (tops[anchor.id] ?: scroll) - scroll)
 }
 
 /**
@@ -216,6 +320,9 @@ fun defaultJourney(journeys: List<Journey>, time: TimeChoice?, now: OffsetDateTi
     anchorJourney(journeys, time)
         ?: journeys.firstOrNull { !it.departure.isBefore(now) }
         ?: journeys.firstOrNull()
+
+// Frames another transfer level waits at most for the list to take its new height.
+private const val LEVEL_SETTLE_FRAMES = 30
 
 // The planning view offers this many journeys as cards and ways on the map.
 private const val PLAN_OPTIONS = 6
@@ -297,14 +404,15 @@ private fun levelColors(level: TransferComfort): Pair<Color, Color> = when (leve
 
 /** The name of a category of journeys, as on its chip. */
 @Composable
-private fun levelName(level: TransferComfort): String = stringResource(
-    when (level) {
-        TransferComfort.Relaxed -> R.string.comfort_relaxed
-        TransferComfort.Normal -> R.string.comfort_normal
-        TransferComfort.Risky -> R.string.comfort_risky
-        TransferComfort.VeryRisky -> R.string.comfort_very_risky
-    },
-)
+private fun levelName(level: TransferComfort): String = stringResource(levelNameRes(level))
+
+/** The string of the name of [level] ("Entspannt", "Normal", "Knapp", "Sprint"). */
+internal fun levelNameRes(level: TransferComfort): Int = when (level) {
+    TransferComfort.Relaxed -> R.string.comfort_relaxed
+    TransferComfort.Normal -> R.string.comfort_normal
+    TransferComfort.Risky -> R.string.comfort_risky
+    TransferComfort.VeryRisky -> R.string.comfort_very_risky
+}
 
 /** The strong colour of a level: the colour its changes have in the chart. */
 fun levelStrongColor(level: TransferComfort): Color = tightnessColor(
@@ -571,6 +679,7 @@ private val OVERVIEW_SLIDE = 24.dp
  * With [fullScreen] the overview has the whole height and a picked journey opens on a page
  * of its own; going back from there returns to the overview as it was.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectionsScreen(
     fromName: String,
@@ -625,11 +734,37 @@ fun ConnectionsScreen(
     patternTitle: String? = null,
     patternNote: String? = null,
     onClearPattern: () -> Unit = {},
+    refreshing: Boolean = false,
+    onRefresh: (asked: Boolean) -> Job? = { null },
+    // False while the app is not on screen: a failed search is not asked again meanwhile.
+    active: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    AllocProbe.tick(AllocProbe.CONNECTIONS)
     val scope = rememberCoroutineScope()
     val detailShare = state.detailShare
+    // The auto test of the performance lab goes back from a journey it opened (debug and staging only).
+    if (PerfLab.available) {
+        DisposableEffect(state) {
+            val close: () -> Unit = { state.detailPage = false }
+            ChartOpenProbe.close = close
+            onDispose { if (ChartOpenProbe.close === close) ChartOpenProbe.close = null }
+        }
+    }
     var shareJob by remember { mutableStateOf<Job?>(null) }
+    // A journey that is about to open on its own page (see warmJourneyPage).
+    val openJob = remember { arrayOfNulls<Job>(1) }
+    // Another transfer level (a tap here, or "Undo"): what was in view is noted while the overview
+    // is still laid out with the journeys of the level before, and kept in place once the new ones
+    // are (see the effect at the overview).
+    val levelSeen = remember { arrayOf<Any?>(comfort, journeys) }
+    if (levelSeen[0] != comfort) {
+        @Suppress("UNCHECKED_CAST")
+        val before = levelSeen[1] as? List<Journey>
+        state.levelHold = before?.takeIf { it.isNotEmpty() }?.let { levelHoldOf(state, it, time, now, listView) }
+    }
+    levelSeen[0] = comfort
+    levelSeen[1] = journeys
     // Carries the border between chart and detail card to a new place with the spring of the
     // sheet of the start page: it goes a little too far and settles, so the card feels like it
     // has weight. [velocity] is how fast the border moved when it was let go, in shares per second.
@@ -655,10 +790,60 @@ fun ConnectionsScreen(
         val pagewise = fullScreen || side
         // The page of one journey: back leads to the overview, not out of the search.
         val detailPage = pagewise && state.detailPage
-        BackHandler(enabled = detailPage) { state.detailPage = false }
+        // Back from it is predictive: the overview lies underneath while the page shrinks.
+        val detailBack = PredictiveNestedBackHandler(enabled = detailPage, label = "journeyPage") { state.detailPage = false }
+        // Under a back gesture from the page (and the fade or the springing back after it) the
+        // overview lies underneath as it will be, with the chips of the search above it. Nothing
+        // is laid out anew for that: the page stays collapsed, so the page of the journey keeps
+        // the very room and place it had (see StackedHeader), and the chips are only drawn in
+        // their place behind it, the overview under the page moved down below them by
+        // [headPlace] (see underHead). Once the gesture is over, the header takes that room
+        // for real and the overview is where it was drawn.
+        val headBack = detailBack.active && !side
+        val headPlace = remember { mutableIntStateOf(0) }
+        // The chips, the transfer levels and a remembered connection above the overview fade
+        // while the page of a journey grows, and the page and the overview slide up over them
+        // (see StackedHeader); on the way back they come in again as the page shrinks.
+        val headerAnimates = rememberAnimationsOn()
+        val headerTarget = if ((detailPage || headBack) && !side) 1f else 0f
+        val headerAnim = remember { Animatable(headerTarget) }
+        // Whether a back gesture was on at the last composition: when it has just ended (let go
+        // or called off), the header is where it ends at once, as under the gesture.
+        val backWas = remember { BooleanArray(1) }
+        val backEnded = backWas[0] && !detailBack.active
+        SideEffect { backWas[0] = detailBack.active }
+        // Back never animates the header: under the gesture the chips are only drawn behind the
+        // page (see headBack), and once it ends the header is where the overview was drawn.
+        val headerSnaps = headBack || backEnded || !headerAnimates
+        // A snapped header holds its end value from this very frame on (not one frame late,
+        // when the effect has snapped the animation), so the overview (underHead) and its
+        // place (StackedHeader) agree in every frame.
+        val headerOut: State<Float> = remember(headerSnaps, headerTarget) {
+            if (headerSnaps) mutableFloatStateOf(headerTarget) else headerAnim.asState()
+        }
+        LaunchedEffect(detailPage, headBack, detailBack.active, side) {
+            if (headerSnaps) {
+                headerAnim.snapTo(headerTarget)
+            } else {
+                headerAnim.animateTo(
+                    headerTarget,
+                    tween(if (detailPage) PAGE_GROW_MILLIS else PAGE_SHRINK_MILLIS, easing = EmphasizedEasing),
+                )
+            }
+        }
+        val headerGone by remember(headerOut) { derivedStateOf { headerOut.value >= 1f } }
+        // While the header moves, the page of the journey grows out of its column or shrinks back
+        // into it: the chart underneath stands still meanwhile, as under the page.
+        val headerMoving by remember(headerOut) { derivedStateOf { headerOut.value > 0f && headerOut.value < 1f } }
+        val headerShown = !detailPage || side || headBack || !headerGone
         SplitOrStack(
             side = side,
             paneWidth = (maxWidth * 0.4f).coerceIn(260.dp, SIDE_PANEL_MAX),
+            collapsed = detailPage || headBack,
+            headerOut = headerOut,
+            headerUnder = headBack,
+            headerGrow = detailBack,
+            headerRoom = headPlace,
             modifier = Modifier
                 .fillMaxSize()
                 // Room for the floating tab bar.
@@ -711,6 +896,8 @@ fun ConnectionsScreen(
                 // A place on the way is added with a labelled chip ("Über …"); once set it shows in the line of the start.
                 if (via == null && !detailPage) ViaButton(onAdd = onAddVia)
             }
+            },
+            header = {
             // The chips of the search in one row, and below it, across the whole width, the
             // choice how tight changes may be. The choice has its own row so a long time chip
             // ("Fr., 27. Nov., 11:26") can never squeeze it; the chips scroll sideways if they
@@ -718,7 +905,9 @@ fun ConnectionsScreen(
             // in the colours of the chart's tags, and only those who switched the choice on in
             // the settings see it at all; the caption is still read out to accessibility services.
             // The page of one journey leaves all of it out.
-            if (!detailPage || side) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (headerShown) Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 val chipScroll = rememberScrollState()
                 Row(
                     modifier = Modifier
@@ -737,14 +926,18 @@ fun ConnectionsScreen(
                 // The tightest level shown; the next tighter one with hidden journeys shows how many it would add.
                 // Without the setting "choose transfer times" the page shows normal and relaxed journeys and asks nothing.
                 if (levelChoice) {
-                    LevelSelector(
-                        level = comfort,
-                        onLevel = onComfort,
-                        tighterCount = if (journeys.isNullOrEmpty()) 0 else tighterCount,
-                        tighterLevel = tighterLevel,
-                        onTighter = onShowFiltered,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                        LevelSelector(
+                            level = comfort,
+                            onLevel = onComfort,
+                            tighterCount = if (journeys.isNullOrEmpty()) 0 else tighterCount,
+                            tighterLevel = tighterLevel,
+                            onTighter = onShowFiltered,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // How the levels are rated, and their buffers.
+                        TransferRatingInfoButton()
+                    }
                 }
                 // Kinds of transport that are off: easy to forget, and otherwise it looks as if
                 // the provider had found no feeder bus.
@@ -757,23 +950,62 @@ fun ConnectionsScreen(
             }
 
             // A remembered connection: its name, what the search found for it, and a way back to all journeys.
-            if (patternTitle != null && (!detailPage || side)) {
+            if (patternTitle != null && headerShown) {
                 PatternBanner(title = patternTitle, note = patternNote, onClear = onClearPattern)
             }
             },
             rest = {
+            // Pulled down at its top, the chart or the list (or the message of a failed search)
+            // asks for the journeys again; not under the page of one journey.
+            val pullState = rememberPullToRefreshState()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .pullToRefresh(
+                        isRefreshing = refreshing,
+                        state = pullState,
+                        enabled = !loading && !detailPage && (pagewise || error != null),
+                        onRefresh = { onRefresh(true) },
+                    ),
+            ) {
+            Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // A failed search is asked again by itself while it is shown: after 5 s, 15 s, then
+            // every 30 s, each once the one before has ended. Any answer clears the message.
+            // Only while the app is on screen: back on it, the retries start over.
+            if (error != null && !loading && active) {
+                LaunchedEffect(Unit) {
+                    var attempt = 0
+                    while (true) {
+                        delay(SEARCH_RETRY_MILLIS[attempt.coerceAtMost(SEARCH_RETRY_MILLIS.lastIndex)])
+                        attempt++
+                        onRefresh(false)?.join()
+                    }
+                }
+            }
             when {
                 loading -> GlassSurface(modifier = Modifier.fillMaxWidth()) {
                     // The little train rides while the search runs.
                     LoadingRow(text = stringResource(R.string.searching_connections), modifier = Modifier.padding(20.dp))
                 }
 
-                error != null -> GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = error,
-                        color = AppColors.Muted,
-                        modifier = Modifier.padding(20.dp),
-                    )
+                // Scrollable, so a pull anywhere on the page reaches the pull to refresh.
+                error != null -> Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Text(text = error, color = AppColors.Muted)
+                            SecondaryButton(
+                                text = stringResource(R.string.try_again),
+                                onClick = { onRefresh(true) },
+                                minHeight = 44.dp,
+                            )
+                        }
+                    }
                 }
 
                 // Connections were found, but the chips hide all of them: say so, and offer them back.
@@ -799,6 +1031,33 @@ fun ConnectionsScreen(
                         val lower = id == current.id && detailShare.floatValue > (DETAIL_START + DETAIL_OPEN) / 2
                         state.selectedId = id
                         moveShare(if (lower) DETAIL_START else DETAIL_OPEN, 0f)
+                    }
+                    // Another transfer level keeps the overview on the connection it showed (or the
+                    // nearest one) instead of jumping to its start; the journey in front stays the
+                    // same where it is still shown.
+                    LaunchedEffect(comfort) {
+                        val hold = state.levelHold ?: return@LaunchedEffect
+                        state.levelHold = null
+                        val keep = levelAnchor(hold.current, journeys)
+                        if (keep != null && (state.selectedId != null || defaultJourney(journeys, time, now)?.id != keep.id)) {
+                            state.selectedId = keep.id
+                        }
+                        val target = levelAnchor(hold.anchor, journeys) ?: return@LaunchedEffect
+                        // The overview has to be laid out with the new journeys first.
+                        withFrameNanos { }
+                        if (!listView) {
+                            val index = journeys.indexOfFirst { it.id == target.id }
+                            if (index < 0) return@LaunchedEffect
+                            state.chartState.scrollToItem(index)
+                            if (hold.offset != 0) state.chartState.scrollBy(-hold.offset.toFloat())
+                        } else {
+                            val top = state.rowTops[target.id] ?: return@LaunchedEffect
+                            val want = (top - hold.offset).coerceAtLeast(0)
+                            // The list takes its new height softly: wait until it is high enough.
+                            var frames = 0
+                            while (state.listScroll.maxValue < want && frames++ < LEVEL_SETTLE_FRAMES) withFrameNanos { }
+                            state.listScroll.scrollTo(want.coerceAtMost(state.listScroll.maxValue))
+                        }
                     }
                     // The connecting departures of the picked journey are asked for once it has
                     // stayed picked for a moment, so leafing through the chart costs no requests.
@@ -831,6 +1090,10 @@ fun ConnectionsScreen(
                                 onLoadEarlier = onLoadEarlier,
                                 onLoadLater = onLoadLater,
                                 modifier = overviewModifier,
+                                // The journey opens on its own page: the chart stays as it is under it,
+                                // from the tap on (see ConnectionsState.opening).
+                                // Under a back gesture from the page it is the overview as it will be.
+                                still = (detailPage && !detailBack.active) || (pagewise && (state.opening || headerMoving)),
                             )
                         } else {
                             // The list starts with the next departure; earlier ones live in the chart.
@@ -848,29 +1111,41 @@ fun ConnectionsScreen(
                                 now = now,
                                 onSelect = { index -> onPick(upcoming[index].id) },
                                 scroll = state.listScroll,
-                                modifier = overviewModifier,
+                                rowTops = state.rowTops,
+                                modifier = overviewModifier.onSizeChanged { state.listViewport = it.height },
                             )
                         }
                     }
                     if (pagewise) {
                         // The journey on its own page grows out of the row or column it was
                         // opened from, and shrinks back into it on the way back.
+                        // pageOrigin is in the box of the page (see growFromColumn), pageBox where that box lies in the root.
                         val pageOrigin = remember { arrayOfNulls<Rect>(1) }
-                        AnimatedContent(
-                            targetState = detailPage,
+                        val pageBox = remember { arrayOfNulls<Rect>(1) }
+                        // A back gesture seeks the change to the overview as it goes (see rememberBackSeek).
+                        rememberBackSeek(detailPage, detailBack, backTarget = false, label = "journeyPage").AnimatedContent(
                             modifier = Modifier
                                 .weight(1f)
-                                .fillMaxWidth(),
+                                .fillMaxWidth()
+                                .boundsInto(pageBox),
                             transitionSpec = {
                                 when {
+                                    // The page stays opaque while held and fades by itself once let go (backFront).
+                                    detailBack.active -> backContentTransform(detailBack, hold = true)
                                     pageOrigin[0] == null -> fadeIn(tween(180)) togetherWith fadeOut(tween(120))
-                                    targetState -> fadeIn(tween(120)) togetherWith fadeOut(tween(260, delayMillis = 120))
+                                    // The page grows out of its column and fades in as it does (see
+                                    // growFromColumn); the chart stays under it, still, and goes once
+                                    // the page covers it.
+                                    targetState -> EnterTransition.None togetherWith
+                                        fadeOut(tween(PAGE_GROW_MILLIS / 2, delayMillis = PAGE_GROW_MILLIS / 2))
                                     // Closing, the page shrinks above the overview that is back underneath.
-                                    else -> (fadeIn(tween(160)) togetherWith fadeOut(tween(220, delayMillis = 160)))
+                                    else -> (
+                                        fadeIn(tween(PAGE_SHRINK_MILLIS / 2)) togetherWith
+                                            fadeOut(tween(PAGE_SHRINK_MILLIS / 3, delayMillis = PAGE_SHRINK_MILLIS * 2 / 3))
+                                        )
                                         .apply { targetContentZIndex = -1f }
                                 }
                             },
-                            label = "journeyPage",
                         ) { open ->
                             if (open) {
                                 JourneyDetail(
@@ -897,14 +1172,55 @@ fun ConnectionsScreen(
                                     handle = false,
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .growFrom(this, pageOrigin[0]),
+                                        // Where the page lies, before any shrinking (see BackProbe).
+                                        .then(if (BackLog.on) Modifier.onGloballyPositioned { BackProbe.top("layer:journeyPage", it) } else Modifier)
+                                        // Under a back gesture the page shrinks with it instead.
+                                        .then(
+                                            if (detailBack.active) {
+                                                // A page of its own while it shrinks: the overview does not show through
+                                                // the glass. The ground under it has the card's own shape, so its
+                                                // corners show what really lies behind them, not a ground of another
+                                                // shape and colour. Its room and place stay as they were (see headBack).
+                                                // Its corners stay as round on the screen as those of the chart
+                                                // card it goes back into (CARD_CORNER) while it shrinks, instead
+                                                // of shrinking with it (and its shadow no longer shows in them).
+                                                Modifier
+                                                    .backFront(detailBack, CARD_CORNER.value)
+                                                    .background(AppColors.PlainGround, CARD_SHAPE)
+                                            } else {
+                                                Modifier.growFromColumn(this, pageOrigin[0])
+                                            },
+                                        ),
                                 )
                             } else {
                                 // The overview alone; a tap opens the journey on its own page.
-                                overview(Modifier.fillMaxSize()) { id ->
-                                    pageOrigin[0] = OpenOrigin.take()
+                                overview(Modifier.fillMaxSize().then(if (headBack) Modifier.underHead(headPlace).backUnder(detailBack) else Modifier)) { id ->
+                                    // The column as it lies in the box of the page right now, before the
+                                    // header above goes: the page grows out of it wherever the box slides.
+                                    val box = pageBox[0]
+                                    pageOrigin[0] = OpenOrigin.take()?.let { origin ->
+                                        if (box == null) null else origin.translate(-box.left, -box.top)
+                                    }
+                                    // The pick shows at once; the page follows a moment later, with
+                                    // what it asks for first worked out off the main thread meanwhile
+                                    // (see warmJourneyPage): the frame of the pick and the first frame
+                                    // of the page no longer fall on one.
                                     state.selectedId = id
-                                    state.detailPage = true
+                                    state.opening = true
+                                    val opening = journeys.firstOrNull { it.id == id }
+                                    openJob[0]?.cancel()
+                                    openJob[0] = scope.launch {
+                                        try {
+                                            if (opening != null) {
+                                                withTimeoutOrNull(PAGE_WARM_MILLIS) {
+                                                    withContext(Dispatchers.Default) { warmJourneyPage(opening) }
+                                                }
+                                            }
+                                            if (state.selectedId == id) state.detailPage = true
+                                        } finally {
+                                            state.opening = false
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1011,62 +1327,119 @@ fun ConnectionsScreen(
                                 }
                             }
                         }
-                        val share = detailShare.floatValue.coerceIn(handleShare, fullShare)
-                        Column(
+                        // The border moves every frame of a drag or of its spring. It is read only while
+                        // laying out and drawing (see SplitColumn and the layer below), never while composing:
+                        // otherwise every frame would compose the chart (or the list) and the card anew.
+                        // Only crossing OVERVIEW_GONE changes what is composed.
+                        val overviewGone by remember(handleShare) {
+                            derivedStateOf { 1f - detailShare.floatValue.coerceIn(handleShare, fullShare) < OVERVIEW_GONE }
+                        }
+                        val slide = with(LocalDensity.current) { OVERVIEW_SLIDE.toPx() }
+                        SplitColumn(
+                            share = { detailShare.floatValue.coerceIn(handleShare, fullShare) },
+                            gap = 12.dp,
                             modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             // Above the card's largest readable size the overview fades and slides up, and at
                             // full height it is gone, with no strip of squeezed columns left; pulled down, it
                             // comes back the same way.
-                            val overviewGone = 1f - share < OVERVIEW_GONE
-                            val shown = ((fullShare - share) / (fullShare - DETAIL_MAX)).coerceIn(0f, 1f)
-                            val slide = with(LocalDensity.current) { OVERVIEW_SLIDE.toPx() }
-                            val overviewModifier = Modifier
-                                .weight((1f - share).coerceAtLeast(OVERVIEW_GONE))
-                                .fillMaxWidth()
-                                .graphicsLayer {
-                                    alpha = shown
-                                    translationY = -(1f - shown) * slide
-                                }
-                            if (!overviewGone) overview(overviewModifier, select)
-                            JourneyDetail(
-                                journey = current,
-                                fromName = fromName,
-                                toName = toName,
-                                now = now,
-                                routeSaved = routeSaved,
-                                onToggleRoute = onToggleRoute,
-                                stopsFailed = stopsFailedId == current.id,
-                                onLoadStops = { onLoadStops(current) },
-                                onStopAction = onStopAction,
-                                onStartTrip = { onStartTrip(current) },
-                                onRememberPattern = { onRememberPattern(current) },
-                                // A tap on the handle puts the card away, or brings it back.
-                                onHandle = {
-                                    val away = detailShare.floatValue < (handleShare + DETAIL_MIN) / 2f
-                                    moveShare(if (away) DETAIL_OPEN else handleShare, 0f)
-                                },
-                                offers = offers,
-                                onAdapt = { keepLegs, option -> onAdapt(current, keepLegs, option) },
-                                adapted = current.id in adaptedIds,
-                                onUndo = { onUndo(current) },
-                                onCourse = onCourse,
-                                onFocusWalk = onFocusWalk,
-                                onDrag = { delta -> shiftUpTo(delta, fullShare) },
-                                onDragEnd = { velocity -> settleNow(velocity) },
-                                // Scrolling inside the card first grows it; the overview above is left alone.
-                                modifier = Modifier
-                                    .weight(share)
-                                    .fillMaxWidth()
-                                    .nestedScroll(connection),
-                            )
+                            if (!overviewGone) Box {
+                                overview(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            val share = detailShare.floatValue.coerceIn(handleShare, fullShare)
+                                            val shown = ((fullShare - share) / (fullShare - DETAIL_MAX)).coerceIn(0f, 1f)
+                                            alpha = shown
+                                            translationY = -(1f - shown) * slide
+                                        },
+                                    select,
+                                )
+                            }
+                            Box {
+                                JourneyDetail(
+                                    journey = current,
+                                    fromName = fromName,
+                                    toName = toName,
+                                    now = now,
+                                    routeSaved = routeSaved,
+                                    onToggleRoute = onToggleRoute,
+                                    stopsFailed = stopsFailedId == current.id,
+                                    onLoadStops = { onLoadStops(current) },
+                                    onStopAction = onStopAction,
+                                    onStartTrip = { onStartTrip(current) },
+                                    onRememberPattern = { onRememberPattern(current) },
+                                    // A tap on the handle puts the card away, or brings it back.
+                                    onHandle = {
+                                        val away = detailShare.floatValue < (handleShare + DETAIL_MIN) / 2f
+                                        moveShare(if (away) DETAIL_OPEN else handleShare, 0f)
+                                    },
+                                    offers = offers,
+                                    onAdapt = { keepLegs, option -> onAdapt(current, keepLegs, option) },
+                                    adapted = current.id in adaptedIds,
+                                    onUndo = { onUndo(current) },
+                                    onCourse = onCourse,
+                                    onFocusWalk = onFocusWalk,
+                                    onDrag = { delta -> shiftUpTo(delta, fullShare) },
+                                    onDragEnd = { velocity -> settleNow(velocity) },
+                                    // Scrolling inside the card first grows it; the overview above is left alone.
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .nestedScroll(connection),
+                                )
+                            }
                         }
                     }
                 }
             }
+            }
+            PullToRefreshDefaults.Indicator(
+                state = pullState,
+                isRefreshing = refreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+                color = AppColors.Blue,
+            )
+            }
             },
         )
+    }
+}
+
+// How long a failed search waits before it is asked again by itself: the first, the second and every further time.
+private val SEARCH_RETRY_MILLIS = longArrayOf(5_000L, 15_000L, 30_000L)
+
+/**
+ * The overview above the detail card, sharing the height as a column with weights would: the
+ * card gets [share] of the height left after [gap], the overview the rest, but never less than
+ * OVERVIEW_GONE of it. With only one child (the overview gone) the card has the whole height.
+ * [share] is read while measuring, so moving the border lays the two out again without
+ * composing either of them anew.
+ */
+@Composable
+private fun SplitColumn(
+    share: () -> Float,
+    gap: Dp,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        if (measurables.size < 2) {
+            val placeables = measurables.map { it.measure(Constraints.fixed(width, height)) }
+            return@Layout layout(width, height) { placeables.forEach { it.place(0, 0) } }
+        }
+        val detailShare = share()
+        val overviewWeight = (1f - detailShare).coerceAtLeast(OVERVIEW_GONE)
+        val room = (height - gap.roundToPx()).coerceAtLeast(0)
+        val overviewHeight = Math.round(room * overviewWeight / (overviewWeight + detailShare)).coerceIn(0, room)
+        val detailHeight = room - overviewHeight
+        val overview = measurables[0].measure(Constraints.fixed(width, overviewHeight))
+        val detail = measurables[1].measure(Constraints.fixed(width, detailHeight))
+        layout(width, height) {
+            overview.place(0, 0)
+            detail.place(0, height - detailHeight)
+        }
     }
 }
 
@@ -1074,12 +1447,46 @@ fun ConnectionsScreen(
  * The parts of a page: on top of each other ([top] above [rest]), or with [side] next to each
  * other, [top] in a scrolling panel [paneWidth] wide and [rest] with the whole height beside it.
  */
+/**
+ * The overview under the page of one journey while a back gesture runs (see headBack): the
+ * page stays collapsed, so the overview lies below the chips drawn behind the page, [room]
+ * lower (the room of the chips with their gap, as StackedHeader measured it), and is exactly
+ * as high as it is at rest, without the page: its card ends where it ends then, with its round
+ * corners and all it draws inside them (cut at the bottom of the room of the page, the card
+ * lost its lower corners and the band of the picked column showed at the cut). Only the
+ * overview is measured for it, which comes with the gesture anyway; the page is not touched,
+ * and once the gesture is over the header gives the overview that very room.
+ */
+private fun Modifier.underHead(room: IntState): Modifier = layout { measurable, constraints ->
+    val lower = room.intValue
+    if (!constraints.hasBoundedHeight) {
+        val placeable = measurable.measure(constraints)
+        return@layout layout(placeable.width, placeable.height) { placeable.place(0, lower) }
+    }
+    val height = (constraints.maxHeight - lower).coerceAtLeast(0)
+    val placeable = measurable.measure(constraints.copy(minHeight = minOf(constraints.minHeight, height), maxHeight = height))
+    layout(placeable.width, constraints.maxHeight) { placeable.place(0, lower) }
+}
+
+// The shape of the cards of the page of the connections: the chart and the page of one journey.
+private val CARD_CORNER = 32.dp
+private val CARD_SHAPE = RoundedCornerShape(CARD_CORNER)
+
+// The gap between the parts of the page of the connections (see SplitOrStack).
+private val HEAD_GAP = 12.dp
+
 @Composable
 private fun SplitOrStack(
     side: Boolean,
     paneWidth: Dp,
     modifier: Modifier = Modifier,
+    collapsed: Boolean = false,
+    headerOut: State<Float>? = null,
+    headerUnder: Boolean = false,
+    headerGrow: BackPreview? = null,
+    headerRoom: MutableIntState? = null,
     top: @Composable ColumnScope.() -> Unit,
+    header: @Composable ColumnScope.() -> Unit = {},
     rest: @Composable ColumnScope.() -> Unit,
 ) {
     if (side) {
@@ -1093,8 +1500,10 @@ private fun SplitOrStack(
                     .verticalScroll(paneScroll)
                     .padding(bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                content = top,
-            )
+            ) {
+                top()
+                header()
+            }
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -1105,9 +1514,99 @@ private fun SplitOrStack(
             )
         }
     } else {
-        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            top()
-            rest()
+        StackedHeader(
+            modifier = modifier,
+            collapsed = collapsed,
+            headerOut = headerOut,
+            headerUnder = headerUnder,
+            headerGrow = headerGrow,
+            headerRoomOut = headerRoom,
+            top = top,
+            header = header,
+            rest = rest,
+        )
+    }
+}
+
+/**
+ * [top], [header] and [rest] one above the other, 12 dp apart; [rest] takes the height left.
+ * While [header] goes ([collapsed], [headerOut] running from 0 to 1) or comes back (1 to 0) it
+ * only fades and [rest] only slides over it: [rest] is measured once for the height it ends
+ * with and then just placed anew each frame, so no frame of the way measures the chart or the
+ * page of a journey again. What [rest] has too much below while it slides up is cut off at
+ * the bottom. With [headerUnder] (collapsed, under a back gesture) the header is drawn whole
+ * in its place behind [rest], which keeps its room and place: nothing is laid out anew; it
+ * grows and fades in with the gesture of [headerGrow] about the centre of the card below it,
+ * as that card does (see backUnder). The room the header takes with its gap goes to [headerRoom].
+ */
+@Composable
+private fun StackedHeader(
+    modifier: Modifier,
+    collapsed: Boolean,
+    headerOut: State<Float>?,
+    headerUnder: Boolean,
+    headerGrow: BackPreview?,
+    headerRoomOut: MutableIntState?,
+    top: @Composable ColumnScope.() -> Unit,
+    header: @Composable ColumnScope.() -> Unit,
+    rest: @Composable ColumnScope.() -> Unit,
+) {
+    val gap = with(LocalDensity.current) { 12.dp.roundToPx() }
+    Layout(
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = top)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = header)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = rest)
+        },
+        modifier = modifier.drawWithCache {
+            // What [rest] has too much below is cut at the bottom along the round lower corners
+            // of its card (CARD_CORNER), where the card ends at rest: cut straight, the chart
+            // (and the page growing over it) lost its round lower corners while the header
+            // moved. Made again only when the size changes.
+            val corner = CARD_CORNER.toPx()
+            val cut = Path().apply {
+                addRect(Rect(-size.width, -size.height, size.width * 2f, size.height - corner))
+                // Its upper corners lie far up, inside the rectangle above.
+                addRoundRect(RoundRect(0f, -size.height, size.width, size.height, CornerRadius(corner)))
+            }
+            onDrawWithContent {
+                val out = headerOut?.value ?: 0f
+                // Also the frame a collapse starts in, before the header has moved: [rest] is
+                // measured for the height without it already and would reach out at the bottom.
+                if (out < 1f && (out > 0f || collapsed)) {
+                    clipPath(cut) { this@onDrawWithContent.drawContent() }
+                } else {
+                    drawContent()
+                }
+            }
+        },
+    ) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val topPlace = measurables[0].measure(loose)
+        val headerPlace = measurables[1].measure(loose)
+        val total = constraints.maxHeight
+        val headerRoom = if (headerPlace.height > 0) headerPlace.height + gap else 0
+        if (headerRoomOut != null && headerRoomOut.intValue != headerRoom) headerRoomOut.intValue = headerRoom
+        val restTop = topPlace.height + gap
+        // The height the rest ends with: without the header when it goes, else below it.
+        val restHeight = (total - restTop - if (collapsed) 0 else headerRoom).coerceAtLeast(0)
+        val restPlace = measurables[2].measure(loose.copy(maxHeight = restHeight))
+        layout(constraints.maxWidth, total) {
+            topPlace.place(0, 0)
+            // Read while placing (not while composing): each frame only places anew.
+            val out = headerOut?.value ?: if (collapsed) 1f else 0f
+            if (headerPlace.height > 0) {
+                // Under a back gesture the card below lies [headerRoom] lower, down to the
+                // bottom (see underHead): the header grows about its centre with it.
+                val pivot = backUnderPivot((restHeight + headerRoom) / 2f, headerPlace.height.toFloat())
+                // Placed before [rest], so drawn behind it.
+                headerPlace.placeWithLayer(0, restTop) {
+                    alpha = if (headerUnder) 1f else 1f - out
+                    translationY = if (headerUnder) 0f else -headerPlace.height * 0.2f * out
+                    if (headerUnder && headerGrow != null) backUnder(headerGrow, pivot)
+                }
+            }
+            restPlace.place(0, restTop + kotlin.math.round(headerRoom * (1f - out)).toInt())
         }
     }
 }
@@ -1126,8 +1625,9 @@ private val BLOCK_ROUND = 14.dp
 // After a ride there is always this much air before the next block, so a change shows as a gap.
 private val RIDE_GAP = 6.dp
 
-// Between two rides whose change shows a pill there is at least this much air, so the pill
-// (OVERLAP_TAG_HEIGHT high) never touches either block; the blocks after it are pushed down.
+// Between two rides whose change shows a label (see chartChanges) there is at least this much
+// air, so the label (OVERLAP_TAG_HEIGHT high) never touches either block; the blocks after it are
+// pushed down. Every labelled change gets it, so a change looks the same in every column.
 private val PILL_GAP = 22.dp
 
 // The name and corners of a ride block grow from the small form at MIN_BLOCK to the full form
@@ -1140,31 +1640,59 @@ private val BLOCK_LABEL_PADDING = 2.dp
 /** The smallest size (sp) the name of a line gets in a block before it is shortened. */
 private const val BLOCK_LABEL_MIN_SIZE = 8f
 
+/** The size (sp) at which the names of lines are measured for their blocks: the largest they get. */
+private const val BLOCK_LABEL_REFERENCE_SIZE = 15f
+
 /**
- * The name of a line for a block of the chart [room] wide, and its size in sp: [full] at
- * [maxSize] (the size of every block, as for "S1" or "U9") where it fits, else smaller until it
- * fits, down to BLOCK_LABEL_MIN_SIZE; below that the [compact] name ("ICE" for "ICE 29"), sized
- * the same way. Never larger than [maxSize].
+ * The name of a line for a block of the chart [room] wide (see [BlockLabelFit]): [full] where
+ * it fits at BLOCK_LABEL_MIN_SIZE or more, else the [compact] name ("N1334" for "Flix N1334").
  */
 @Composable
-private fun fitBlockLabel(full: String, compact: String, maxSize: Float, room: Dp): Pair<String, Float> {
+private fun fitBlockLabel(full: String, compact: String, room: Dp, marked: Boolean = false): BlockLabelFit {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val style = LocalTextStyle.current.merge(TextStyle(fontWeight = FontWeight.ExtraBold))
-    return remember(full, compact, maxSize, room, density, style) {
-        val roomPixels = with(density) { room.toPx() }.coerceAtLeast(1f)
-        val fitting = { text: String ->
-            val width = measurer.measure(text, style.copy(fontSize = maxSize.sp), softWrap = false, maxLines = 1)
-                .size.width.toFloat()
-            if (width <= roomPixels) maxSize else maxSize * roomPixels / width * 0.98f
+    // Text grows in step with its size, so each name is measured once, at
+    // BLOCK_LABEL_REFERENCE_SIZE, and its width at any other size worked out from there. The mode
+    // icon in front (see modeHint) grows with it: as wide as the size of the text, gap included.
+    val widths = remember(full, compact, density, style, marked) {
+        val mark = if (marked) with(density) { BLOCK_LABEL_REFERENCE_SIZE.sp.toPx() } else 0f
+        val widthOf = { text: String ->
+            measurer.measure(text, style.copy(fontSize = BLOCK_LABEL_REFERENCE_SIZE.sp), softWrap = false, maxLines = 1)
+                .size.width.toFloat() + mark
         }
-        val fullSize = fitting(full)
-        if (fullSize >= BLOCK_LABEL_MIN_SIZE || compact == full) {
-            full to fullSize.coerceAtLeast(BLOCK_LABEL_MIN_SIZE)
+        val fullWidth = widthOf(full)
+        fullWidth to (if (compact == full) fullWidth else widthOf(compact))
+    }
+    val roomPixels = with(density) { room.toPx() }.coerceAtLeast(1f)
+    return remember(full, compact, widths, roomPixels) {
+        // Which name shows does not depend on the size the block allows (11 to 15 sp): a name
+        // that fits at the small size is never cut below the smallest one at the large size.
+        val fullFit = BlockLabelFit(full, widths.first, roomPixels)
+        if (compact == full || fullFit.fitted(BLOCK_LABEL_REFERENCE_SIZE) >= BLOCK_LABEL_MIN_SIZE) {
+            fullFit
         } else {
-            compact to fitting(compact).coerceAtLeast(BLOCK_LABEL_MIN_SIZE)
+            BlockLabelFit(compact, widths.second, roomPixels)
         }
     }
+}
+
+/**
+ * The name [text] of a line in a block, [referenceWidth] pixels wide at
+ * BLOCK_LABEL_REFERENCE_SIZE, for a block with [roomPixels] for it.
+ */
+private class BlockLabelFit(val text: String, private val referenceWidth: Float, private val roomPixels: Float) {
+    /** The size (sp) at which the name fills the room at most, never larger than [maxSize]. */
+    fun fitted(maxSize: Float): Float {
+        val width = referenceWidth * maxSize / BLOCK_LABEL_REFERENCE_SIZE
+        return if (width <= roomPixels) maxSize else maxSize * roomPixels / width * 0.98f
+    }
+
+    /**
+     * The size (sp) of the name where the block allows [maxSize] (the size of every block, as
+     * for "S1" or "U9"): that where it fits, else smaller until it fits, down to BLOCK_LABEL_MIN_SIZE.
+     */
+    fun size(maxSize: Float): Float = fitted(maxSize).coerceAtLeast(BLOCK_LABEL_MIN_SIZE)
 }
 
 // A walk is never lower than this; from the second height on it says how long it is.
@@ -1194,7 +1722,7 @@ private fun neededScale(journeys: List<Journey>): Dp {
         val legs = journey.legs
         val firstRide = legs.indexOfFirst { !it.walking }
         val lastRide = legs.indexOfLast { !it.walking }
-        val pills = pillChanges(journey)
+        val pills = labelledChanges(journey)
         var least = 0.dp
         legs.forEachIndexed { index, leg ->
             val betweenRides = firstRide >= 0 && index > firstRide && index < lastRide
@@ -1215,56 +1743,214 @@ private fun neededScale(journeys: List<Journey>): Dp {
 }
 
 /**
- * The legs of [journey] (by index) whose change before them shows a pill in the chart: risky
- * and very risky changes (see journeyChangesOf), none in a cancelled journey.
+ * How a change between two rides shows in the chart: [minutes] from the arrival to the
+ * departure, its [tightness] and the [tone] of its minutes. Staying on board ([onBoard]) is no
+ * change and is rated comfortable. A risky or very risky change shows as a pill with a dot.
  */
-private fun pillChanges(journey: Journey): Set<Int> =
-    if (journey.cancelled) {
-        emptySet()
-    } else {
-        journeyChangesOf(journey).filter { it.tightness.ordinal >= Tightness.Risky.ordinal }.map { it.nextIndex }.toSet()
-    }
-
-/** One stretch of a journey column: a ride, or a walk before the first or after the last ride. */
-private class ColumnPart(val leg: Leg, val top: Dp, val height: Dp)
+internal class ChartChange(val minutes: Long, val tightness: Tightness, val onBoard: Boolean, val tone: WaitTone) {
+    val pill: Boolean get() = !onBoard && tightness.ordinal >= Tightness.Risky.ordinal
+}
 
 /**
- * Where the stretches of a journey lie in its column. [starts] and [ends] are the times
- * of its legs in minutes of the chart. Each stretch starts at its departure, but never
- * inside the one before it: a very short ride keeps a readable height and pushes what
- * follows down a little, so blocks can not overlap at any scale. A pushed stretch still
- * ends at its arrival where it is long enough to give up the room, so a long ride after
- * short ones is a little compressed and the column does not run past its arrival.
- * A walk between two rides is part of the change and has no stretch of its own. A ride in
- * [pillsBefore] (a leg index whose change shows a pill) starts at least [PILL_GAP] below the
- * ride before it, so the pill has room of its own.
+ * The changes of [journey] that show a label in the chart, by the leg index of the ride after
+ * them: every change between two rides that both run, as a pill where it is risky or worse,
+ * else with its minutes where it leaves at least one. Each is rated as the detail view rates
+ * it (see journeyChangesOf), by the change alone, and gets room of its own (see
+ * PILL_GAP): the same change looks the same in every column that has it, whatever the column
+ * holds around it and whatever room the scale happens to leave.
  */
-private fun columnParts(
+internal fun chartChanges(journey: Journey): Map<Int, ChartChange> {
+    val legs = journey.legs
+    val own = journeyChangesOf(journey).associate { it.nextIndex to it.tightness }
+    val rides = legs.indices.filter { !legs[it].walking }
+    val changes = LinkedHashMap<Int, ChartChange>()
+    for ((from, to) in rides.zipWithNext()) {
+        val arriving = legs[from]
+        val next = legs[to]
+        // A change to or from a cancelled ride does not happen: nothing to rate.
+        if (arriving.cancelled || next.cancelled) continue
+        val minutes = changeGapMinutes(arriving, next)
+        val onBoard = arriving.tripId != null && arriving.tripId == next.tripId
+        val tightness = if (onBoard) Tightness.Comfortable else own[to] ?: changeTightness(arriving, next)
+        // Coloured by the wait (see waitTone): a long one is a calm sand, not green.
+        val tone = if (onBoard) WaitTone.Neutral else waitTone(tightness, minutes, changeNeed(arriving, next))
+        val change = ChartChange(minutes, tightness, onBoard, tone)
+        if (change.pill || minutes >= 1) changes[to] = change
+    }
+    return changes
+}
+
+/** The legs of [journey] (by index) whose change before them shows a label in the chart (see chartChanges). */
+private fun labelledChanges(journey: Journey): Set<Int> = LabelledChanges.of(journey)
+
+/**
+ * The labelled changes of the journeys asked for last, by identity. The height of the chart asks
+ * for them every frame while its window glides (see columnBottom), and rating a change is not
+ * free (it may look up the walk between two platforms).
+ */
+private object LabelledChanges {
+    private const val SIZE = 64
+    private val journeys = arrayOfNulls<Journey>(SIZE)
+    private val labels = arrayOfNulls<Set<Int>>(SIZE)
+    // The rating settings each entry was made with (see ratingSettingsVersion): after a change
+    // of the transfer tuning or the walking pace a journey is rated afresh.
+    private val versions = IntArray(SIZE)
+    private var next = 0
+
+    @Synchronized
+    fun of(journey: Journey): Set<Int> {
+        val version = ratingSettingsVersion
+        for (index in 0 until SIZE) {
+            if (journeys[index] === journey && versions[index] == version) return labels[index] ?: emptySet()
+        }
+        val found = chartChanges(journey).keys
+        journeys[next] = journey
+        labels[next] = found
+        versions[next] = version
+        next = (next + 1) % SIZE
+        return found
+    }
+}
+
+/**
+ * One stretch of a journey column: leg [index] of it, a ride or a walk before the first or after
+ * the last ride. Where short rides are combined (see ChartShortLegs.Combine), [members] holds
+ * the leg indices of the rides it stands for, and [bands] where each of them lies in it, as
+ * pairs of top and bottom from the top of the stretch; [index] and [leg] are its first ride.
+ */
+internal class ColumnPart(
+    val index: Int,
+    val leg: Leg,
+    val top: Dp,
+    val height: Dp,
+    val members: IntArray? = null,
+    val bands: FloatArray? = null,
+)
+
+/**
+ * Where the stretches of a journey lie in its column: always where their times say, the time
+ * axis rules. [starts] and [ends] are the times of its legs in minutes of the chart. Each
+ * stretch runs from its departure to its arrival, however short: a short ride is drawn smaller
+ * (without the minutes of the change, then without its name, at last as a thin bar, see
+ * [ColumnLook]), never pushing what follows down. A walk between two rides is part of the
+ * change and has no stretch of its own. With [combine], two or more short rides in a row (each,
+ * and the changes between them, lower than MIN_BLOCK) are one stretch from the departure of
+ * the first to the arrival of the last. [pillsBefore] is no longer needed for the room and kept
+ * for the callers.
+ */
+@Suppress("UNUSED_PARAMETER")
+internal fun columnParts(
     legs: List<Leg>,
     starts: FloatArray,
     ends: FloatArray,
     windowStart: Float,
     perMinute: Dp,
     pillsBefore: Set<Int> = emptySet(),
+    top: Dp = CHART_TOP,
+    combine: Boolean = false,
 ): List<ColumnPart> {
     val firstRide = legs.indexOfFirst { !it.walking }
     val lastRide = legs.indexOfLast { !it.walking }
-    var floor = 0.dp
-    var lastRideBottom: Dp? = null
-    return legs.mapIndexedNotNull { index, leg ->
+    val parts = ArrayList<ColumnPart>(legs.size)
+    var index = 0
+    while (index < legs.size) {
+        val leg = legs[index]
         val minutes = ends[index] - starts[index]
         val betweenRides = firstRide >= 0 && index > firstRide && index < lastRide
         if (leg.walking && (betweenRides || minutes < 1f)) {
-            null
-        } else {
-            val naturalTop = CHART_TOP + perMinute * (starts[index] - windowStart)
-            val naturalBottom = naturalTop + perMinute * minutes.coerceAtLeast(1f)
-            val pillFloor = lastRideBottom?.takeIf { !leg.walking && index in pillsBefore }?.plus(PILL_GAP) ?: 0.dp
-            val top = maxOf(naturalTop, floor, pillFloor)
-            val height = maxOf(naturalBottom - top, if (leg.walking) MIN_WALK else MIN_BLOCK)
-            floor = top + height + (if (leg.walking) BLOCK_GAP else RIDE_GAP)
-            if (!leg.walking) lastRideBottom = top + height
-            ColumnPart(leg, top, height)
+            index++
+            continue
+        }
+        val partTop = top + perMinute * (starts[index] - windowStart)
+        val height = perMinute * minutes.coerceAtLeast(0f)
+        if (combine && !leg.walking && height < MIN_BLOCK) {
+            val last = shortRun(legs, starts, ends, index, firstRide, lastRide, perMinute)
+            if (last > index) {
+                var count = 0
+                for (k in index..last) if (!legs[k].walking) count++
+                val members = IntArray(count)
+                val bands = FloatArray(count * 2)
+                var at = 0
+                for (k in index..last) {
+                    if (legs[k].walking) continue
+                    members[at] = k
+                    bands[2 * at] = (perMinute * (starts[k] - starts[index])).value
+                    bands[2 * at + 1] = (perMinute * (ends[k] - starts[index]).coerceAtLeast(starts[k] - starts[index])).value
+                    at++
+                }
+                parts.add(ColumnPart(index, leg, partTop, perMinute * (ends[last] - starts[index]).coerceAtLeast(0f), members, bands))
+                index = last + 1
+                continue
+            }
+        }
+        parts.add(ColumnPart(index, leg, partTop, height))
+        index++
+    }
+    return parts
+}
+
+/**
+ * The last ride of the run of short rides that starts with the ride at [first] (see
+ * columnParts with combine): each ride and each change between two of them lower than
+ * MIN_BLOCK at [perMinute]; walks between rides belong to the change. [first] where the
+ * ride after it is not short.
+ */
+private fun shortRun(
+    legs: List<Leg>,
+    starts: FloatArray,
+    ends: FloatArray,
+    first: Int,
+    firstRide: Int,
+    lastRide: Int,
+    perMinute: Dp,
+): Int {
+    var last = first
+    var k = first + 1
+    while (k < legs.size) {
+        if (legs[k].walking) {
+            if (k > firstRide && k < lastRide) {
+                k++
+                continue
+            }
+            break
+        }
+        if (perMinute * (ends[k] - starts[k]) >= MIN_BLOCK || perMinute * (starts[k] - ends[last]) >= MIN_BLOCK) break
+        last = k
+        k++
+    }
+    return last
+}
+
+/**
+ * The times of the legs of one journey in minutes of the chart, and its labelled changes, worked
+ * out once: the height of the chart asks how far its columns reach every frame while the window
+ * glides, and minuteOf makes a Duration for each time it is asked.
+ */
+private class ColumnSpan(
+    val legs: List<Leg>,
+    val starts: FloatArray,
+    val ends: FloatArray,
+    val arrival: Float,
+    val pills: Set<Int>,
+) {
+    /** How far down the column reaches with the window starting at [windowStart] (see columnBottom). */
+    fun bottom(windowStart: Float, perMinute: Dp, top: Dp = CHART_TOP): Dp {
+        val parts = columnParts(legs, starts, ends, windowStart, perMinute, pills, top)
+        val natural = top + perMinute * (arrival - windowStart)
+        val last = parts.lastOrNull() ?: return natural
+        return maxOf(last.top + last.height, natural)
+    }
+
+    companion object {
+        fun of(journey: Journey, minuteOf: (OffsetDateTime) -> Float): ColumnSpan {
+            val legs = journey.legs
+            return ColumnSpan(
+                legs,
+                FloatArray(legs.size) { minuteOf(legs[it].departure) },
+                FloatArray(legs.size) { minuteOf(legs[it].arrival) },
+                minuteOf(journey.arrival),
+                labelledChanges(journey),
+            )
         }
     }
 }
@@ -1278,6 +1964,7 @@ private fun columnBottom(
     minuteOf: (OffsetDateTime) -> Float,
     windowStart: Float,
     perMinute: Dp,
+    top: Dp = CHART_TOP,
 ): Dp {
     val legs = journey.legs
     val parts = columnParts(
@@ -1286,10 +1973,185 @@ private fun columnBottom(
         FloatArray(legs.size) { minuteOf(legs[it].arrival) },
         windowStart,
         perMinute,
-        pillChanges(journey),
+        labelledChanges(journey),
+        top,
     )
-    val natural = CHART_TOP + perMinute * (minuteOf(journey.arrival) - windowStart)
+    val natural = top + perMinute * (minuteOf(journey.arrival) - windowStart)
     return maxOf(parts.lastOrNull()?.let { it.top + it.height } ?: natural, natural)
+}
+
+/**
+ * Where everything of one journey column lies for one window and scale: its stretches, the
+ * dashed outline above each of them (0 dp where it has none), the top of its departure time and
+ * of its arrival time, and the stretch that holds the tag of a cancelled ride (-1 for none).
+ * It is worked out while the chart is laid out, so the window and the scale can move every
+ * frame without composing the column again.
+ */
+internal class ColumnGeometry(
+    val parts: List<ColumnPart>,
+    val dashes: List<Dp>,
+    val departureTop: Dp,
+    val arrivalTop: Dp,
+    val cancelTagPart: Int,
+) {
+    /** Where the gap below stretch [part] (a ride) begins. */
+    fun gapTop(part: Int): Dp = parts[part].top + parts[part].height
+
+    /** How high the gap below stretch [part] is, down to the outline of the next ride where it has one. */
+    fun gapHeight(part: Int): Dp = parts[part + 1].top - dashes[part + 1] - gapTop(part)
+
+    /** The middle of the gap below stretch [part], for the stop and the minutes of the change. */
+    fun gapMiddle(part: Int): Dp = gapTop(part) + gapHeight(part) / 2
+
+    /** The middle of the gap below stretch [part] for the pill of its change, the dashed outline below included. */
+    fun pillMiddle(part: Int): Dp = gapTop(part) + (parts[part + 1].top - gapTop(part)) / 2
+
+    /** What of the column is shown at all at this moment (see [ColumnLook]). */
+    fun look(): ColumnLook = ColumnLook(
+        legIndices = parts.map { it.index },
+        walkLabels = parts.map { it.leg.walking && it.height >= WALK_LABEL },
+        named = parts.map { !it.leg.walking && it.height >= NAMED_BLOCK },
+        thin = parts.map { !it.leg.walking && it.height < SMALL_BLOCK },
+        combined = parts.map { it.members?.size ?: 0 },
+        gapRoom = parts.indices.map { part ->
+            val next = parts.getOrNull(part + 1)
+            when {
+                parts[part].leg.walking || next == null || next.leg.walking -> 0
+                gapHeight(part) >= OVERLAP_TAG_HEIGHT + 2.dp -> 2
+                gapHeight(part) >= GAP_ONE_LINE -> 1
+                else -> 0
+            }
+        },
+        dashed = dashes.map { it > 0.dp },
+        roomyGaps = parts.indices.map { part ->
+            val next = parts.getOrNull(part + 1)
+            !parts[part].leg.walking && next != null && !next.leg.walking && gapHeight(part) >= GAP_TWO_LINES
+        },
+        cancelTagPart = cancelTagPart,
+    )
+}
+
+/**
+ * What of a journey column is shown, as opposed to where: the legs that have a stretch (by
+ * index), which walks are tall enough to say how long they are, which rides show the dashed
+ * outline of their planned departure, whether the gap below each ride has room for the name
+ * of the stop above the minutes of the change, and which stretch holds the tag of a cancelled ride. It changes only when a
+ * stretch crosses one of the heights that decide it, so only then is the column composed again.
+ */
+internal data class ColumnLook(
+    val legIndices: List<Int>,
+    val walkLabels: List<Boolean>,
+    /** Which rides are tall enough for the name of their line (see NAMED_BLOCK). */
+    val named: List<Boolean>,
+    /** Which rides are lower than a small block and show as a thin bar (see SMALL_BLOCK). */
+    val thin: List<Boolean>,
+    /** For each stretch, how many short rides it combines (0 for one ride or a walk). */
+    val combined: List<Int>,
+    /** Room in the gap below each ride for the change: 0 a dot only, 1 its minutes, 2 its pill. */
+    val gapRoom: List<Int>,
+    val dashed: List<Boolean>,
+    val roomyGaps: List<Boolean>,
+    val cancelTagPart: Int,
+)
+
+// From this height the gap between two rides holds the minutes of the change; below it a dot.
+private val GAP_ONE_LINE = 13.dp
+
+// From this height a ride block shows the name of its line; below it only its colour.
+private val NAMED_BLOCK = 13.dp
+
+// Below this height a ride is drawn as a thin bar of its colour (at least THIN_BAR high).
+private val SMALL_BLOCK = 5.dp
+private val THIN_BAR = 3.dp
+
+// From this height the gap between two rides holds the name of the stop above the minutes of
+// the change, where the setting asks for it (see LocalChartChangeStops).
+private val GAP_TWO_LINES = 28.dp
+
+/**
+ * [ColumnGeometry] of the legs [legs] of a journey, [cancelled] or not, with the times of its
+ * legs [starts] and [ends] in minutes of the chart, for the window starting at [windowStart] at
+ * [perMinute]. [pillsBefore] as in [columnParts]; [labelHeight] is the height of the departure
+ * time with the delay above it, where shown.
+ */
+internal fun columnGeometry(
+    legs: List<Leg>,
+    starts: FloatArray,
+    ends: FloatArray,
+    windowStart: Float,
+    perMinute: Dp,
+    pillsBefore: Set<Int>,
+    labelHeight: Dp,
+    cancelled: Boolean,
+    top: Dp = CHART_TOP,
+    combine: Boolean = false,
+): ColumnGeometry {
+    val parts = columnParts(legs, starts, ends, windowStart, perMinute, pillsBefore, top, combine)
+    val firstTop = parts.firstOrNull()?.top ?: (top + perMinute * (starts.first() - windowStart))
+    val lastBottom = parts.lastOrNull()?.let { it.top + it.height } ?: firstTop
+    // The dashed outline of the planned part of a late ride, by its place among the parts.
+    // It needs room above its block: below the times for the first ride, below the block before for the others.
+    val dashes = parts.mapIndexed { index, part ->
+        val delay = part.leg.departureDelayMinutes.toInt()
+        if (part.leg.walking || cancelled || delay <= 0) {
+            0.dp
+        } else {
+            val room = if (index == 0) part.top - labelHeight else part.top - (parts[index - 1].top + parts[index - 1].height)
+            val wanted = (perMinute * delay).coerceIn(6.dp, 28.dp)
+            if (room >= 6.dp) minOf(wanted, room) else 0.dp
+        }
+    }
+    // The first cancelled ride with room for it holds the tag "fällt aus".
+    val tagPart = parts.indexOfFirst { !it.leg.walking && it.leg.cancelled && it.height >= CANCEL_TAG_BLOCK }
+    return ColumnGeometry(
+        parts = parts,
+        dashes = dashes,
+        departureTop = firstTop - (dashes.firstOrNull() ?: 0.dp) - labelHeight,
+        arrivalTop = maxOf(top + perMinute * (ends.last() - windowStart), lastBottom) + 2.dp,
+        cancelTagPart = tagPart,
+    )
+}
+
+/** Axis labels every 10, 20, 30 or 60 minutes at [perMinute], whatever still has room. */
+internal fun axisStep(perMinute: Dp): Int = when {
+    perMinute * 10 >= 26.dp -> 10
+    perMinute * 20 >= 26.dp -> 20
+    perMinute * 30 >= 26.dp -> 30
+    else -> 60
+}
+
+/** The ticks of the axis: from [first] to [last] (inclusive) every [step] minutes. */
+internal data class AxisTicks(val first: Int, val last: Int, val step: Int)
+
+/** The ticks of the axis for the window from [windowStart] to [windowEnd] at [perMinute]. */
+internal fun axisTicks(windowStart: Float, windowEnd: Float, perMinute: Dp): AxisTicks {
+    val step = axisStep(perMinute)
+    return AxisTicks(ceil(windowStart / step).toInt() * step, windowEnd.toInt(), step)
+}
+
+/** Whether the line of "now" at minute [now] shows in the window from [windowStart] to [windowEnd]. */
+internal fun nowInWindow(now: Float, windowStart: Float, windowEnd: Float): Boolean =
+    now >= windowStart - 0.5f && now <= windowEnd
+
+/** Whether the axis label of a tick at [tickY] gives way to the marker of "now" at [nowY] (null: none). */
+internal fun givesWayToNow(tickY: Dp, nowY: Dp?): Boolean =
+    nowY != null && tickY > nowY - 16.dp && tickY < nowY + 16.dp
+
+/**
+ * The height of the chart: as tall as its window at [perMinute] ([span] minutes) and as the
+ * column that was pushed down the furthest ([deepest]), with the room below; a hair more than
+ * the card ([viewport]) is no reason to scroll, so then it is as tall as the card.
+ */
+internal fun chartHeightOf(
+    deepest: Dp,
+    perMinute: Dp,
+    span: Float,
+    viewport: Dp,
+    top: Dp = CHART_TOP,
+    bottom: Dp = CHART_BOTTOM,
+): Dp {
+    val wanted = maxOf(top + perMinute * span, deepest) + bottom
+    return if (wanted > viewport + 4.dp) wanted else viewport
 }
 
 /**
@@ -1304,12 +2166,14 @@ private fun fittingScale(
     windowStart: Float,
     windowEnd: Float,
     height: Dp,
+    top: Dp = CHART_TOP,
+    bottom: Dp = CHART_BOTTOM,
 ): Dp {
     val span = (windowEnd - windowStart).coerceAtLeast(10f)
-    val room = (height - CHART_TOP - CHART_BOTTOM).coerceAtLeast(80.dp)
+    val room = (height - top - bottom).coerceAtLeast(80.dp)
     fun fits(scale: Dp): Boolean {
-        val deepest = journeys.maxOfOrNull { columnBottom(it, minuteOf, windowStart, scale) } ?: 0.dp
-        return maxOf(deepest, CHART_TOP + scale * span) + CHART_BOTTOM <= maxOf(height, room + CHART_TOP + CHART_BOTTOM)
+        val deepest = journeys.maxOfOrNull { columnBottom(it, minuteOf, windowStart, scale, top) } ?: 0.dp
+        return maxOf(deepest, top + scale * span) + bottom <= maxOf(height, room + top + bottom)
     }
     var high = room / span
     if (fits(high)) return high
@@ -1344,43 +2208,90 @@ private fun JourneyChart(
     onLoadEarlier: () -> Unit,
     onLoadLater: () -> Unit,
     modifier: Modifier = Modifier,
+    still: Boolean = false,
 ) {
+    AllocProbe.begin(AllocProbe.CHART_COMPOSE)
     val loadEarlier by rememberUpdatedState(onLoadEarlier)
+    // While a journey opens on a page of its own out of a column ([still]), the chart under it
+    // stands still: it neither scrolls to the pick nor takes a new window or scale for the room
+    // the page leaves it, so it costs no frame of the opening (see JourneyDetail).
+    val stillNow by rememberUpdatedState(still)
     val loadLater by rememberUpdatedState(onLoadLater)
+    // The tap on a column calls the latest [onSelect]; the click of a column stays the same
+    // lambda, so a column whose journey did not change skips when the page composes again.
+    val select by rememberUpdatedState(onSelect)
     val glide = rememberAnimationsOn()
 
     // Minutes are counted from a fixed full hour, so axis labels fall on round times.
     val base = remember { journeys.first().departure.withMinute(0).withSecond(0).withNano(0) }
-    val minuteOf: (OffsetDateTime) -> Float = { time -> Duration.between(base, time).seconds / 60f }
+    val minuteOf: (OffsetDateTime) -> Float = remember(base) { { time -> Duration.between(base, time).seconds / 60f } }
 
     // Every column that shows decides the time window, also one that only peeks in at an edge:
     // each of them is seen whole, from its first departure (a walk included) to its arrival.
-    val visibleKeys by remember(listState) {
+    // Worked out for every frame of a scroll: only the first and the last index in view, packed
+    // into one number, so the frames in between allocate no lists (see packedRange); the chart
+    // composes again only when a column comes into view or leaves it.
+    val visibleRange by remember(listState) {
         derivedStateOf {
             val info = listState.layoutInfo
-            info.visibleItemsInfo
-                .filter { item ->
-                    item.offset + item.size > info.viewportStartOffset + PEEK_PIXELS &&
-                        item.offset < info.viewportEndOffset - PEEK_PIXELS
+            val items = info.visibleItemsInfo
+            var first = -1
+            var last = -1
+            for (i in items.indices) {
+                val item = items[i]
+                if (item.offset + item.size > info.viewportStartOffset + PEEK_PIXELS &&
+                    item.offset < info.viewportEndOffset - PEEK_PIXELS
+                ) {
+                    if (first < 0) first = item.index
+                    last = item.index
                 }
-                .map { it.key }
+            }
+            packedRange(first, last)
         }
     }
-    val inView = journeys.filter { it.id in visibleKeys }.ifEmpty { journeys.take(4) }
+    // The columns in view last time: when earlier journeys have just been put in front, the
+    // indices of [visibleRange] still belong to the row as it was laid out before (for one
+    // frame), so they are checked by key and, not matching yet, the columns before stay.
+    val inViewBefore = remember { arrayOfNulls<List<Journey>>(1) }
+    val inView = remember(journeys, visibleRange) {
+        val first = rangeFirst(visibleRange)
+        val last = rangeLast(visibleRange)
+        val before = inViewBefore[0]
+        val shown = if (first < 0) {
+            journeys.take(4)
+        } else if (before != null && !rangeMatches(listState, journeys, first, last)) {
+            before
+        } else {
+            journeys.subList(first.coerceAtMost(journeys.size), (last + 1).coerceAtMost(journeys.size)).ifEmpty { journeys.take(4) }
+        }
+        inViewBefore[0] = shown
+        shown
+    }
+    val visibleKeys = remember(inView) { inView.mapTo(HashSet()) { it.id } }
 
     val firstDeparture = inView.minOf { minuteOf(it.departure) }
     val nowMinute = minuteOf(now)
     // Start at "now" when the first departure is close, so the wait is visible.
     // A search at a picked time starts at its first journey and never slides to "now".
     val nowIsClose = !timed && nowMinute < firstDeparture && firstDeparture - nowMinute <= 45f
-    val targetStart = if (nowIsClose) nowMinute else firstDeparture
-    val targetEnd = maxOf(inView.maxOf { minuteOf(it.arrival) }, targetStart + 20f)
+    val liveStart = if (nowIsClose) nowMinute else firstDeparture
+    val liveEnd = maxOf(inView.maxOf { minuteOf(it.arrival) }, liveStart + 20f)
+    // Held as they were while the chart stands still (see [still]).
+    val held = remember { floatArrayOf(Float.NaN, Float.NaN) }
+    if (!still || held[0].isNaN()) {
+        held[0] = liveStart
+        held[1] = liveEnd
+    }
+    val targetStart = held[0]
+    val targetEnd = held[1]
     // A spring carries the window along: a new target while it moves keeps its speed, so
     // scrolling sideways glides instead of jerking from one window to the next.
+    // The window is kept as states that only laying out and drawing read: it moves every frame
+    // after a sideways scroll, and composing the whole chart again for each of those frames made
+    // scrolling stutter (see ChartFrame).
     val windowSpring = spring<Float>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
-    val windowStart by animateFloatAsState(targetStart, windowSpring, label = "windowStart")
-    val windowEnd by animateFloatAsState(targetEnd, windowSpring, label = "windowEnd")
-    val span = (windowEnd - windowStart).coerceAtLeast(10f)
+    val windowStart = animateFloatAsState(targetStart, windowSpring, label = "windowStart")
+    val windowEnd = animateFloatAsState(targetEnd, windowSpring, label = "windowEnd")
 
     // A search at a picked time opens on the journey that fits it, once per search:
     // for an arrival time that is the last one, with the earlier ones to its left.
@@ -1403,7 +2314,7 @@ private fun JourneyChart(
         val firstRun = shownPick[0] == null
         val newPick = shownPick[0] != selectedId
         shownPick[0] = selectedId
-        if (listState.isScrollInProgress) return@LaunchedEffect
+        if (listState.isScrollInProgress || stillNow) return@LaunchedEffect
         val index = journeys.indexOfFirst { it.id == selectedId }
         if (index < 0) return@LaunchedEffect
         val info = listState.layoutInfo
@@ -1426,12 +2337,20 @@ private fun JourneyChart(
     LaunchedEffect(journeys.size, listState) {
         val firstId = journeys.first().id
         val lastIds = journeys.takeLast(2).map { it.id }
+        // Three flags in one small number (boxed from the cache of small integers): no object
+        // for each frame of a scroll, and the flow goes on only when one of them changes.
         snapshotFlow {
             val items = listState.layoutInfo.visibleItemsInfo
-            Triple(items.firstOrNull()?.key, items.lastOrNull()?.key, listState.isScrollInProgress)
-        }.collect { (firstKey, lastKey, scrolling) ->
-            if (lastIds.any { it == lastKey }) loadLater()
-            if (firstKey == firstId && (scrolling || !earlierPrimed.value)) {
+            val lastKey = items.lastOrNull()?.key
+            (if (lastIds.any { it == lastKey }) 1 else 0) or
+                (if (items.firstOrNull()?.key == firstId) 2 else 0) or
+                (if (listState.isScrollInProgress) 4 else 0)
+        }.collect { flags ->
+            val atEnd = flags and 1 != 0
+            val atStart = flags and 2 != 0
+            val scrolling = flags and 4 != 0
+            if (atEnd) loadLater()
+            if (atStart && (scrolling || !earlierPrimed.value)) {
                 earlierPrimed.value = true
                 loadEarlier()
             }
@@ -1439,30 +2358,109 @@ private fun JourneyChart(
     }
 
     val density = LocalDensity.current
+    // The clock moves the line of "now": it is read while drawing, so a new minute composes nothing.
+    val nowAt = rememberUpdatedState(nowMinute)
+    // Where the row of columns lies on the screen (left, top, height), for the tap of the auto test.
+    val rowPlace = remember { FloatArray(3) }
+    // The auto test of the performance lab scrolls the chart where it is open (debug and staging only).
+    if (PerfLab.available) {
+        DisposableEffect(listState) {
+            PerfLab.chart = listState
+            // The auto test opens the first column in full view as a tap on it does (see ChartOpenProbe).
+            val tap: () -> Boolean = {
+                val info = listState.layoutInfo
+                val item = info.visibleItemsInfo.firstOrNull {
+                    it.offset >= info.viewportStartOffset && it.offset + it.size <= info.viewportEndOffset
+                }
+                val id = item?.key as? String
+                if (item == null || id == null) {
+                    false
+                } else {
+                    val left = rowPlace[0] + item.offset
+                    OpenOrigin.set(Rect(left, rowPlace[1], left + item.size, rowPlace[1] + rowPlace[2]))
+                    select(id)
+                    true
+                }
+            }
+            ChartOpenProbe.tap = tap
+            onDispose {
+                if (PerfLab.chart === listState) PerfLab.chart = null
+                if (ChartOpenProbe.tap === tap) ChartOpenProbe.tap = null
+            }
+        }
+    }
+    AllocProbe.end(AllocProbe.CHART_COMPOSE)
     GlassSurface(modifier = modifier, shape = RoundedCornerShape(32.dp)) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(start = 6.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
         ) {
+            AllocProbe.begin(AllocProbe.CHART_BODY)
             // The scale at which every column in view fits the card whole, with the room for its
             // times above and below, unless the journeys in view need more to show their
             // stretches at all (see neededScale). Then the chart scrolls up and down instead.
-            val targetScale = remember(inView, targetStart, targetEnd, maxHeight) {
-                maxOf(fittingScale(inView, minuteOf, targetStart, targetEnd, maxHeight), neededScale(inView))
+            val heldScale = remember { arrayOfNulls<Dp>(1) }
+            // The total time of each journey, where the setting asks for it, has room of its own
+            // above or below every column, kept the same in all of them (see chartRoomOf).
+            val totalTime = LocalChartTotalTime.current
+            val chartTop = CHART_TOP + chartRoomOf(totalTime, top = true)
+            val chartBottom = CHART_BOTTOM + chartRoomOf(totalTime, top = false)
+            // Pinned total times keep a margin of their own at an edge; the chart scrolls in the rest.
+            val bandTop = pinnedBandOf(totalTime, top = true)
+            val bandBottom = pinnedBandOf(totalTime, top = false)
+            val viewHeight = maxHeight - bandTop - bandBottom
+            val fitted = if (still && heldScale[0] != null) {
+                null
+            } else {
+                remember(inView, targetStart, targetEnd, viewHeight, totalTime) {
+                    maxOf(fittingScale(inView, minuteOf, targetStart, targetEnd, viewHeight, chartTop, chartBottom), neededScale(inView))
+                }
             }
-            val perMinute by animateDpAsState(
+            val targetScale = fitted ?: heldScale[0] ?: 0.dp
+            heldScale[0] = targetScale
+            val perMinute = animateDpAsState(
                 targetScale,
                 spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow),
                 label = "chartScale",
             )
+            // The window and the scale as they move, for laying out and drawing only.
+            val frame = remember(windowStart, windowEnd, perMinute, chartTop) { ChartFrame(windowStart, windowEnd, perMinute, chartTop) }
 
             // The chart is as tall as its window at this scale, and as the column that was
-            // pushed down the furthest. A hair more than the card is no reason to scroll.
-            val deepest = inView.maxOf { columnBottom(it, minuteOf, windowStart, perMinute) }
-            val wanted = maxOf(CHART_TOP + perMinute * span, deepest) + CHART_BOTTOM
-            val chartHeight = if (wanted > maxHeight + 4.dp) wanted else maxHeight
-            val scrolls = chartHeight > maxHeight
+            // pushed down the furthest (see chartHeightOf), worked out while it is measured.
+            val viewport = viewHeight
+            // The times of the columns in view in minutes of the chart, worked out once per set
+            // of columns: the height is asked for every frame while the window glides.
+            val spans = rememberUpdatedState(remember(inView, minuteOf) { inView.map { ColumnSpan.of(it, minuteOf) } })
+            val chartHeight: () -> Dp = remember(frame, viewport, chartBottom) {
+                // The last answer, for the same columns, window and scale: measuring and the check
+                // whether the chart scrolls both ask in the same frame.
+                var askedSpans: List<ColumnSpan>? = null
+                var askedStart = Float.NaN
+                var askedScale = Dp.Unspecified
+                var askedSpan = Float.NaN
+                var answer = viewport
+                {
+                    val columns = spans.value
+                    val start = frame.windowStart
+                    val scale = frame.perMinute
+                    val span = frame.span
+                    if (columns !== askedSpans || start != askedStart || scale != askedScale || span != askedSpan) {
+                        AllocProbe.begin(AllocProbe.CHART_HEIGHT)
+                        var deepest = 0.dp
+                        for (column in columns) deepest = maxOf(deepest, column.bottom(start, scale, frame.top))
+                        answer = chartHeightOf(deepest, scale, span, viewport, frame.top, chartBottom)
+                        askedSpans = columns
+                        askedStart = start
+                        askedScale = scale
+                        askedSpan = span
+                        AllocProbe.end(AllocProbe.CHART_HEIGHT)
+                    }
+                    answer
+                }
+            }
+            val scrolls by remember(chartHeight) { derivedStateOf { chartHeight() > viewport } }
 
             // Where the chart is taller than its card, the picked journey is scrolled fully into
             // view, its times included: when it is picked, and when the window or the scale
@@ -1470,14 +2468,15 @@ private fun JourneyChart(
             val picked = journeys.firstOrNull { it.id == selectedId }?.takeIf { it.id in visibleKeys }
             val sideways = listState.isScrollInProgress
             LaunchedEffect(selectedId, scrolls, targetScale, targetStart, sideways) {
-                if (picked == null || !scrolls || sideways || upDown.isScrollInProgress) return@LaunchedEffect
+                if (picked == null || !scrolls || sideways || upDown.isScrollInProgress || stillNow) return@LaunchedEffect
                 // The new window and scale have to be reached first, or the place is off.
                 delay(SETTLE_SCROLL_MILLIS)
+                if (stillNow) return@LaunchedEffect
                 with(density) {
                     // The top of its column is the top of its departure time, which lies above the first block.
                     val top = (targetScale * (minuteOf(picked.departure) - targetStart)).roundToPx()
-                    val bottom = (columnBottom(picked, minuteOf, targetStart, targetScale) + CHART_BOTTOM).roundToPx()
-                    val view = maxHeight.roundToPx()
+                    val bottom = (columnBottom(picked, minuteOf, targetStart, targetScale, chartTop) + chartBottom).roundToPx()
+                    val view = viewHeight.roundToPx()
                     val from = upDown.value
                     val target = when {
                         bottom - top > view || top < from -> top
@@ -1488,17 +2487,10 @@ private fun JourneyChart(
                 }
             }
 
-            // Axis labels every 10, 20, 30 or 60 minutes, whatever still has room.
-            val step = when {
-                perMinute * 10 >= 26.dp -> 10
-                perMinute * 20 >= 26.dp -> 20
-                perMinute * 30 >= 26.dp -> 30
-                else -> 60
+            // Where the line of "now" lies; null while it is outside the window.
+            val nowY: () -> Dp? = remember(frame) {
+                { if (nowInWindow(nowAt.value, frame.windowStart, frame.windowEnd)) frame.y(nowAt.value) else null }
             }
-            val firstTick = ceil(windowStart / step).toInt() * step
-            val ticks = (firstTick..windowEnd.toInt() step step).toList()
-            val nowVisible = nowMinute >= windowStart - 0.5f && nowMinute <= windowEnd
-            val nowY = CHART_TOP + perMinute * (nowMinute - windowStart)
 
             // Four columns share the width; with more, a fifth peeks in to invite scrolling. Fewer
             // journeys keep the width of four and stand at the start, so a single one is never
@@ -1510,77 +2502,39 @@ private fun JourneyChart(
                 (plotWidth - COLUMN_GAP * 4) / 4.4f
             }
             val columnWidth = fittingWidth.coerceAtLeast(64.dp)
+            AllocProbe.end(AllocProbe.CHART_BODY)
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(top = bandTop, bottom = bandBottom)
                     .fadeEdges(upDown, horizontal = false)
                     .verticalScroll(upDown)
-                    .height(chartHeight),
+                    .heightOf(chartHeight),
             ) {
-                Box(
+                ChartAxis(
+                    frame = frame,
+                    base = base,
+                    now = now,
+                    nowY = nowY,
                     modifier = Modifier
                         .width(AXIS_WIDTH)
                         .fillMaxHeight(),
-                ) {
-                    ticks.forEach { tick ->
-                        val tickY = CHART_TOP + perMinute * (tick - windowStart)
-                        // A label that would collide with the "now" marker gives way to it.
-                        val hidden = nowVisible && tickY > nowY - 16.dp && tickY < nowY + 16.dp
-                        if (!hidden) {
-                            Text(
-                                text = base.plusMinutes(tick.toLong()).clock(),
-                                color = AppColors.Muted,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                modifier = Modifier.offset(y = tickY - 7.dp),
-                            )
-                        }
-                    }
-                    if (nowVisible) {
-                        Box(
-                            modifier = Modifier
-                                .offset(y = nowY - 9.dp)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(AppColors.Blue)
-                                .padding(horizontal = 5.dp, vertical = 1.dp),
-                        ) {
-                            Text(
-                                text = now.clock(),
-                                color = AppColors.OnBlue,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
+                )
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight(),
+                        .fillMaxHeight()
+                        // The grid, and the line of "now" behind the columns: it shows between them,
+                        // and every column draws its own piece of it below its blocks, so no block is
+                        // crossed out.
+                        .drawBehind {
+                            AllocProbe.begin(AllocProbe.CHART_GRID)
+                            drawGrid(frame)
+                            nowY()?.let { drawNowLine(it) }
+                            AllocProbe.end(AllocProbe.CHART_GRID)
+                        },
                 ) {
-                    ticks.forEach { tick ->
-                        Box(
-                            modifier = Modifier
-                                .offset(y = CHART_TOP + perMinute * (tick - windowStart))
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(AppColors.Grid),
-                        )
-                    }
-                    // The line of "now" lies behind the columns: it shows between them, and every
-                    // column draws its own piece of it below its blocks, so no block is crossed out.
-                    if (nowVisible) {
-                        Box(
-                            modifier = Modifier
-                                .offset(y = nowY - 1.dp)
-                                .fillMaxWidth()
-                                .height(2.dp)
-                                .background(AppColors.Blue),
-                        )
-                    }
                     // Columns that run out of the card fade lightly at its edge instead of being cut.
                     // The fade comes in softly once the chart is there, not with it.
                     val sideFade = remember { Animatable(0f) }
@@ -1589,16 +2543,33 @@ private fun JourneyChart(
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
+                            .then(
+                                // Lab builds, or the lab opened in an unlocked release: nothing extra otherwise.
+                                if (PerfLab.labBuild || PerfLab.shown) {
+                                    Modifier.onGloballyPositioned { coordinates ->
+                                        val at = coordinates.positionInRoot()
+                                        rowPlace[0] = at.x
+                                        rowPlace[1] = at.y
+                                        rowPlace[2] = coordinates.size.height.toFloat()
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            )
                             .fadeEdges(
                                 listState,
                                 horizontal = true,
                                 length = 22.dp,
                                 edgeAlpha = { 1f - SIDE_FADE_DEPTH * sideFade.value },
-                            ),
+                            )
+                            // The row's own measuring (with the columns it composes and measures) and drawing.
+                            .probed(AllocProbe.CHART_ROW_LAYOUT, AllocProbe.CHART_ROW_DRAW),
                         horizontalArrangement = Arrangement.spacedBy(COLUMN_GAP),
                     ) {
-                        items(journeys, key = { it.id }) { journey ->
-                            val bounds = remember { arrayOfNulls<Rect>(1) }
+                        items(journeys, key = { it.id }, contentType = { CHART_COLUMN }) { journey ->
+                            // Where the column lies is asked for at the tap only: working out its bounds for
+                            // every frame of a scroll made a Rect per column and frame.
+                            val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
                             // When live times move a journey past another (see searchOrder), its
                             // column slides to its new place; pages that come in appear as before.
                             val moves = if (glide) {
@@ -1609,27 +2580,178 @@ private fun JourneyChart(
                             JourneyColumn(
                                 journey = journey,
                                 minuteOf = minuteOf,
-                                windowStart = windowStart,
-                                perMinute = perMinute,
-                                nowY = if (nowVisible) nowY else null,
+                                frame = frame,
+                                nowY = nowY,
                                 selected = journey.id == selectedId,
                                 level = levels?.get(journey.id),
+                                columnWidth = columnWidth,
                                 modifier = moves
                                     .width(columnWidth)
                                     .fillMaxHeight()
-                                    .boundsInto(bounds)
+                                    .onPlaced { placed[0] = it }
                                     .clip(RoundedCornerShape(20.dp))
                                     .clickable {
-                                        OpenOrigin.set(bounds[0])
-                                        onSelect(journey.id)
+                                        OpenOrigin.set(placed[0]?.takeIf { it.isAttached }?.boundsInRoot())
+                                        select(journey.id)
                                     },
                             )
                         }
                     }
                 }
             }
+            // The pinned total times as chips in the margin at an edge of the chart: they follow their
+            // columns sideways and stay put while the chart scrolls up and down.
+            if (bandTop > 0.dp || bandBottom > 0.dp) {
+                PinnedTotals(
+                    journeys = journeys,
+                    listState = listState,
+                    selectedId = selectedId,
+                    plotStart = AXIS_WIDTH,
+                    modifier = Modifier
+                        .align(if (bandTop > 0.dp) Alignment.TopStart else Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(PINNED_TOTAL_BAND),
+                )
+            }
         }
     }
+}
+
+/** [first] and [last] (indices, -1 for none) in one number, for a state that changes every frame. */
+private fun packedRange(first: Int, last: Int): Long = (first.toLong() shl 32) or (last.toLong() and 0xffffffffL)
+/**
+ * Whether the columns laid out at [first] and [last] of the row in [listState] are the
+ * journeys at these indices of [journeys] (by key): right after journeys were put in front,
+ * the layout still has the indices of before. Read without observing, allocates nothing.
+ */
+private fun rangeMatches(listState: LazyListState, journeys: List<Journey>, first: Int, last: Int): Boolean =
+    Snapshot.withoutReadObservation {
+        val items = listState.layoutInfo.visibleItemsInfo
+        var matches = true
+        for (i in items.indices) {
+            val item = items[i]
+            if (item.index == first || item.index == last) {
+                if (journeys.getOrNull(item.index)?.id != item.key) matches = false
+            }
+        }
+        matches
+    }
+
+private fun rangeFirst(range: Long): Int = (range shr 32).toInt()
+private fun rangeLast(range: Long): Int = range.toInt()
+
+// The steps of the corners of a block between its small and its full form (see BlockShape).
+private const val BLOCK_SHAPE_STEPS = 48
+
+/** The content type of the columns of the chart: all alike, so the row reuses any of them. */
+private const val CHART_COLUMN = "journey"
+
+/**
+ * The time window and the scale of the chart as they move. They glide every frame after a
+ * sideways scroll or a change of the scale; only laying out and drawing read them, so the chart
+ * is not composed again for every frame of that.
+ */
+@Stable
+private class ChartFrame(
+    private val start: State<Float>,
+    private val end: State<Float>,
+    private val scale: State<Dp>,
+    /** The room above the minute the window starts at: CHART_TOP, and the total times where they stand on top. */
+    val top: Dp = CHART_TOP,
+) {
+    val windowStart: Float get() = start.value
+    val windowEnd: Float get() = end.value
+    val perMinute: Dp get() = scale.value
+    val span: Float get() = (windowEnd - windowStart).coerceAtLeast(10f)
+
+    /** Where [minute] lies in the chart, from its top. */
+    fun y(minute: Float): Dp = top + perMinute * (minute - windowStart)
+}
+
+/** Places the element [top] down from the top of its parent; [top] is read while placing. */
+private fun Modifier.atTop(top: () -> Dp): Modifier = offset { IntOffset(0, top().roundToPx()) }
+
+/** Makes the element exactly [height] high, as Modifier.height does; [height] is read while measuring. */
+private fun Modifier.heightOf(height: () -> Dp): Modifier = layout { measurable, constraints ->
+    val wanted = constraints.constrainHeight(height().roundToPx().coerceAtLeast(0))
+    val placeable = measurable.measure(constraints.copy(minHeight = wanted, maxHeight = wanted))
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+}
+
+/** The lines of the axis across the chart, one per tick (see axisTicks), each 1 dp high. */
+private fun DrawScope.drawGrid(frame: ChartFrame) {
+    val ticks = axisTicks(frame.windowStart, frame.windowEnd, frame.perMinute)
+    val line = 1.dp.roundToPx().toFloat()
+    var tick = ticks.first
+    while (tick <= ticks.last) {
+        val y = frame.y(tick.toFloat()).roundToPx().toFloat()
+        drawRect(AppColors.Grid, topLeft = Offset(0f, y), size = Size(size.width, line))
+        tick += ticks.step
+    }
+}
+
+/** The line of "now" across an element: 2 dp high, its middle at [y]. */
+private fun DrawScope.drawNowLine(y: Dp) {
+    drawRect(
+        AppColors.Blue,
+        topLeft = Offset(0f, (y - 1.dp).roundToPx().toFloat()),
+        size = Size(size.width, 2.dp.roundToPx().toFloat()),
+    )
+}
+
+/**
+ * The times along the left of the chart, and the pill of "now". Only a tick that comes into or
+ * leaves the window composes it again; the labels move with the window while being placed.
+ */
+@Composable
+private fun ChartAxis(
+    frame: ChartFrame,
+    base: OffsetDateTime,
+    now: OffsetDateTime,
+    nowY: () -> Dp?,
+    modifier: Modifier = Modifier,
+) {
+    AllocProbe.begin(AllocProbe.CHART_AXIS)
+    val ticks by remember(frame) { derivedStateOf { axisTicks(frame.windowStart, frame.windowEnd, frame.perMinute) } }
+    val nowVisible by remember(nowY) { derivedStateOf { nowY() != null } }
+    Box(modifier = modifier) {
+        var tick = ticks.first
+        while (tick <= ticks.last) {
+            val minute = tick
+            key(minute) {
+                Text(
+                    text = base.plusMinutes(minute.toLong()).clock(),
+                    color = AppColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .atTop { frame.y(minute.toFloat()) - 7.dp }
+                        // A label that would collide with the "now" marker gives way to it.
+                        .drawWithContent { if (!givesWayToNow(frame.y(minute.toFloat()), nowY())) drawContent() },
+                )
+            }
+            tick += ticks.step
+        }
+        if (nowVisible) {
+            Box(
+                modifier = Modifier
+                    .atTop { (nowY() ?: 0.dp) - 9.dp }
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(AppColors.Blue)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            ) {
+                Text(
+                    text = now.clock(),
+                    color = AppColors.OnBlue,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+    AllocProbe.end(AllocProbe.CHART_AXIS)
 }
 
 /** A vertical row of dots: a stretch on foot. */
@@ -1735,96 +2857,120 @@ private fun changeInk(tightness: Tightness): Color = when (tightness) {
 private fun JourneyColumn(
     journey: Journey,
     minuteOf: (OffsetDateTime) -> Float,
-    windowStart: Float,
-    perMinute: Dp,
-    nowY: Dp?,
+    frame: ChartFrame,
+    nowY: () -> Dp?,
     selected: Boolean,
     level: TransferComfort?,
+    columnWidth: Dp,
     modifier: Modifier = Modifier,
 ) {
+    AllocProbe.begin(AllocProbe.COLUMN_COMPOSE)
     val legs = journey.legs
     val cancelled = journey.cancelled
+    // Notices about lifts raise the sign only for step-free travel (see warningAlerts).
+    val stepFree = rememberStepFree()
     val textColor = when {
         cancelled -> AppColors.Muted
         selected -> AppColors.OnBlueContainer
         else -> AppColors.Ink
     }
     val decoration = if (cancelled) TextDecoration.LineThrough else null
-    // A pick moves in softly: the ground turns blue and the blocks grow a little wider.
-    val ground by animateColorAsState(
+    // A pick moves in softly: the ground turns blue and the blocks grow a little wider. Both are
+    // read only while drawing and laying out: read while composing, every frame of the pick
+    // composed the column (and its block names) again, just as a journey opens.
+    val ground = animateColorAsState(
         // The same blue without opacity, so the fade does not pass through grey.
         if (selected) AppColors.BlueContainer else AppColors.BlueContainer.copy(alpha = 0f),
         spring(stiffness = Spring.StiffnessMediumLow),
         label = "columnGround",
     )
-    val inset by animateDpAsState(
-        if (selected) 2.dp else 5.dp,
+    val insetState = animateDpAsState(
+        if (selected) SELECTED_INSET else COLUMN_INSET,
         spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium),
         label = "columnInset",
     )
+    val inset = { insetState.value }
 
     // The times of the legs in minutes of the chart. Fresh live data moves them there with
-    // a spring, so a block that is late glides to its new place instead of jumping.
-    val starts = FloatArray(legs.size)
-    val ends = FloatArray(legs.size)
+    // a spring, so a block that is late glides to its new place instead of jumping. They are
+    // kept as states and read only where the column is laid out (see columnGeometry).
     val glide = spring<Float>(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)
+    val times = ArrayList<State<Float>>(legs.size * 2)
     legs.forEachIndexed { index, leg ->
         key(index) {
-            starts[index] = animateFloatAsState(minuteOf(leg.departure), glide, label = "legStart").value
-            ends[index] = animateFloatAsState(minuteOf(leg.arrival), glide, label = "legEnd").value
+            times.add(animateFloatAsState(minuteOf(leg.departure), glide, label = "legStart"))
+            times.add(animateFloatAsState(minuteOf(leg.arrival), glide, label = "legEnd"))
         }
     }
-    val pills = remember(journey) { pillChanges(journey) }
-    val parts = columnParts(legs, starts, ends, windowStart, perMinute, pills)
-    val firstTop = parts.firstOrNull()?.top ?: (CHART_TOP + perMinute * (starts.first() - windowStart))
-    val lastBottom = parts.lastOrNull()?.let { it.top + it.height } ?: firstTop
+    // How each change shows, by the change alone (see chartChanges); these get room of their own.
+    // Rated afresh when the transfer tuning or the walking pace changes (see ratingSettingsShown).
+    val ratingVersion = ratingSettingsShown.intValue
+    val changes = remember(journey, ratingVersion) { AllocProbe.measure(AllocProbe.CHART_CHANGES) { chartChanges(journey) } }
+    val pills = changes.keys
 
     // A ride that leaves late shows its "+2" above its time, as the delay setting says (see DelayDisplay).
     val display = LocalDelayDisplay.current
     val firstLeg = legs.first()
     val startDelay = firstLeg.departureDelayMinutes.takeIf { !cancelled && firstLeg.realtime && it > 0 }
     val startDelayShown = startDelay != null && display.showsDelay
-    val labelHeight = if (startDelayShown) 32.dp else 18.dp
+    // The total time on top takes a line of its own above the departure time in every column.
+    val totalTime = LocalChartTotalTime.current
+    val labelHeight = (if (startDelayShown) 32.dp else 18.dp) + chartRoomOf(totalTime, top = true)
+    // Short rides each in a block of their own, or a run of them as one (see ChartShortLegs).
+    val combine = ChartShortLegsSetting.load(LocalContext.current) == ChartShortLegs.Combine
 
-    // The dashed outline of the planned part of a late ride, by its place among the parts.
-    // It needs room above its block: below the times for the first ride, below the block before for the others.
-    val dashes = parts.mapIndexed { index, part ->
-        val delay = part.leg.departureDelayMinutes.toInt()
-        if (part.leg.walking || cancelled || delay <= 0) {
-            0.dp
-        } else {
-            val room = if (index == 0) part.top - labelHeight else part.top - (parts[index - 1].top + parts[index - 1].height)
-            val wanted = (perMinute * delay).coerceIn(6.dp, 28.dp)
-            if (room >= 6.dp) minOf(wanted, room) else 0.dp
+    // Where everything of the column lies right now: worked out again when the window, the scale
+    // or the time of a leg moves, and read only while the column is laid out and drawn.
+    // The same inputs as long as the legs and what they show are the same (the states of the
+    // times stay the same for the same legs): a column composed again for another reason (a pick,
+    // the clock) works out none of its geometry again.
+    val inputs = rememberUpdatedState(remember(legs, pills, labelHeight, cancelled, combine) { ColumnInputs(legs, times, pills, labelHeight, cancelled, combine) })
+    val geometryState = remember(frame) {
+        derivedStateOf {
+            AllocProbe.begin(AllocProbe.COLUMN_GEOMETRY)
+            val input = inputs.value
+            val count = input.legs.size
+            val made = columnGeometry(
+                input.legs,
+                FloatArray(count) { input.times[2 * it].value },
+                FloatArray(count) { input.times[2 * it + 1].value },
+                frame.windowStart,
+                frame.perMinute,
+                input.pills,
+                input.labelHeight,
+                input.cancelled,
+                frame.top,
+                input.combine,
+            )
+            AllocProbe.end(AllocProbe.COLUMN_GEOMETRY)
+            made
         }
     }
+    val geometry = { geometryState.value }
+    // What is shown at all: the column is composed again only when that changes.
+    val look by remember(geometryState) { derivedStateOf { geometryState.value.look() } }
+
     // The tightest change of the journey decides whether it is marked as risky, by the time to
     // spare less any walk, as its category does. Only real changes count: two rides of the
     // same trip (staying seated) are none.
-    val tightest = journeyTightness(journey)
-    // Every change rated within its journey, by the leg it leads to (see journeyChangesOf).
-    val changeRatings = remember(journey) { journeyChangesOf(journey).associate { it.nextIndex to it.tightness } }
-    var cancelTagShown = false
+    val tightest = remember(journey, ratingVersion) { journeyTightness(journey) }
     val showStops = LocalChartChangeStops.current
 
-    Box(modifier = modifier.background(ground)) {
-        // The line of "now" above the ground of the column and below everything else in it.
-        if (nowY != null) {
-            Box(
-                modifier = Modifier
-                    .offset(y = nowY - 1.dp)
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .background(AppColors.Blue),
-            )
-        }
+    Box(
+        modifier = modifier
+            .probed(AllocProbe.COLUMN_MEASURE, AllocProbe.COLUMN_DRAW)
+            .drawBehind { drawRect(ground.value) }
+            // The line of "now" above the ground of the column and below everything else in it.
+            .drawBehind { nowY()?.let { drawNowLine(it) } },
+    ) {
         // The triangle next to the departure time says: this journey has a disruption notice.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset(y = firstTop - (dashes.firstOrNull() ?: 0.dp) - labelHeight),
+                .atTop { geometry().departureTop },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (totalTime == ChartTotalTime.Above) TotalTimeText(journey, selected)
             if (startDelayShown && startDelay != null) {
                 Text(
                     text = stringResource(R.string.delay_short, startDelay.toInt()),
@@ -1839,7 +2985,7 @@ private fun JourneyColumn(
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (journey.warnings.isNotEmpty()) WarningMark(size = 12.dp)
+                if (alertingWarnings(journey.warnings, stepFree).isNotEmpty()) WarningMark(size = 12.dp)
                 Text(
                     text = (if (cancelled) journey.departure else display.clockOf(journey.departure, firstLeg.plannedDeparture)).clock(),
                     color = if (startDelay != null && !display.showsPlanned) AppColors.DelayRed else textColor,
@@ -1852,208 +2998,152 @@ private fun JourneyColumn(
             }
         }
 
-        parts.forEachIndexed { index, part ->
-            val leg = part.leg
-            if (leg.walking) {
-                Column(
-                    modifier = Modifier
-                        .offset(y = part.top)
-                        .fillMaxWidth()
-                        .height(part.height),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    WalkDots(modifier = Modifier.weight(1f))
-                    if (part.height >= WALK_LABEL) {
-                        WalkMark(
-                            minutes = minutesBetween(leg.departure, leg.arrival),
-                            color = if (selected) AppColors.OnBlueContainer else AppColors.Muted,
-                            unit = true,
-                            cycling = leg.cycling,
-                        )
-                    }
-                    WalkDots(modifier = Modifier.weight(1f))
-                }
-            } else {
-                // Only the ride that is cancelled is struck; the others of the journey still run.
-                val grey = leg.cancelled
-                val faded = cancelled && !grey
-                // From the small form to the full one by the height of the block, eased by a
-                // spring: zooming and dragging morph the name and the corners, never switch them.
-                val morphTarget = ((part.height - MIN_BLOCK) / (FULL_BLOCK - MIN_BLOCK)).coerceIn(0f, 1f)
-                val morph = key(index) {
-                    animateFloatAsState(morphTarget, spring(stiffness = Spring.StiffnessMediumLow), label = "blockMorph").value
-                }
-                val color = lineColor(leg)
-                val round = lerp(8.dp, BLOCK_ROUND, morph)
-                val dash = dashes[index]
-                if (dash > 0.dp) {
-                    // Where the ride should have been: an outline that runs on below the block.
-                    Box(
+        look.legIndices.forEachIndexed { index, legIndex ->
+            key(legIndex) {
+                val leg = legs[legIndex]
+                // This stretch as it lies right now; none for a moment where the stretches of the
+                // column changed and it is not composed anew yet.
+                val part = { geometry().parts.getOrNull(index)?.takeIf { it.index == legIndex } }
+                if (leg.walking) {
+                    Column(
                         modifier = Modifier
-                            .padding(horizontal = inset)
-                            .offset(y = part.top - dash)
+                            .atTop { part()?.top ?: 0.dp }
                             .fillMaxWidth()
-                            .height(dash + round)
-                            .drawBehind {
-                                val line = 2.dp.toPx()
-                                drawRoundRect(
-                                    color = color,
-                                    topLeft = Offset(line / 2f, line / 2f),
-                                    size = Size(size.width - line, size.height - line),
-                                    cornerRadius = CornerRadius(round.toPx()),
-                                    style = Stroke(
-                                        width = line,
-                                        pathEffect = PathEffect.dashPathEffect(
-                                            floatArrayOf(4.dp.toPx(), 3.dp.toPx()),
-                                            0f,
-                                        ),
-                                    ),
-                                )
-                            },
-                    )
-                }
-                val shape = if (dash > 0.dp) RoundedCornerShape(0.dp, 0.dp, round, round) else RoundedCornerShape(round)
-                // How much of the block lies behind the timetable at its end.
-                val lateEnd = leg.arrivalDelayMinutes.toInt()
-                val tail = if (grey || lateEnd <= 0) 0f else (perMinute * lateEnd / part.height).coerceIn(0.1f, 0.45f)
-                BoxWithConstraints(
-                    modifier = Modifier
-                        .padding(horizontal = inset)
-                        .offset(y = part.top)
-                        .fillMaxWidth()
-                        .height(part.height)
-                        .clip(shape)
-                        .then(if (faded) Modifier.alpha(FADED_RIDE_ALPHA) else Modifier)
-                        .then(
-                            when {
-                                grey -> Modifier
-                                    .background(AppColors.Chip)
-                                    .stripes(AppColors.Grid, step = 9.dp, width = 4.dp)
-                                    .border(2.dp, AppColors.Rail, shape)
-
-                                tail > 0f -> Modifier
-                                    .background(color)
-                                    .stripes(Color.White.copy(alpha = 0.6f), fromShare = 1f - tail, step = 6.dp, width = 2.5.dp)
-
-                                else -> Modifier.background(color)
-                            },
-                        )
-                        .then(if (leg.warnings.isNotEmpty() && !grey) Modifier.warningBand() else Modifier),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // A low block gets a smaller name, so even a ride of one minute says which line it is.
-                    // The size is that of every block ("S1", "U9") at most; a name too wide for its
-                    // block gets smaller until it fits, and below a smallest size a long-distance
-                    // train drops its number ("ICE 29" as "ICE") instead of being cut.
-                    // A rail replacement bus says so: "SEV S1", or "SEV" where that does not fit.
-                    val blockReplacement = leg.railReplacement
-                    val fullLabel = blockReplacement?.let { listOfNotNull(SEV_MARK, it.replaced).joinToString(" ") }
-                        ?: shortLine(leg.line) ?: "?"
-                    val blockLabel = fitBlockLabel(
-                        full = fullLabel,
-                        compact = if (blockReplacement != null) SEV_MARK else compactLine(leg.line) ?: fullLabel,
-                        maxSize = 11f + 4f * morph,
-                        room = maxWidth - BLOCK_LABEL_PADDING * 2,
-                    )
-                    // The cancelled ride itself says so, where its block has room for the tag.
-                    val tagHere = grey && !cancelTagShown && part.height >= CANCEL_TAG_BLOCK
-                    if (tagHere) cancelTagShown = true
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = blockLabel.first,
-                            color = if (grey) AppColors.Muted else onLineColor(color),
-                            textDecoration = if (grey) TextDecoration.LineThrough else null,
-                            fontSize = blockLabel.second.sp,
-                            lineHeight = (13f + 5f * morph).sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Clip,
-                            modifier = Modifier.padding(horizontal = BLOCK_LABEL_PADDING),
-                        )
-                        if (tagHere) {
-                            ColumnTag(
-                                text = stringResource(R.string.cancelled_ride_tag),
-                                ground = AppColors.DelayRed,
-                                ink = AppColors.OnDelayRed,
-                                modifier = Modifier.padding(top = 2.dp),
+                            .heightOf { part()?.height ?: 0.dp },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        WalkDots(modifier = Modifier.weight(1f))
+                        if (look.walkLabels.getOrElse(index) { false }) {
+                            WalkMark(
+                                minutes = minutesBetween(leg.departure, leg.arrival),
+                                color = if (selected) AppColors.OnBlueContainer else AppColors.Muted,
+                                unit = true,
+                                cycling = leg.cycling,
                             )
                         }
+                        WalkDots(modifier = Modifier.weight(1f))
                     }
-                }
-
-                // The gap to the next ride is the change: where it happens, or how tight it is.
-                val next = parts.getOrNull(index + 1)?.takeIf { !it.leg.walking }
-                if (next != null) {
-                    val gapMinutes = changeGapMinutes(leg, next.leg)
-                    // Staying on board is no change.
-                    val onBoard = leg.tripId != null && leg.tripId == next.leg.tripId
-                    val tightness = if (onBoard) {
-                        Tightness.Comfortable
-                    } else {
-                        changeRatings[legs.indexOfFirst { it === next.leg }] ?: changeTightness(leg, next.leg)
-                    }
-                    // Only risky and very risky changes get a pill, so the overview stays calm; the
-                    // minutes of every change stay in the detail.
-                    val risky = !onBoard && tightness.ordinal >= Tightness.Risky.ordinal
-                    val gapTop = part.top + part.height
-                    val gapHeight = next.top - dashes[index + 1] - gapTop
-                    val middle = gapTop + gapHeight / 2
-                    // A pill sits in the middle of the room reserved for it (see PILL_GAP); a dashed
-                    // outline of a late ride may lie behind it.
-                    val pillMiddle = gapTop + (next.top - gapTop) / 2
-                    when {
-                        // A change to or from a cancelled ride does not happen: nothing to rate.
-                        leg.cancelled || next.leg.cancelled -> Unit
-
-                        // The minutes of a risky change: a neutral pill in the room kept free for it.
-                        risky -> OverlapTag(
-                            minutes = gapMinutes,
-                            tightness = tightness,
+                } else if (look.combined.getOrElse(index) { 0 } > 0) {
+                    // A run of short rides as one block (see ChartShortLegs.Combine).
+                    val size = look.combined[index]
+                    val rides = remember(legs, legIndex, size) { legs.drop(legIndex).filter { !it.walking }.take(size) }
+                    CombinedBlock(
+                        rides = rides,
+                        part = part,
+                        inset = inset,
+                        named = look.named.getOrElse(index) { false },
+                        room = columnWidth - (if (selected) SELECTED_INSET else COLUMN_INSET) * 2 - BLOCK_LABEL_PADDING * 2,
+                    )
+                    ChangeMark(index, legIndex, look, changes, legs, geometry, selected, showStops)
+                } else {
+                    // Only the ride that is cancelled is struck; the others of the journey still run.
+                    val grey = leg.cancelled
+                    val faded = cancelled && !grey
+                    // From the small form to the full one by the height of the block, eased by a
+                    // spring: zooming and dragging morph the name and the corners, never switch them.
+                    val morph = rememberFollower(
+                        target = { part()?.let { ((it.height - MIN_BLOCK) / (FULL_BLOCK - MIN_BLOCK)).coerceIn(0f, 1f) } },
+                        stiffness = Spring.StiffnessMediumLow,
+                    )
+                    val color = lineColor(leg)
+                    val dashed = look.dashed.getOrElse(index) { false }
+                    val shape = remember(morph, dashed) { BlockShape({ morph.value }, squareTop = dashed) }
+                    if (dashed) {
+                        val dash = { if (part() != null) geometry().dashes[index] else 0.dp }
+                        // Where the ride should have been: an outline that runs on below the block.
+                        Box(
                             modifier = Modifier
-                                .zIndex(1f)
-                                .offset(y = pillMiddle - OVERLAP_TAG_HEIGHT / 2),
+                                .insetX(inset)
+                                .atTop { (part()?.top ?: 0.dp) - dash() }
+                                .fillMaxWidth()
+                                .heightOf { dash() + shape.round() }
+                                .drawWithCache {
+                                    val line = 2.dp.toPx()
+                                    val outline = Stroke(
+                                        width = line,
+                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()), 0f),
+                                    )
+                                    onDrawBehind {
+                                        drawRoundRect(
+                                            color = color,
+                                            topLeft = Offset(line / 2f, line / 2f),
+                                            size = Size(size.width - line, size.height - line),
+                                            cornerRadius = CornerRadius(shape.round().toPx()),
+                                            style = outline,
+                                        )
+                                    }
+                                },
                         )
-
-                        gapHeight >= 12.dp -> {
-                            // The name of the stop only where the setting asks for it (it crowds the
-                            // chart); the minutes then stand below it where there is room, else alone.
-                            val withStop = showStops
-                            val roomy = gapHeight >= 28.dp
-                            val twoLines = withStop && roomy
-                            Column(
-                                modifier = Modifier
-                                    .padding(horizontal = 2.dp)
-                                    .fillMaxWidth()
-                                    .offset(y = middle - (if (twoLines) 12.dp else 6.dp)),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                if (withStop) {
-                                    Text(
-                                        text = leg.to.briefStopName(),
-                                        color = if (selected) AppColors.OnBlueContainer else AppColors.Muted,
-                                        fontSize = 10.sp,
-                                        lineHeight = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                if (!withStop || roomy) {
-                                    // Coloured by the wait (see waitTone): a long one is a calm sand, not green.
-                                    val tone = if (onBoard) WaitTone.Neutral else waitTone(tightness, gapMinutes, changeNeed(leg, next.leg))
-                                    Text(
-                                        text = stringResource(R.string.in_minutes, gapMinutes),
-                                        color = toneColor(tone),
-                                        fontSize = 10.sp,
-                                        lineHeight = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                    )
-                                }
+                    }
+                    // How much of the block lies behind the timetable at its end.
+                    val lateEnd = leg.arrivalDelayMinutes.toInt()
+                    val tailed = !grey && lateEnd > 0
+                    // A plain box: the width of a block is known (the column less its inset on both
+                    // sides), and its height, place and corners are only read while it is laid out
+                    // and drawn, so zooming the chart or gliding its window composes nothing.
+                    Box(
+                        modifier = Modifier
+                            .insetX(inset)
+                            .atTop { part()?.top ?: 0.dp }
+                            .fillMaxWidth()
+                            // A ride too short for a block is a thin bar of its colour at its time.
+                            .heightOf { part()?.height?.coerceAtLeast(THIN_BAR) ?: 0.dp }
+                            .graphicsLayer {
+                                this.shape = shape.current()
+                                clip = true
                             }
+                            .then(if (faded) Modifier.alpha(FADED_RIDE_ALPHA) else Modifier)
+                            .then(
+                                when {
+                                    grey -> Modifier
+                                        .background(AppColors.Chip)
+                                        .stripes(AppColors.Grid, step = 9.dp, width = 4.dp)
+                                        .border(2.dp, AppColors.Rail, shape)
+
+                                    tailed -> Modifier
+                                        .background(color)
+                                        .stripes(
+                                            Color.White.copy(alpha = 0.6f),
+                                            fromShare = {
+                                                val height = part()?.height ?: 0.dp
+                                                1f - (frame.perMinute * lateEnd / height).coerceIn(0.1f, 0.45f)
+                                            },
+                                            step = 6.dp,
+                                            width = 2.5.dp,
+                                        )
+
+                                    else -> Modifier.background(color)
+                                },
+                            )
+                            .then(if (leg.warnings.any { warningAlerts(it, stepFree) } && !grey) Modifier.warningBand() else Modifier),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        // A low block gets a smaller name, so even a ride of one minute says which line it is.
+                        // The size is that of every block ("S1", "U9") at most; a name too wide for its
+                        // block gets smaller until it fits; a train keeps its kind and number ("RJ 174") however
+                        // narrow, a coach drops its operator ("Flix N1334" as "N1334").
+                        // A rail replacement bus says so: "SEV S1", or "SEV" where that does not fit.
+                        val blockReplacement = leg.railReplacement
+                        // Too low for its name: only its colour (see NAMED_BLOCK).
+                        if (look.named.getOrElse(index) { true }) {
+                        val fullLabel = blockReplacement?.let { listOfNotNull(SEV_MARK, it.replaced).joinToString(" ") }
+                            ?: badgeLine(leg.line) ?: "?"
+                        BlockLabel(
+                            full = fullLabel,
+                            compact = if (blockReplacement != null) SEV_MARK else compactLine(leg.line) ?: fullLabel,
+                            morph = morph,
+                            // By where the inset goes: the name is fitted once, not for each frame of a pick.
+                            room = columnWidth - (if (selected) SELECTED_INSET else COLUMN_INSET) * 2 - BLOCK_LABEL_PADDING * 2,
+                            ink = if (grey) AppColors.Muted else onLineColor(color),
+                            struck = grey,
+                            // The cancelled ride itself says so, where its block has room for the tag.
+                            tag = look.cancelTagPart == index,
+                            mode = if (blockReplacement != null) TravelMode.Bus else modeHint(leg.line, leg.product),
+                        )
                         }
                     }
+
+                    ChangeMark(index, legIndex, look, changes, legs, geometry, selected, showStops)
                 }
             }
         }
@@ -2063,7 +3153,7 @@ private fun JourneyColumn(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset(y = maxOf(CHART_TOP + perMinute * (ends.last() - windowStart), lastBottom) + 2.dp),
+                .atTop { geometry().arrivalTop },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -2075,9 +3165,11 @@ private fun JourneyColumn(
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
             )
+            // Right under the arrival time, above the delay and the rating of the changes.
+            if (totalTime == ChartTotalTime.Below) TotalTimeText(journey, selected)
             if (cancelled) {
                 // The cancelled ride had no room for its tag: it stands below the column.
-                if (!cancelTagShown) {
+                if (look.cancelTagPart < 0) {
                     ColumnTag(
                         text = stringResource(R.string.cancelled_ride_tag),
                         ground = AppColors.DelayRed,
@@ -2122,6 +3214,532 @@ private fun JourneyColumn(
             }
         }
     }
+    AllocProbe.end(AllocProbe.COLUMN_COMPOSE)
+}
+
+// The height of the line with the total time of a journey (see TotalTimeText).
+private val TOTAL_TIME_HEIGHT = 12.dp
+
+/**
+ * The room the chart keeps for the total times at its [top] (or its bottom) for [setting]: a
+ * line in every column where they stand above or below it, none otherwise, so no column jumps
+ * for it. Pinned totals take no room in the columns (see pinnedBandOf).
+ */
+internal fun chartRoomOf(setting: ChartTotalTime, top: Boolean): Dp = when (setting) {
+    ChartTotalTime.Above -> if (top) TOTAL_TIME_HEIGHT else 0.dp
+    ChartTotalTime.Below -> if (top) 0.dp else TOTAL_TIME_HEIGHT
+    ChartTotalTime.Off, ChartTotalTime.PinnedTop, ChartTotalTime.PinnedBottom -> 0.dp
+}
+
+// The height of the band with the pinned total times at an edge of the chart (see PinnedTotals).
+internal val PINNED_TOTAL_BAND = 18.dp
+
+/**
+ * The band the chart keeps at its [top] (or its bottom) edge for the pinned total times of
+ * [setting]: it stays put while the chart scrolls up and down, and the chart scrolls in the
+ * rest of the card, so the columns themselves are laid out as without it.
+ */
+internal fun pinnedBandOf(setting: ChartTotalTime, top: Boolean): Dp = when (setting) {
+    ChartTotalTime.PinnedTop -> if (top) PINNED_TOTAL_BAND else 0.dp
+    ChartTotalTime.PinnedBottom -> if (top) 0.dp else PINNED_TOTAL_BAND
+    ChartTotalTime.Off, ChartTotalTime.Above, ChartTotalTime.Below -> 0.dp
+}
+
+/**
+ * The total times of [journeys] at an edge of the chart, each as a small chip centred over its
+ * column as the row in [listState] lies right now (read while drawing: a scroll composes
+ * nothing and measures nothing), from [plotStart] on (the axis stays free). There is no band
+ * across the card: only the chips, in the margin the chart keeps for them. Near the left and
+ * right edge of the plot they fade out as the columns do (see fadeEdges), so none is cut hard;
+ * the picked column's chip takes the picked look of TotalTimeText.
+ */
+@Composable
+private fun PinnedTotals(
+    journeys: List<Journey>,
+    listState: LazyListState,
+    selectedId: String?,
+    plotStart: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val measurer = rememberTextMeasurer()
+    val labels = remember(journeys, context) { journeys.associate { it.id to durationText(context, journeyTotalMinutes(it)) } }
+    // Text laid out once per label, then reused for every frame of a scroll.
+    val laidOut = remember(measurer) { HashMap<String, TextLayoutResult>() }
+    val picked = rememberUpdatedState(selectedId)
+    // The same type as the total time in a column (see TotalTimeText).
+    val style = remember { TextStyle(fontSize = 9.sp, lineHeight = 12.sp, fontWeight = FontWeight.SemiBold) }
+    val chip = AppColors.Chip
+    val chipPicked = AppColors.BlueContainer
+    val muted = AppColors.Muted
+    val inkPicked = AppColors.OnBlueContainer
+    Box(
+        modifier = modifier.drawBehind {
+            val left = plotStart.toPx()
+            val right = size.width
+            val padX = PINNED_CHIP_PAD_X.toPx()
+            val chipHeight = PINNED_CHIP_HEIGHT.toPx().coerceAtMost(size.height)
+            val chipTop = (size.height - chipHeight) / 2f
+            val fade = PINNED_CHIP_FADE.toPx()
+            val corner = CornerRadius(chipHeight / 2f)
+            val items = listState.layoutInfo.visibleItemsInfo
+            for (i in items.indices) {
+                val item = items[i]
+                val id = item.key as? String ?: continue
+                val text = labels[id] ?: continue
+                val layout = laidOut.getOrPut(text) { measurer.measure(text, style, maxLines = 1, softWrap = false) }
+                val chipWidth = layout.size.width + padX * 2f
+                val chipLeft = left + item.offset + (item.size - chipWidth) / 2f
+                val chipRight = chipLeft + chipWidth
+                // Fully there while a fade length inside the plot, gone where it would touch its edge.
+                val alpha = minOf((chipLeft - left) / fade, (right - chipRight) / fade).coerceIn(0f, 1f)
+                if (alpha <= 0f) continue
+                val isPicked = id == picked.value
+                drawRoundRect(
+                    color = if (isPicked) chipPicked else chip,
+                    topLeft = Offset(chipLeft, chipTop),
+                    size = Size(chipWidth, chipHeight),
+                    cornerRadius = corner,
+                    alpha = alpha,
+                )
+                drawText(
+                    layout,
+                    color = if (isPicked) inkPicked else muted,
+                    topLeft = Offset(chipLeft + padX, chipTop + (chipHeight - layout.size.height) / 2f),
+                    alpha = alpha,
+                )
+            }
+        },
+    )
+}
+
+// A pinned total time's chip: its height, the room beside its text, and how far from the edge
+// of the plot it starts to fade (as the columns, see the LazyRow's fadeEdges).
+private val PINNED_CHIP_HEIGHT = 14.dp
+private val PINNED_CHIP_PAD_X = 6.dp
+private val PINNED_CHIP_FADE = 22.dp
+
+/**
+ * The total time of [journey] door to door, the walks to the first stop and from the last one
+ * included: from its first departure to its last arrival, in whole minutes, never below zero.
+ */
+internal fun journeyTotalMinutes(journey: Journey): Long =
+    java.time.Duration.between(journey.departure, journey.arrival).toMinutes().coerceAtLeast(0L)
+
+/**
+ * A total time for people, as [durationLabel] says it: [minutesOnly] below an hour ("48 min"),
+ * [wholeHours] on the hour ("2 Std") and [hoursAndMinutes] otherwise ("2 Std 23 min").
+ */
+internal fun totalTimeText(
+    minutes: Long,
+    minutesOnly: (Long) -> String,
+    wholeHours: (Long) -> String,
+    hoursAndMinutes: (Long, Long) -> String,
+): String {
+    val (hours, rest) = durationSpan(minutes)
+    return when {
+        hours == null -> minutesOnly(rest ?: 0L)
+        rest == null -> wholeHours(hours)
+        else -> hoursAndMinutes(hours, rest)
+    }
+}
+
+/** The total time of [journey] in a column of the chart: small, muted, one line (see ChartTotalTime). */
+@Composable
+private fun TotalTimeText(journey: Journey, selected: Boolean) {
+    Text(
+        text = durationLabel(journeyTotalMinutes(journey)),
+        color = if (selected) AppColors.OnBlueContainer else AppColors.Muted,
+        fontSize = 9.sp,
+        lineHeight = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        modifier = Modifier.height(TOTAL_TIME_HEIGHT),
+    )
+}
+
+// How far the blocks of a column stand in from its sides; a picked column's a little less.
+private val COLUMN_INSET = 5.dp
+private val SELECTED_INSET = 2.dp
+
+/** Pads the element by [inset] on the left and the right; [inset] is read while measuring. */
+private fun Modifier.insetX(inset: () -> Dp): Modifier = layout { measurable, constraints ->
+    val side = inset().roundToPx().coerceAtLeast(0)
+    val placeable = measurable.measure(constraints.offset(horizontal = -2 * side))
+    layout(constraints.constrainWidth(placeable.width + 2 * side), placeable.height) { placeable.place(side, 0) }
+}
+
+
+// The mark of a change whose minutes do not fit into its gap by the clock.
+private val CHANGE_DOT = 5.dp
+
+/**
+ * The change below stretch [index] (leg [legIndex]) of a journey column: its minutes, or its pill
+ * where it is risky, where the gap by the clock has room for them (see ColumnLook.gapRoom), else
+ * a small dot. Each change shows by itself alone (see chartChanges), the same in every column.
+ */
+@Composable
+private fun ChangeMark(
+    index: Int,
+    legIndex: Int,
+    look: ColumnLook,
+    changes: Map<Int, ChartChange>,
+    legs: List<Leg>,
+    geometry: () -> ColumnGeometry,
+    selected: Boolean,
+    showStops: Boolean,
+) {
+    // The gap to the next ride is the change: how long it is, and how tight. Each
+    // change shows by itself alone (see chartChanges), the same in every column.
+    val nextIndex = look.legIndices.getOrNull(index + 1)
+    val change = nextIndex?.let { changes[it] }
+    if (nextIndex != null && change != null && legs.getOrNull(nextIndex)?.walking == false) {
+        // How much of the label the gap holds where it lies by the clock (see ColumnLook.gapRoom).
+        val room = look.gapRoom.getOrElse(index) { 0 }
+        // The gap as it lies right now, while the column still has these stretches.
+        val gap = {
+            geometry().takeIf {
+                it.parts.getOrNull(index)?.index == legIndex && it.parts.getOrNull(index + 1)?.index == nextIndex
+            }
+        }
+        if (room == 0 || (change.pill && room < 2)) {
+            // No room in the true gap: a small dot of the tone of the change, pushing nothing.
+            val tone = if (change.pill) AppColors.DelayRed else toneColor(change.tone)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .atTop { (gap()?.gapMiddle(index) ?: 0.dp) - CHANGE_DOT / 2 }
+                    .height(CHANGE_DOT)
+                    .zIndex(1f)
+                    .drawBehind { drawCircle(tone, radius = size.height / 2f) },
+            )
+        } else if (change.pill) {
+            // The minutes of a risky change: a pill in the middle of the room kept
+            // free for it (see PILL_GAP); a dashed outline of a late ride may lie behind it.
+            OverlapTag(
+                minutes = change.minutes,
+                tightness = change.tightness,
+                modifier = Modifier
+                    .zIndex(1f)
+                    .atTop { (gap()?.pillMiddle(index) ?: 0.dp) - OVERLAP_TAG_HEIGHT / 2 },
+            )
+        } else {
+            // The name of the stop only where the setting asks for it (it crowds the
+            // chart) and the gap has room for it above the minutes, which always show.
+            val twoLines = showStops && look.roomyGaps.getOrElse(index) { false }
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 2.dp)
+                    .fillMaxWidth()
+                    .atTop { (gap()?.gapMiddle(index) ?: 0.dp) - (if (twoLines) 12.dp else 6.dp) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (twoLines) {
+                    Text(
+                        text = legs.subList(0, nextIndex).last { !it.walking }.to.briefStopName(),
+                        color = if (selected) AppColors.OnBlueContainer else AppColors.Muted,
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.in_minutes, change.minutes),
+                    color = toneColor(change.tone),
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+// The width of the strip of line colours in a block of combined short rides.
+private val COMBINED_STRIP = 5.dp
+
+/**
+ * A run of short [rides] as one block (see ChartShortLegs.Combine), where they lie by the clock
+ * ([part]): a strip of the colours of their lines, each band at its own times, a dot at each
+ * change between them, and their names ("M11 · S1 · U9") where [named] and they fit into
+ * [room], else the first with the count of the others ("M11 +3"). Read while drawing only.
+ */
+@Composable
+private fun CombinedBlock(rides: List<Leg>, part: () -> ColumnPart?, inset: () -> Dp, named: Boolean, room: Dp) {
+    val colors = remember(rides) { rides.map { lineColor(it) } }
+    val dot = AppColors.Muted
+    Box(
+        modifier = Modifier
+            .insetX(inset)
+            .atTop { part()?.top ?: 0.dp }
+            .fillMaxWidth()
+            .heightOf { part()?.height?.coerceAtLeast(THIN_BAR) ?: 0.dp }
+            .clip(RoundedCornerShape(6.dp))
+            .background(AppColors.Chip)
+            .drawBehind {
+                val bands = part()?.bands ?: return@drawBehind
+                val strip = COMBINED_STRIP.toPx()
+                val least = 1.dp.toPx()
+                for (k in colors.indices) {
+                    if (2 * k + 1 >= bands.size) break
+                    val top = bands[2 * k].dp.toPx()
+                    val bottom = maxOf(bands[2 * k + 1].dp.toPx(), top + least)
+                    drawRect(colors[k], topLeft = Offset(0f, top), size = Size(strip, bottom - top))
+                    if (k > 0) {
+                        val before = bands[2 * k - 1].dp.toPx()
+                        drawCircle(dot, radius = 1.5.dp.toPx(), center = Offset(strip / 2f, (before + top) / 2f))
+                    }
+                }
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (named) {
+            val names = remember(rides) { rides.map { badgeLine(it.line) ?: "?" } }
+            val fit = fitBlockLabel(
+                full = names.joinToString(" · "),
+                compact = names.first() + " +" + (names.size - 1),
+                room = room - COMBINED_STRIP - 3.dp,
+            )
+            Text(
+                text = fit.text,
+                color = AppColors.Ink,
+                fontSize = fit.size(11f).sp,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.padding(start = COMBINED_STRIP + 3.dp),
+            )
+        }
+    }
+}
+
+/** What the geometry of a journey column is worked out from (see columnGeometry). */
+private class ColumnInputs(
+    val legs: List<Leg>,
+    val times: List<State<Float>>,
+    val pills: Set<Int>,
+    val labelHeight: Dp,
+    val cancelled: Boolean,
+    val combine: Boolean,
+)
+
+/**
+ * The shape of a ride block: its corners grow from 8 dp to BLOCK_ROUND with [morph]; with
+ * [squareTop] (a late ride with its outline above) only the lower ones are round. [morph] is
+ * read where the shape is used, while drawing, so a morph composes nothing.
+ */
+private class BlockShape(private val morph: () -> Float, private val squareTop: Boolean) : Shape {
+    fun round(): Dp = lerp(8.dp, BLOCK_ROUND, morph())
+
+    // The shapes by quarter dp, made once each: a new shape every frame of a morph made the
+    // layer work out a new outline (and a path, for the square top) each frame.
+    private val made = arrayOfNulls<Shape>(BLOCK_SHAPE_STEPS + 1)
+
+    /** The shape as it is at this moment. */
+    fun current(): Shape {
+        val step = (((round() - 8.dp) / (BLOCK_ROUND - 8.dp)).coerceIn(0f, 1f) * BLOCK_SHAPE_STEPS).roundToInt()
+        made[step]?.let { return it }
+        val round = lerp(8.dp, BLOCK_ROUND, step / BLOCK_SHAPE_STEPS.toFloat())
+        val shape = if (squareTop) RoundedCornerShape(0.dp, 0.dp, round, round) else RoundedCornerShape(round)
+        made[step] = shape
+        return shape
+    }
+
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        current().createOutline(size, layoutDirection, density)
+}
+
+/**
+ * The name of the line in a ride block, sized by the [morph] of the block within [room] (see
+ * fitBlockLabel), and the tag of a cancelled ride below it where [tag]. The name is laid out
+ * once, at the size of the full form, and drawn smaller by the morph: a block that morphs (the
+ * chart zoomed, its window gliding) composes and lays out nothing again, it is only drawn.
+ */
+@Composable
+private fun BlockLabel(
+    full: String,
+    compact: String,
+    morph: State<Float>,
+    room: Dp,
+    ink: Color,
+    struck: Boolean,
+    tag: Boolean,
+    mode: TravelMode? = null,
+) {
+    AllocProbe.begin(AllocProbe.BLOCK_LABEL)
+    // The mode icon gives way before the name gets smaller than the smallest size: a train
+    // named by its number keeps the number ("174", "RJ 174"), the icon goes where room is short.
+    // Only a block with a mode icon measures its name a second time, with the icon.
+    val plainFit = fitBlockLabel(full = full, compact = compact, room = room, marked = false)
+    val markedFit = if (mode != null) fitBlockLabel(full = full, compact = compact, room = room, marked = true) else null
+    val markShown = markedFit != null && markedFit.fitted(BLOCK_LABEL_REFERENCE_SIZE) >= BLOCK_LABEL_MIN_SIZE
+    val fit = if (markShown) markedFit!! else plainFit
+    // The full form: 15 sp where the name fits, as at a morph of 1 (11 sp + 4 sp of morph).
+    val laidOut = fit.size(BLOCK_LABEL_REFERENCE_SIZE)
+    // Laid out at the full size, the name may be taller than a low block: it is measured as tall
+    // as it is and stands in the middle of the block, as the smaller name it is drawn as does.
+    Column(modifier = Modifier.wrapContentHeight(unbounded = true), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .graphicsLayer {
+                    // The size of the name at this moment of the morph, around its middle.
+                    val scale = fit.size(11f + 4f * morph.value) / laidOut
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .padding(horizontal = BLOCK_LABEL_PADDING),
+        ) {
+            // The kind of vehicle where the name does not tell it (see modeHint), as tall as the
+            // capitals of the name and growing with it.
+            if (mode != null && markShown) {
+                val mark = with(LocalDensity.current) { (laidOut * 0.8f).sp.toDp() }
+                val gap = with(LocalDensity.current) { (laidOut * 0.2f).sp.toDp() }
+                ModeMark(mode, ink, mark, Modifier.padding(end = gap))
+            }
+            Text(
+                text = fit.text,
+                color = ink,
+                textDecoration = if (struck) TextDecoration.LineThrough else null,
+                fontSize = laidOut.sp,
+                lineHeight = BLOCK_LABEL_FULL_LINE.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+            )
+        }
+        if (tag) {
+            ColumnTag(
+                text = stringResource(R.string.cancelled_ride_tag),
+                ground = AppColors.DelayRed,
+                ink = AppColors.OnDelayRed,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+    }
+    AllocProbe.end(AllocProbe.BLOCK_LABEL)
+}
+
+// The line height (sp) of the name of a line in a block of the full form; a smaller form is the
+// same line drawn smaller.
+private const val BLOCK_LABEL_FULL_LINE = 18f
+
+/**
+ * A value that follows [target] with a spring of [stiffness] without bounce, as
+ * animateFloatAsState does (a new target while it moves keeps its speed), but with the target
+ * read outside of composition: where the target moves every frame, as the height of a block
+ * while the window glides, nothing is composed again for it, only what reads the value is
+ * updated. A null target leaves the value going where it goes.
+ */
+@Composable
+private fun rememberFollower(target: () -> Float?, stiffness: Float): State<Float> {
+    val currentTarget = rememberUpdatedState(target)
+    val follower = remember { Follower(Snapshot.withoutReadObservation { target() } ?: 0f, stiffness) }
+    LaunchedEffect(follower) {
+        val scope = this
+        // One spring runs while the target moves: a new target only turns it (see Follower.aim),
+        // so no animation and no coroutine is started for each frame of a glide.
+        snapshotFlow {
+            AllocProbe.begin(AllocProbe.FOLLOWER_TARGET)
+            try {
+                currentTarget.value()
+            } finally {
+                AllocProbe.end(AllocProbe.FOLLOWER_TARGET)
+            }
+        }.filterNotNull().collect { goal -> follower.aim(goal, scope) }
+    }
+    return follower
+}
+
+/**
+ * The value of [rememberFollower]: it runs one spring towards the newest goal, frame by frame.
+ * A new goal while it runs starts the spring afresh from where the value is, with its speed, as
+ * an Animatable that is sent to a new target does, but without a new animation for each.
+ */
+@Stable
+private class Follower(initial: Float, stiffness: Float) : State<Float> {
+    private val shown = mutableFloatStateOf(initial)
+    override val value: Float get() = shown.floatValue
+
+    private val spring = FloatSpringSpec(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = stiffness)
+    private var goal = initial
+    private var running: Job? = null
+
+    /** Sends the value towards [target], with the spring that runs in [scope] or a new one. */
+    fun aim(target: Float, scope: CoroutineScope) {
+        goal = target
+        if (running?.isActive != true && target != shown.floatValue) running = scope.launch { run() }
+    }
+
+    // The spring that runs (see run): where it started, with what speed, to where, and when.
+    private var from = 0f
+    private var speed = 0f
+    private var to = 0f
+    private var start = -1L
+    private var last = 0L
+
+    private suspend fun run() {
+        // As every animation: slower or faster with the animation scale of the system, at once without animations.
+        val durationScale = coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f
+        from = shown.floatValue
+        speed = 0f
+        to = goal
+        start = -1L
+        last = 0L
+        while (true) {
+            val frame = withFrameNanos { it }
+            AllocProbe.begin(AllocProbe.FOLLOWER)
+            val arrived = try {
+                step(frame, durationScale)
+            } finally {
+                AllocProbe.end(AllocProbe.FOLLOWER)
+            }
+            if (arrived) return
+        }
+    }
+
+    /** One frame of the spring at [frame] (nanoseconds); true when it has arrived and stops. */
+    private fun step(frame: Long, durationScale: Float): Boolean {
+        if (durationScale <= 0f) {
+            shown.floatValue = goal
+            return true
+        }
+        if (start < 0L) {
+            start = frame
+            last = frame
+        }
+        if (goal != to) {
+            // A new goal: on from where the value was at the last frame, with its speed there.
+            val played = ((last - start) / durationScale).toLong()
+            val at = spring.getValueFromNanos(played, from, to, speed)
+            speed = spring.getVelocityFromNanos(played, from, to, speed)
+            from = at
+            to = goal
+            start = last
+        }
+        val play = ((frame - start) / durationScale).toLong()
+        last = frame
+        if (play >= spring.getDurationNanos(from, to, speed)) {
+            shown.floatValue = to
+            if (goal == to) return true
+            // A goal came in just as the spring arrived: on to it from rest.
+            from = to
+            speed = 0f
+            to = goal
+            start = frame
+        } else {
+            shown.floatValue = spring.getValueFromNanos(play, from, to, speed)
+        }
+        return false
+    }
 }
 
 @Composable
@@ -2133,7 +3751,10 @@ private fun JourneyList(
     onSelect: (Int) -> Unit,
     scroll: ScrollState,
     modifier: Modifier = Modifier,
+    rowTops: MutableMap<String, Int> = mutableMapOf(),
 ) {
+    // Notices about lifts raise the sign only for step-free travel (see warningAlerts).
+    val stepFree = rememberStepFree()
     GlassSurface(modifier = modifier, shape = RoundedCornerShape(32.dp)) {
         Column(
             modifier = Modifier
@@ -2153,6 +3774,8 @@ private fun JourneyList(
                     val bounds = remember { arrayOfNulls<Rect>(1) }
                     Column(
                         modifier = Modifier
+                            // Where the row lies in the list, before it glides there (see ConnectionsState.rowTops).
+                            .onPlaced { rowTops[journey.id] = it.positionInParent().y.roundToInt() }
                             .glideToPlace(glide)
                             .then(appearModifier(index))
                             .fillMaxWidth()
@@ -2181,7 +3804,7 @@ private fun JourneyList(
                                     textDecoration = if (cancelled) TextDecoration.LineThrough else null,
                                 )
                             }
-                            if (journey.warnings.isNotEmpty()) {
+                            if (alertingWarnings(journey.warnings, stepFree).isNotEmpty()) {
                                 WarningMark(modifier = Modifier.padding(end = 8.dp))
                             }
                             MinutesPill(
@@ -2199,7 +3822,7 @@ private fun JourneyList(
                             Text(
                                 text = stringResource(
                                     R.string.duration_and_transfers,
-                                    journey.durationMinutes,
+                                    durationLabel(journey.durationMinutes),
                                     journey.transfers,
                                 ),
                                 color = AppColors.Muted,
@@ -2257,15 +3880,19 @@ private fun JourneyDetail(
     handle: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    AllocProbe.begin(AllocProbe.DETAIL_COMPOSE)
     val scroll = rememberScrollState()
+    // Notices about lifts are listed quietly, without the sign, unless the traveller travels step-free.
+    val stepFree = rememberStepFree()
     // Another journey is read from its top.
     LaunchedEffect(journey.id) { if (scroll.value != 0) scroll.animateScrollTo(0) }
     // The ride that shows all its stops, by its place among the legs; another journey starts folded.
     var openRide by remember(journey.id) { mutableStateOf<Int?>(null) }
-    val changes = remember(journey) { journeyChanges(journey) }
+    val ratingVersion = ratingSettingsShown.intValue
+    val changes = remember(journey, ratingVersion) { journeyChanges(journey) }
     // The time of every change, by the index of the ride it leads to: the same numbers as the
     // choice of connections, the trip companion and the watch show (see changeTime).
-    val changeTimes = remember(journey) { journeyChangesOf(journey).associate { it.nextIndex to it.time } }
+    val changeTimes = remember(journey, ratingVersion) { journeyChangesOf(journey).associate { it.nextIndex to it.time } }
     // Where to board for a change needs the stop before it, which the search leaves out: a
     // journey with a change between two trains gets its stops once when it is opened, as long
     // as boarding hints are on.
@@ -2348,7 +3975,7 @@ private fun JourneyDetail(
                         Text(
                             text = stringResource(
                                 R.string.duration_and_transfers,
-                                journey.durationMinutes,
+                                durationLabel(journey.durationMinutes),
                                 journey.transfers,
                             ),
                             color = AppColors.Muted,
@@ -2425,7 +4052,8 @@ private fun JourneyDetail(
                         )
                     }
                 }
-                WarningSummary(journey.warnings)
+                WarningSummary(alertingWarnings(journey.warnings, stepFree))
+                QuietNotices(quietWarnings(journey.warnings, stepFree))
                 FareZoneNote(journey)
                 JourneyLiftWarning(journey)
                 val legs = journey.legs
@@ -2496,8 +4124,12 @@ private fun JourneyDetail(
                                 // Two stop positions of buses or trams apart: both and the way between them, folded at first.
                                 if (hasSpotWalkMap(leg, next)) {
                                     FoldedMap(indent = 84.dp) { SpotWalkMap(leg, next, onFocusWalk) }
+                                } else if (!hasBoardingPositionMap(next) && remember(leg, next) { hasChangeMap(leg, next) }) {
+                                    // Any other change to another place, as from a stop in the street to a platform.
+                                    FoldedMap(indent = 84.dp) { ChangeWalkMap(leg, next, onFocusWalk) }
                                 }
                                 TransferChoice(journey.id, changes.firstOrNull { it.keepLegs == index + 1 }, offers, onAdapt)
+                                AltChangeOffers(journey, index + 1, onAdapt)
                             }
                         }
 
@@ -2526,11 +4158,15 @@ private fun JourneyDetail(
                                 if (!before.walking && !after.walking) {
                                     ChangeHint(arriving = before, next = after, walkMinutes = minutes, modifier = Modifier.padding(start = 84.dp))
                                 }
-                                // The walk of the change as a small map, folded at first.
-                                if (minutes > 0 && hasWalkMap(leg)) {
-                                    FoldedMap(indent = 84.dp) { WalkMap(leg, onFocusWalk) }
+                                // The walk of the change as a small map, folded at first; where the walk has
+                                // none of its own (no minutes, no way) but leads elsewhere, as to another stop
+                                // position of the same stop, the map of the change (see changeMapKind).
+                                val mapKind = remember(before, after, leg, minutes) { changeWalkMapKind(before, after, leg, minutes) }
+                                if (mapKind != ChangeMapKind.None) {
+                                    FoldedMap(indent = 84.dp) { ChangeMapOf(mapKind, before, after, leg, onFocusWalk) }
                                 }
                                 TransferChoice(journey.id, changes.firstOrNull { it.keepLegs == index }, offers, onAdapt)
+                                AltChangeOffers(journey, index + 1, onAdapt)
                             } else if (minutes > 0) {
                                 if (leg.cycling) {
                                     // The bike combo: by bike to the first stop or from the last one, with its length.
@@ -2558,7 +4194,99 @@ private fun JourneyDetail(
             }
         }
     }
+    AllocProbe.end(AllocProbe.DETAIL_COMPOSE)
 }
+
+/**
+ * Works out, off the main thread, what the page of [journey] asks for first and what is kept
+ * once worked out: its rated changes with their times (see journeyChangesOf) and where to board
+ * for each of them (see changePositionOf). The page then finds them ready in its first frame.
+ */
+private fun warmJourneyPage(journey: Journey) {
+    for (change in journeyChangesOf(journey)) {
+        change.time
+        changePositionOf(change.arriving, change.next)
+    }
+}
+
+// How long a tap on a column waits for warmJourneyPage at most before the page opens anyway.
+private const val PAGE_WARM_MILLIS = 60L
+
+// The page of a journey grows out of its column in this time, and shrinks back into it in this.
+private const val PAGE_GROW_MILLIS = 420
+private const val PAGE_SHRINK_MILLIS = 360
+
+// The emphasized easing of Material: quick to leave, long and soft to arrive.
+private val EmphasizedEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+/**
+ * Lets the page of a journey grow out of the column it was opened from ([origin], in the box
+ * the page fills, as it lay when the column was tapped)
+ * when it comes in, and shrink back into it when it goes: a container transform. The page is
+ * laid out once at its full size and only drawn moved, scaled, faded and rounded (a graphics
+ * layer), so no frame of the way lays anything out again. Material's emphasized easing over
+ * PAGE_GROW_MILLIS (PAGE_SHRINK_MILLIS back) instead of a spring: the page arrives softly and
+ * does not overshoot its own size. Without an origin or animations it is left alone.
+ */
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+private fun Modifier.growFromColumn(scope: AnimatedVisibilityScope, origin: Rect?): Modifier {
+    if (origin == null || !rememberAnimationsOn()) return this
+    val grow = scope.transition.animateFloat(
+        transitionSpec = {
+            if (targetState == EnterExitState.Visible) {
+                tween(PAGE_GROW_MILLIS, easing = EmphasizedEasing)
+            } else {
+                tween(PAGE_SHRINK_MILLIS, easing = EmphasizedEasing)
+            }
+        },
+        label = "growFromColumn",
+    ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+    // The shapes of the corners by whole dp, made once each: the layer takes a new outline only
+    // from another shape (one shape reading a changing radius would keep its first outline),
+    // and a new RoundedCornerShape every frame is garbage.
+    val shapes = remember { arrayOfNulls<Shape>(GROW_CORNER_SHAPES) }
+    return this.graphicsLayer {
+        // The progress is read first, always: the layer is worked out anew only when what the
+        // block read changes. (It used to wait for the bounds of the page from
+        // onGloballyPositioned first; those come after the first layer is made, so the block
+        // read nothing, never ran again and the page stood there whole from its first frame.)
+        val progress = grow.value
+        if (progress >= 1f) return@graphicsLayer
+        // Only on the way out of the column (a real open) and back into it (closed without a
+        // gesture): a page that stays after a back gesture was called off is whole, it never
+        // grows out of the column again.
+        val from = scope.transition.currentState
+        val to = scope.transition.targetState
+        // From PreEnter whatever the target: an open cut short shrinks back instead of standing whole.
+        val opening = from == EnterExitState.PreEnter
+        val closing = from == EnterExitState.Visible && to == EnterExitState.PostExit
+        if (!opening && !closing) return@graphicsLayer
+        // The page fills the box the origin is measured in: its size is all it needs.
+        val page = size
+        if (page.width <= 0f || page.height <= 0f) {
+            alpha = 0f
+            return@graphicsLayer
+        }
+        val rest = 1f - progress
+        transformOrigin = TransformOrigin(0f, 0f)
+        scaleX = (origin.width / page.width) * rest + progress
+        scaleY = (origin.height / page.height) * rest + progress
+        translationX = origin.left * rest
+        translationY = origin.top * rest
+        // The content comes in over the first third of the way, as the column turns into the page.
+        alpha = (progress / 0.35f).coerceIn(0f, 1f)
+        // From the corners of the column to those of the page, as they show on the screen
+        // (the layer scales them with the page).
+        val shown = (20f + 12f * progress) / kotlin.math.sqrt(scaleX * scaleY).coerceAtLeast(0.05f)
+        val radius = kotlin.math.round(shown).toInt().coerceIn(0, GROW_CORNER_SHAPES - 1)
+        shape = shapes[radius] ?: RoundedCornerShape(radius.dp).also { shapes[radius] = it }
+        clip = true
+    }
+}
+
+// The most corner radii (dp) growFromColumn keeps a shape for; larger ones are drawn this large.
+private const val GROW_CORNER_SHAPES = 257
 
 /** The main action of the detail card as a compact blue pill: follow this journey. */
 @Composable
@@ -2630,6 +4358,37 @@ private fun JourneyMenu(
  * loaded: tighter and more relaxed ones around the chosen one. Picking another one swaps
  * the rest of the journey for it.
  */
+/**
+ * The other stops where the very same rides can be changed, under the change before the leg
+ * [nextLeg] (see Journey.altChanges): "Change also possible at … · 3 min walk · normal"; a tap
+ * puts that variant in place of the journey (see switchToAltChange).
+ */
+@Composable
+private fun AltChangeOffers(journey: Journey, nextLeg: Int, onAdapt: (Int, Journey) -> Unit) {
+    if (journey.altChanges.isEmpty()) return
+    val change = journey.legs.take(nextLeg).count { !it.walking } - 1
+    for (alt in journey.altChanges) {
+        if (alt.changeIndex != change) continue
+        val rating = stringResource(tightnessName(alt.rating))
+        val stop = alt.at.plainStopName()
+        Text(
+            text = if (alt.walkMinutes > 0) {
+                stringResource(R.string.alt_change_offer, stop, alt.walkMinutes, rating)
+            } else {
+                stringResource(R.string.alt_change_offer_no_walk, stop, rating)
+            },
+            color = AppColors.Blue,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .padding(start = 76.dp, top = 2.dp, bottom = 2.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(role = Role.Button) { onAdapt(ALT_CHANGE_SWITCH, switchToAltChange(journey, alt)) }
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+        )
+    }
+}
+
 @Composable
 private fun TransferChoice(
     journeyId: String,
@@ -2640,8 +4399,12 @@ private fun TransferChoice(
     if (change == null) return
     val options = connectionOptions(change, offers[offerKey(journeyId, change.keepLegs)])
     if (options.size < 2) return
-    Column(modifier = appearModifier(0), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        ConnectionChips(change = change, options = options, onSwitch = { option -> onAdapt(change.keepLegs, option) })
+    // Keyed by the journey and its change: the choice of another journey comes in with its own
+    // appearance, instead of taking over the place (and the finished appearance) of the one before.
+    key(journeyId, change.keepLegs) {
+        Column(modifier = appearModifier(0), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ConnectionChips(change = change, options = options, onSwitch = { option -> onAdapt(change.keepLegs, option) })
+        }
     }
 }
 
@@ -2870,15 +4633,18 @@ private fun RideRow(
                         )
                     } else {
                         // The whole name with the train number ("FEX 021857") where the badge leaves it out.
-                        val towards = if (direction == null) "" else stringResource(R.string.direction, direction.plainStopName())
+                        // An arrow before the destination saves room; read out as "towards …".
+                        val towards = if (direction == null) "" else stringResource(R.string.direction_arrow, direction.plainStopName())
+                        val spokenTowards = if (direction == null) "" else stringResource(R.string.direction, direction.plainStopName())
                         val whole = fullLineName(leg.line)
+                        val spoken = if (whole == null) spokenTowards else listOf(whole, spokenTowards).filter { it.isNotEmpty() }.joinToString(" · ")
                         Text(
                             text = if (whole == null) towards else listOf(whole, towards).filter { it.isNotEmpty() }.joinToString(" · "),
                             color = AppColors.Muted,
                             fontSize = 13.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).semantics { contentDescription = spoken },
                         )
                     }
                     Chevron(open = open)
@@ -3020,14 +4786,17 @@ private fun StopLine(
                 if (estimated) EstimatedMark()
                 Text(text = note, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1)
             }
-            if (place != null) MoreDots(label = menuLabel, onClick = { menuOpen = true }, size = if (strong) 32.dp else 28.dp)
-        }
-        if (place != null) {
-            StopMenu(
-                open = menuOpen,
-                onDismiss = { menuOpen = false },
-                onAction = { action -> onStopAction(place, action) },
-            )
+            // The menu opens at the dots, on the right (see StopMenu).
+            if (place != null) {
+                Box {
+                    MoreDots(label = menuLabel, onClick = { menuOpen = true }, size = if (strong) 32.dp else 28.dp)
+                    StopMenu(
+                        open = menuOpen,
+                        onDismiss = { menuOpen = false },
+                        onAction = { action -> onStopAction(place, action) },
+                    )
+                }
+            }
         }
     }
 }

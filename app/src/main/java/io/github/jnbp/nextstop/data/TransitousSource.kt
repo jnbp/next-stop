@@ -78,9 +78,12 @@ class TransitousSource(
     @Volatile
     var searchBias: Pair<Double, Double>? = null
 
-    override suspend fun searchStops(query: String, results: Int): List<Stop> =
+    override suspend fun searchStops(query: String, results: Int): List<Stop> = searchStopsNear(query, results, searchBias)
+
+    /** Places that match [query], looking first around [near]; with null without any preference of place. */
+    suspend fun searchStopsNear(query: String, results: Int, near: Pair<Double, Double>?): List<Stop> =
         withContext(Dispatchers.IO) {
-            val bias = searchBias?.let { "&place=%.2f,%.2f".format(Locale.ROOT, it.first, it.second) } ?: ""
+            val bias = near?.let { "&place=%.2f,%.2f".format(Locale.ROOT, it.first, it.second) } ?: ""
             val json = JSONArray(
                 get("/api/v1/geocode?text=${encode(query)}&numResults=$results&language=$language$bias", CACHE_PLACES_MILLIS),
             )
@@ -141,7 +144,6 @@ class TransitousSource(
             val passed = Duration.between(departure, moment).toMillis().coerceIn(0, total)
             return pointAlong(shape, passed.toDouble() / total)
         }
-        val path = listOf(now, now.plusSeconds(15), now.plusSeconds(30)).map { at(it) }.distinct()
         val mode = segment.text("mode") ?: ""
         val line = rapidLineName(
             composeLineName(
@@ -155,8 +157,17 @@ class TransitousSource(
             ),
             productKey(mode),
         )
+        val product = classifyProduct(productKey(mode), line)
+        val path = if (isStraightRoadHop(product, shape)) {
+            // A bus hop without a shape (a rail replacement, often) is a straight line through the
+            // fields: the bus stands at the stop it left until halfway, then at the next one.
+            val passed = Duration.between(departure, now).toMillis()
+            listOf(if (passed < total / 2) shape.first() else shape.last())
+        } else {
+            listOf(now, now.plusSeconds(15), now.plusSeconds(30)).map { at(it) }.distinct()
+        }
         LineColors.noteProvider(
-            line, classifyProduct(productKey(mode), line),
+            line, product,
             segment.text("routeColor") ?: trip.text("routeColor"),
             segment.text("routeTextColor") ?: trip.text("routeTextColor"),
             path.firstOrNull(),
@@ -164,7 +175,7 @@ class TransitousSource(
         return Vehicle(
             tripId = tripId,
             line = line ?: "?",
-            product = classifyProduct(productKey(mode), line),
+            product = product,
             direction = "",
             path = path,
             nextStop = segment.optJSONObject("to")?.text("name"),
@@ -847,6 +858,7 @@ class TransitousSource(
             val known = cache[path]
             if (known != null && now - known.first < keepMillis) return known.second
         }
+        val started = System.nanoTime()
         val connection = URL(baseUrl + path).openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = 10_000
@@ -854,6 +866,7 @@ class TransitousSource(
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("User-Agent", userAgent)
             val code = connection.responseCode
+            logHttpAnswer("transitous", path, code, started)
             if (code !in 200..299) throw HttpStatusException(code)
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             synchronized(cache) { cache[path] = System.currentTimeMillis() to body }
@@ -906,6 +919,9 @@ private const val COMBO_CYCLING_SPEED = "4.2"
 
 // Places saved from the former DB source carry their position in place of an id (see AppPrefs).
 private const val POSITION_ID_PREFIX = "pos:"
+
+/** A stop id that stands for the stops around a position (see stopQuery), for a place of another provider. */
+internal fun positionStopId(latitude: Double, longitude: Double): String = "$POSITION_ID_PREFIX$latitude,$longitude"
 
 private fun isPositionId(id: String): Boolean = id.startsWith(POSITION_ID_PREFIX) || id.startsWith("address:")
 
@@ -986,7 +1002,7 @@ private fun lineName(item: JSONObject): String? = rapidLineName(composeLineName(
  * from the display name, the route names, and last from the mode and the operator.
  * Other lines keep the short name of the route or what MOTIS shows.
  */
-private fun composeLineName(
+internal fun composeLineName(
     mode: String?,
     route: String?,
     number: String?,
@@ -1002,11 +1018,22 @@ private fun composeLineName(
     val shown = display?.trim()?.takeIf { it.isNotEmpty() && !isProductWord(it) }
     val shortLong = longName?.trim()?.takeIf { it.length in 1..5 && it.any { char -> char.isDigit() } && !it.contains(' ') }
     val categoryName = category?.trim()?.takeIf { it.isNotEmpty() }
+    // A FlixBus by the code of its line ("N1334", "260"): "FlixBus N1334" (see flixLineName).
+    if (mode == "COACH" && agency.orEmpty().contains("Flix", ignoreCase = true)) {
+        val code = routeName ?: shown ?: trip
+        return if (code == null || code.contains("flix", ignoreCase = true) || code.startsWith("FLX", ignoreCase = true)) {
+            code ?: "FlixBus"
+        } else {
+            "FlixBus $code"
+        }
+    }
     if (mode in TRAIN_MODES || mode == "COACH") {
-        val kind = categoryName?.takeIf { it.none { char -> char.isDigit() } }
-            ?: kindOf(shown) ?: kindOf(routeName) ?: kindOf(longName) ?: defaultKind(mode, agency)
+        val kind = trainKindOf(categoryName) ?: categoryName?.takeIf { it.none { char -> char.isDigit() } }
+            ?: kindOf(shown) ?: kindOf(routeName) ?: kindOf(longName)
+            ?: trainKindOf(longName) ?: trainKindOf(agency) ?: defaultKind(mode, agency)
         val routeIsNumber = routeName != null && routeName.all { it.isDigit() }
         val tripIsNumber = trip != null && trip.all { it.isDigit() }
+        val routeKind = routeName?.takeIf { it.none { char -> char.isDigit() } }?.let { trainKindOf(it) }
         when {
             // The route names only the kind: the trip number goes behind it.
             routeName != null && kind != null && routeName.equals(kind, ignoreCase = true) && tripIsNumber ->
@@ -1014,6 +1041,15 @@ private fun composeLineName(
             routeName != null && routeIsNumber && kind != null -> return "$kind $routeName"
             routeName == null && kind != null && shown != null && shown.all { it.isDigit() } -> return "$kind $shown"
             routeName == null && shown == null && kind != null && tripIsNumber -> return "$kind $trip"
+            // The route names only the kind in words ("Railjet", "EuroCity"): the kind's code
+            // and the number, from the trip or the shown name ("RJ 174"), never the word alone.
+            // Trains only: a coach named "Intercity" is no IC.
+            mode in TRAIN_MODES && routeKind != null -> {
+                val code = routeKind
+                if (tripIsNumber) return "$code $trip"
+                if (shown != null && shown.all { it.isDigit() }) return "$code $shown"
+                if (shown != null && shown.any { it.isDigit() } && kindOf(shown) != null) return shown
+            }
         }
     }
     if (routeName == null && shown == null && shortLong == null) {

@@ -109,9 +109,31 @@ fun stopNameParts(name: String, home: String? = WatchTown.reference): StopNamePa
         parts.add(0, match.groupValues[2].trim().replace(NAME_STREET_WITHOUT_DOT, "."))
         rest = match.groupValues[1].trim()
     }
+    // Generic English words at the end came in the watch's language already where the provider's
+    // answer was read (see localStopTerms, which knows there whether the stop lies in Germany).
+    // "S+U Zoologischer Garten Bhf" as "S+U Zoologischer Garten": the S+U says it is a station.
+    rest = withoutRedundantStationWord(rest)
     val town = nameTownInBrackets(rest)
-    val title = if (town != null && sameTown(town.second, home)) town.first else rest
+    val title = when {
+        town != null && sameTown(town.second, home) -> town.first
+        else -> withoutTownAfterComma(rest, home)
+    }
     return StopNameParts(title.ifEmpty { name.trim() }, parts.filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { null })
+}
+
+// "Stop, Town" at the end of a name.
+private val NAME_TOWN_AFTER_COMMA = Regex("""^(.*\S),\s*([^,()\[\]]+)$""")
+
+/** [name] without ", Town" at its end where that town is [home] ("Rathaus, Springfield" in Springfield); else as it is. */
+private fun withoutTownAfterComma(name: String, home: String?): String {
+    val match = NAME_TOWN_AFTER_COMMA.matchEntire(name) ?: return name
+    return if (sameTown(match.groupValues[2].trim(), home)) match.groupValues[1].trim() else name
+}
+
+/** The stop [name] in one line for a list: its title as shown (see [stopNameParts]), then the part of the station. */
+fun listedStopName(name: String, home: String? = WatchTown.reference): String {
+    val parts = stopNameParts(name, home)
+    return if (parts.part == null) parts.title else parts.title + " · " + parts.part
 }
 
 /**

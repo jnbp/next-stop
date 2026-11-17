@@ -12,10 +12,10 @@ class StationSignsTest {
 
     // Berlin Hauptbahnhof as the VBB lists it: the station, its deep platforms 150 m south
     // (900003200, "[Gleis 1-8]") and, from the offline data, the bus and tram stop area in the
-    // street to the north.
+    // street to the north (150 m from the station's sign: a sign of its own).
     private val hbf = Stop("900003201", "S+U Berlin Hauptbahnhof", 52.525847, 13.368924, 20, rail + setOf("bus", "tram"))
     private val deep = Stop("900003200", "S+U Berlin Hauptbahnhof [Gleis 1-8]", 52.524500, 13.369400, 10, setOf("regional", "express"))
-    private val street = Stop("osm:a:900003201:hauptbahnhof", "S+U Hauptbahnhof", 52.526564, 13.369297, null, setOf("bus", "tram"))
+    private val street = Stop("osm:a:900003201:hauptbahnhof", "S+U Hauptbahnhof", 52.527200, 13.369297, null, setOf("bus", "tram"))
 
     @Test
     fun hauptbahnhofIsOneRailSignAndTheStreetStopStays() {
@@ -84,7 +84,7 @@ class StationSignsTest {
         val near = Stop("c", "S Bahnhofstr.", 52.50, 13.40, null, setOf("suburban"))
         val far = Stop("d", "S Bahnhofstr.", 52.51, 13.40, null, setOf("suburban"))
         assertEquals(2, stationGroups(listOf(near, far)).size)
-        // Bus stops of one name never: each "H" has its own street.
+        // Bus stops of one name far apart: each "H" has its own street.
         val busA = Stop("e", "S+U Hauptbahnhof", 52.5265, 13.3693, null, setOf("bus"))
         val busB = Stop("f", "S+U Hauptbahnhof", 52.5233, 13.3702, null, setOf("bus"))
         assertEquals(2, stationGroups(listOf(busA, busB)).size)
@@ -148,5 +148,77 @@ class StationSignsTest {
         assertTrue(sameStopPlace("osm:a:de:11000:900100031:x", "de:11000:900100031::3"))
         assertFalse(sameStopPlace("osm:a:900100024:x", "900100031"))
         assertFalse(sameStopPlace("osm:a:52.5,13.4:x", "900100031"))
+    }
+
+    @Test
+    fun streetStopRightAtTheStationJoinsItsSign() {
+        // The bus and tram stop area of Hauptbahnhof 85 m from the station's sign, of its number.
+        val close = street.copy(latitude = 52.526564)
+        val groups = stationGroups(listOf(hbf, close))
+        assertEquals(1, groups.size)
+        assertEquals(hbf.id, groups.single().main.id)
+        assertEquals(listOf(close.id), groups.single().members.map { it.id })
+        assertTrue(groups.single().sign.products.containsAll(setOf("bus", "tram")))
+    }
+
+    @Test
+    fun nightBusStopOfAUBahnStationIsNoSecondSign() {
+        // The provider lists the U-Bahn station and the stop of the night buses in front of it
+        // under two numbers, 60 m apart: one sign.
+        val station = Stop("900100023", "U Rosenthaler Platz (Berlin)", 52.529700, 13.401400, null, setOf("subway"))
+        val nightBus = Stop("900100523", "U Rosenthaler Platz (Berlin)", 52.530200, 13.401700, null, setOf("bus"))
+        val groups = stationGroups(listOf(nightBus, station))
+        assertEquals(1, groups.size)
+        assertEquals(station.id, groups.single().main.id)
+        assertEquals(setOf("subway", "bus"), groups.single().sign.products)
+        // The same from the offline data: the stop area beside the station's sign is dropped
+        // already, and what is left is one sign.
+        assertEquals(1, stationSigns(mergeMapStops(listOf(station), listOf(nightBus.copy(id = "osm:a:900100523:rosenthalerplatz")), null), null).size)
+    }
+
+    @Test
+    fun tramAndBusStopOfOneSquareAreOneSign() {
+        // Two stop areas of one name, 145 m apart, with numbers of their own.
+        val tram = Stop("900120816", "Bersarinplatz (Berlin)", 52.518943, 13.454404, null, setOf("tram"))
+        val other = Stop("900120516", "Bersarinplatz (Berlin)", 52.519417, 13.452368, null, setOf("tram", "bus"))
+        val groups = stationGroups(listOf(tram, other))
+        assertEquals(1, groups.size)
+        assertEquals(tram.id, groups.single().main.id)
+        assertEquals(listOf(other.id), groups.single().members.map { it.id })
+        // Not on from stop to stop: a third one of the name 290 m from the first stays apart.
+        val third = Stop("x3", "Bersarinplatz (Berlin)", 52.519417, 13.450200, null, setOf("bus"))
+        assertEquals(2, stationGroups(listOf(tram, other, third)).size)
+    }
+
+    @Test
+    fun longDistanceAndLocalStopOfOneStationAreOneSign() {
+        val local = Stop("900058101", "S Südkreuz Bhf (Berlin)", 52.475465, 13.365575, null, setOf("suburban", "bus"))
+        // Another provider's stop of the station, under the DB number and another name.
+        val far = Stop("8011113", "Berlin Südkreuz", 52.475800, 13.365100, null, setOf("regional", "express"))
+        assertEquals(1, stationGroups(listOf(local, far)).size)
+        // A provider that names no products for it.
+        val bare = Stop("de-DELFI_de:11000:900058101:3:51", "Berlin Südkreuz", 52.476100, 13.365600, null)
+        val groups = stationGroups(listOf(far, bare, local))
+        assertEquals(1, groups.size)
+        assertEquals(setOf("suburban", "bus", "regional", "express"), groups.single().sign.products)
+    }
+
+    @Test
+    fun busStationInFrontOfAMainStationJoinsIt() {
+        // The station and, from the offline data, the stop areas in front of it: its bus
+        // station under a number of its own, the long-distance buses and the coach stop.
+        val station = Stop("de-DELFI_de:03159:33817:1:1", "Göttingen", 51.536783, 9.925897, null, setOf("regional", "express"))
+        val buses = Stop("osm:a:de:03152:33853:bahnhof", "Bahnhof", 51.535013, 9.927103, null, setOf("bus"))
+        val coaches = Stop("osm:a::göttingenfernbusse", "Göttingen Fernbusse", 51.534898, 9.926553, null, setOf("bus"))
+        val tourist = Stop("osm:a::zob", "ZOB (Touristenbusse)", 51.536019, 9.927593, null, setOf("bus"))
+        // A stop of another name 270 m off: a stop of its own.
+        val court = Stop("osm:a::landgerichtbahnhof", "Landgericht/Bahnhof", 51.537850, 9.929463, null, setOf("bus"))
+        val groups = stationGroups(listOf(buses, coaches, station, tourist, court))
+        assertEquals(2, groups.size)
+        assertEquals(station.id, groups[0].main.id)
+        assertEquals(setOf(buses.id, coaches.id, tourist.id), groups[0].members.map { it.id }.toSet())
+        assertEquals(court.id, groups[1].main.id)
+        assertTrue(isForecourtOf("göttingenfernbusse", "göttingen"))
+        assertFalse(isForecourtOf("landgerichtbahnhof", "göttingen"))
     }
 }

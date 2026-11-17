@@ -106,16 +106,19 @@ object LineColors {
     fun lookup(line: String?, product: String, at: Pair<Double, Double>? = focus): Entry? {
         val key = key(line, product) ?: return null
         nearest(provider[key], at, anywhere = true)?.let { return it }
-        // A Stadtbahn may be a tram for the provider and a light rail in OpenStreetMap (and the other way).
+        // A Stadtbahn may be a tram for the provider and a light rail in OpenStreetMap (and the
+        // other way); a line of no known product (a feed's mode the app has no key for) may be
+        // any of the lines on rails in the city.
         val mode = key.substringBefore('|')
         val name = key.substringAfter('|')
-        val alternative = when (mode) {
-            "t" -> "u"
-            "u" -> "t"
-            else -> null
+        val alternatives = when (mode) {
+            "t" -> listOf("u")
+            "u" -> listOf("t")
+            UNKNOWN_KIND -> listOf("u", "t", "s")
+            else -> emptyList()
         }
         return nearest(osm[key], at, anywhere = false)
-            ?: alternative?.let { nearest(osm["$it|$name"], at, anywhere = false) }
+            ?: alternatives.firstNotNullOfOrNull { nearest(osm["$it|$name"], at, anywhere = false) }
     }
 
     /**
@@ -186,13 +189,20 @@ object LineColors {
     }
 
     // The entry nearest to [at] within MAX_FOCUS_METERS; without [at] the only one of a line
-    // (or with [anywhere] the newest one).
+    // (or with [anywhere] the newest one). Berlin's lines and those around it are kept apart
+    // (see sameCity): a night bus N2 in Berlin never takes the light blue of the N2 of
+    // Brandenburg an der Havel, which lies within MAX_FOCUS_METERS of western Berlin.
     private fun nearest(list: List<Entry>?, at: Pair<Double, Double>?, anywhere: Boolean): Entry? {
         if (list.isNullOrEmpty()) return null
         if (at == null) return if (anywhere || list.map { it.color }.distinct().size == 1) list.first() else null
-        val best = list.minByOrNull { meters(it.latitude to it.longitude, at) } ?: return null
+        val best = list.filter { sameCity(it, at) }.minByOrNull { meters(it.latitude to it.longitude, at) } ?: return null
         return best.takeIf { meters(it.latitude to it.longitude, at) <= MAX_FOCUS_METERS }
     }
+
+    // A colour noted in Berlin belongs to a ride in Berlin only, one noted outside to a ride
+    // outside only: a line name of Berlin (N2, M41, 100) names other lines in the towns around.
+    private fun sameCity(entry: Entry, at: Pair<Double, Double>): Boolean =
+        inBerlin(entry.latitude, entry.longitude) == inBerlin(at.first, at.second)
 
     private fun key(line: String?, product: String): String? {
         val mode = kindOf(product) ?: return null
@@ -200,15 +210,23 @@ object LineColors {
         return "$mode|$name"
     }
 
-    /** The kind of a product in the colour table: "b", "t", "u", "s", "f" (ferry); null for trains. */
+    /**
+     * The kind of a product in the colour table: "b", "t", "u", "s", "f" (ferry), "o" for a line
+     * whose product the provider names none or one the app has no key for (a Stadtbahn in some
+     * feeds); null for trains and coaches.
+     */
     fun kindOf(product: String): String? = when (product) {
         "bus" -> "b"
         "tram" -> "t"
         "subway" -> "u"
         "suburban" -> "s"
         "ferry" -> "f"
+        "" -> UNKNOWN_KIND
         else -> null
     }
+
+    // The kind of a line of no known product (see kindOf).
+    private const val UNKNOWN_KIND = "o"
 
     /** A line name in one form: "Tram 4A" and "4a" are "4A", "S 1" is "S1". Null for no name. */
     fun nameKey(line: String?): String? {

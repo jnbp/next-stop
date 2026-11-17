@@ -212,7 +212,7 @@ internal fun MapSettings(
     onFitLine: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
-    val last = 8
+    val last = 9
     SettingsGroup(label = stringResource(R.string.settings_group_map)) {
         SettingsRow(
             shape = groupShape(0, last),
@@ -245,8 +245,22 @@ internal fun MapSettings(
                 }
             }
         }
+        // Which live vehicles: all, only zoomed in close, or none (for less powerful phones).
         SettingsRow(
             shape = groupShape(1, last),
+            title = stringResource(R.string.map_vehicles_title),
+            text = stringResource(mapVehiclesTextRes(Appearance.mapVehicles)),
+            scroll = false,
+            // The same little map as in the setup, cross-fading with the level, lower to suit the list.
+            preview = { VehicleMapSketch(Appearance.mapVehicles, sketchHeight = SETTINGS_VEHICLE_SKETCH_HEIGHT) },
+        ) {
+            MapVehiclesToggle(
+                selected = Appearance.mapVehicles,
+                onSelect = { value -> Appearance.changeMapVehicles(context, value) },
+            )
+        }
+        SettingsRow(
+            shape = groupShape(2, last),
             title = stringResource(R.string.vehicle_direction_title),
             text = stringResource(R.string.vehicle_direction_text),
             preview = { VehicleDirectionPreview(Appearance.vehicleDirection) },
@@ -263,7 +277,7 @@ internal fun MapSettings(
             )
         }
         SwitchRow(
-            shape = groupShape(2, last),
+            shape = groupShape(3, last),
             title = stringResource(R.string.start_vehicles_title),
             text = stringResource(R.string.start_vehicles_text),
             preview = { StartVehiclesPreview(startVehicles) },
@@ -272,7 +286,7 @@ internal fun MapSettings(
         )
         // Stop positions, entrances and lifts from OpenStreetMap on the map, close up.
         SwitchRow(
-            shape = groupShape(3, last),
+            shape = groupShape(4, last),
             title = stringResource(R.string.station_details_title),
             text = stringResource(R.string.station_details_text),
             preview = { StationDetailsPreview(StationDetailSetting.shown) },
@@ -281,9 +295,9 @@ internal fun MapSettings(
         )
         // Reserved: the setting "show entrances and exits" (automatic / always / only at the
         // selected station) of the map2 work goes here, after the station details.
-        EntranceModeRow(shape = groupShape(4, last))
+        EntranceModeRow(shape = groupShape(5, last))
         SwitchRow(
-            shape = groupShape(5, last),
+            shape = groupShape(6, last),
             title = stringResource(R.string.stop_names_title),
             text = stringResource(R.string.stop_names_text),
             preview = { StopNamesPreview(StopNameSetting.named) },
@@ -292,7 +306,7 @@ internal fun MapSettings(
         )
         // A warning sign at the stops known disruptions are about (see MapNoticeLayer).
         SwitchRow(
-            shape = groupShape(6, last),
+            shape = groupShape(7, last),
             title = stringResource(R.string.map_notices_title),
             text = stringResource(R.string.map_notices_text),
             preview = { MapNoticesPreview(MapNoticeSetting.shown) },
@@ -302,7 +316,7 @@ internal fun MapSettings(
         // The small hint on the map that vehicle positions come from live data, not GPS.
         var vehicleHint by remember { mutableStateOf(VehicleHintSetting.shown(context)) }
         SwitchRow(
-            shape = groupShape(7, last),
+            shape = groupShape(8, last),
             title = stringResource(R.string.vehicle_hint_setting_title),
             text = stringResource(R.string.vehicle_hint_setting_text),
             preview = { VehicleHintPreview(vehicleHint) },
@@ -313,7 +327,7 @@ internal fun MapSettings(
             },
         )
         SwitchRow(
-            shape = groupShape(8, last),
+            shape = groupShape(9, last),
             title = stringResource(R.string.fit_line_title),
             text = stringResource(R.string.fit_line_text),
             preview = { FitLinePreview(fitLine) },
@@ -421,14 +435,10 @@ internal fun StartPageSettings(
             title = stringResource(R.string.nearby_radius_title),
             text = stringResource(R.string.nearby_radius_text),
             preview = { NearbyRadiusPreview(nearbyRadius) },
+            // The slider fills the width of the row.
+            scroll = false,
         ) {
-            SegmentedToggle(
-                labels = AppPrefs.NEARBY_RADII.map { stringResource(R.string.metres, it) },
-                selected = AppPrefs.NEARBY_RADII.indexOf(nearbyRadius),
-                onSelect = { index -> onNearbyRadius(AppPrefs.NEARBY_RADII[index]) },
-                minHeight = 40.dp,
-                ground = AppColors.Chip,
-            )
+            NearbyRadiusSlider(radius = nearbyRadius, onRadius = onNearbyRadius)
         }
     }
 }
@@ -520,7 +530,8 @@ internal fun AdvancedEntryRow(onClick: () -> Unit) {
 
 /**
  * The page "Advanced": the data sources with their order, switches and keys, the own server,
- * the keys of the lift data, the address of the live page and the developer options.
+ * the keys of the lift data, the address of the live page, the developer options and, at the
+ * very end, the version of the app (7 taps on it unlock the developer options, see DeveloperSection).
  */
 @Composable
 internal fun AdvancedSettingsPage(
@@ -590,3 +601,6 @@ private fun LiveAddressGroup() {
         }
     }
 }
+
+// The height of the little map of the vehicles setting (see VehicleMapSketch) in the settings list.
+private val SETTINGS_VEHICLE_SKETCH_HEIGHT = 96.dp

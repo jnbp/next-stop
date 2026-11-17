@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withTimeout
 
+// The tag of the answers and failures of the backends in the diagnostic log (see DiagLog).
+private const val LOG_TAG = "Sources"
+
 /**
  * One concrete server or library the app can get data from. The user orders them in the
  * settings; the app asks them in that order and falls back to the next one when one fails.
@@ -132,8 +135,10 @@ class SourceChain(
         var lastError: Throwable? = null
         for ((index, backend) in order.withIndex()) {
             val more = index < order.lastIndex || cutLast
+            val started = System.nanoTime()
             try {
                 val answer = attempt(backend, if (more) timeoutMillis else 0L, block)
+                DiagLog.d(LOG_TAG) { "${family.key}: ${backend.key} answered in ${millisSince(started)} ms" }
                 health.succeeded(backend)
                 if (record) health.record(candidates.first(), backend)
                 return answer
@@ -144,6 +149,7 @@ class SourceChain(
                     health.succeeded(backend)
                     throw e
                 }
+                DiagLog.w(LOG_TAG) { "${family.key}: ${backend.key} failed after ${millisSince(started)} ms: HTTP ${e.code}" }
                 tried.add(backend)
                 health.failed(backend)
                 lastError = e
@@ -152,13 +158,17 @@ class SourceChain(
             } catch (e: NotSupportedException) {
                 lastError = lastError ?: e
             } catch (e: Exception) {
+                DiagLog.w(LOG_TAG) { "${family.key}: ${backend.key} failed after ${millisSince(started)} ms: ${e.javaClass.simpleName}" }
                 tried.add(backend)
                 health.failed(backend)
                 lastError = e
             }
         }
+        DiagLog.w(LOG_TAG) { "${family.key}: no source answered (tried ${tried.joinToString { it.key }})" }
         throw SourceUnreachableException(family, lastError ?: IOException("no source"), tried)
     }
+
+    private fun millisSince(startedNanos: Long): Long = (System.nanoTime() - startedNanos) / 1_000_000
 
     private suspend fun <T> attempt(backend: Backend, timeoutMillis: Long, block: suspend (Backend) -> T): T {
         if (timeoutMillis <= 0L) return block(backend)

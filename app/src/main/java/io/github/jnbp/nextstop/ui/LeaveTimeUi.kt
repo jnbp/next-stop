@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
@@ -86,32 +87,63 @@ fun LeaveRow(
     stopFavorite: Boolean,
     onDepartureAction: (Departure, DepartureAction) -> Unit,
     modifier: Modifier = Modifier,
+    // In a list of several stops: the town of the board and the marker of each stop (see stopMarkers).
+    boardTown: String? = null,
+    markers: Map<String, Int> = emptyMap(),
 ) {
     val seconds = secondsToLeave(leave, now)
     val missed = seconds != null && seconds < 0
+    // A row of several stops names its stop in the header, so the line below leaves it out.
+    val stopName = departureStopLabel(leave.departure, boardTown)
     Column(modifier = modifier.alpha(if (missed) 0.5f else 1f)) {
-        LeaveLabel(leave = leave, seconds = seconds, modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp))
+        LeaveLabel(
+            leave = leave,
+            seconds = seconds,
+            stopName = stopName,
+            marker = leave.departure.stop?.id?.let { markers[it] }?.let { stopMarkerColor(it) },
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
+        )
         DepartureItem(
             departure = leave.departure,
             now = now,
             stopFavorite = stopFavorite,
             onAction = { action -> onDepartureAction(leave.departure, action) },
             contentPadding = PaddingValues(start = 12.dp, end = 8.dp),
+            boardTown = boardTown,
+            stopInHeader = stopName != null,
         )
     }
 }
 
-/** "los in 4 min · 6 min zu Fuß" above a departure; nothing for a cancelled run or one without a time. */
+/**
+ * "los in 4 min · 6 min zu Fuß" above a departure; nothing for a cancelled run or one without a
+ * time. In a list of several stops ([stopName]) the stop leads: "● 🚶 Hauptstraße · los in 4 min
+ * · 6 min zu Fuß" (see StopRowHeader), and its name alone where there is no time to set off.
+ */
 @Composable
-private fun LeaveLabel(leave: LeaveTime, seconds: Long?, modifier: Modifier = Modifier) {
+private fun LeaveLabel(leave: LeaveTime, seconds: Long?, stopName: String?, marker: Color?, modifier: Modifier = Modifier) {
     val walk = leave.walkSeconds
-    if (seconds == null || walk == null || leave.departure.cancelled) return
+    if (seconds == null || walk == null || leave.departure.cancelled) {
+        if (stopName != null) StopRowHeader(stopName = stopName, marker = marker, modifier = modifier.fillMaxWidth())
+        return
+    }
     val (text, color) = when {
         seconds < 0 -> stringResource(R.string.leave_order_missed) to AppColors.Muted
         seconds < 60 -> stringResource(R.string.leave_order_now) to AppColors.Blue
         else -> stringResource(R.string.leave_order_in, seconds / 60) to AppColors.Ink
     }
     val walkMinutes = ceil(walk / 60.0).toLong().coerceAtLeast(1L)
+    if (stopName != null) {
+        StopRowHeader(
+            stopName = stopName,
+            marker = marker,
+            modifier = modifier.fillMaxWidth(),
+            leaveColor = color,
+            leave = { RollingText(value = seconds / 60, text = text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+            walk = stringResource(R.string.leave_order_walk, walkDurationLabel(walkMinutes)),
+        )
+        return
+    }
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,

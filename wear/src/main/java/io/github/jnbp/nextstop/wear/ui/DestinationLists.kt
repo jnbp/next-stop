@@ -25,8 +25,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.LocalContext
@@ -63,7 +61,7 @@ fun AllRecentScreen(onDestination: (Place) -> Unit) {
     val places by WatchStore.places.collectAsState()
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
     ScreenScaffold(scrollState = listState) { contentPadding ->
-        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
             item { ListHeader { Text(stringResource(R.string.recent)) } }
             if (places.recent.isEmpty()) item { Note(stringResource(R.string.no_results)) }
             items(places.recent) { place -> PlaceButton(place, onClick = { onDestination(place.place) }) }
@@ -113,14 +111,6 @@ fun AllContactsScreen(onDestination: (Place) -> Unit) {
         delay(SCRUB_HIDE_MILLIS)
         scrubbing = false
     }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        try {
-            focus.requestFocus()
-        } catch (e: IllegalStateException) {
-            // Not attached yet: the list still scrolls by touch.
-        }
-    }
     fun open(contact: SyncedContact) {
         if (looking != null) return
         val key = ContactUsage.keyOf(contact)
@@ -148,6 +138,7 @@ fun AllContactsScreen(onDestination: (Place) -> Unit) {
                 rotaryScrollableBehavior = null,
                 modifier = Modifier
                     .fillMaxSize()
+                    .fadeUnderTimeText(contentPadding.calculateTopPadding())
                     .onRotaryScrollEvent { event ->
                         if (headers.isEmpty()) return@onRotaryScrollEvent false
                         if (!scrubbing) {
@@ -171,7 +162,7 @@ fun AllContactsScreen(onDestination: (Place) -> Unit) {
                         lastTurn = System.nanoTime()
                         true
                     }
-                    .focusRequester(focus)
+                    .crownFocus()
                     .focusable(),
             ) {
                 item { ListHeader { Text(stringResource(R.string.contacts)) } }

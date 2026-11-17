@@ -132,9 +132,14 @@ const val RAIL_STATION_NEED = 5L
 const val WALK_EXTRA_NEED = 1L
 
 // Minutes to spare beyond what a change needs from which it is relaxed or normal; from 0 it
-// is risky, below 0 very risky.
+// is risky, below 0 very risky. Set so that a change to another platform (3 minutes needed)
+// is normal from 4 minutes and relaxed from 8, the change times of the provider's searches at
+// those levels (TransferComfort): what a change needs already holds getting off and the way,
+// so normal asks one minute more, not two (with two, every 4-minute change from the U-Bahn to
+// a bus outside was "knapp").
+// These are the defaults: the settings can change both (see [normalSpare], [relaxedSpare]).
 const val RELAXED_SPARE = 5L
-const val NORMAL_SPARE = 2L
+const val NORMAL_SPARE = 1L
 
 // The kinds of transport of a large rail station.
 private val RAIL_PRODUCTS = setOf("express", "regional")
@@ -155,13 +160,14 @@ fun neededMinutes(kind: ChangeKind, walkMinutes: Long = 0, largeStation: Boolean
 
 /**
  * The category of a change by the minutes it leaves beyond what it needs ([spare]), by the
- * live times: relaxed from 5, normal from 2, risky (tight) from 0, and very risky ("Sprint")
+ * live times: relaxed from [relaxedSpare], normal from [normalSpare] (5 and 1 unless the
+ * settings change them), risky (tight) from 0, and very risky ("Sprint")
  * below 0: by the rule of what a change needs (walk included) it cannot be made, only by
  * running. The timetable alone plays no part: a delayed ride counts with its live time.
  */
 fun spareTightness(spare: Long): Tightness = when {
-    spare >= RELAXED_SPARE -> Tightness.Comfortable
-    spare >= NORMAL_SPARE -> Tightness.Tight
+    spare >= relaxedSpare -> Tightness.Comfortable
+    spare >= normalSpare -> Tightness.Tight
     spare >= 0 -> Tightness.Risky
     else -> Tightness.VeryRisky
 }
@@ -171,14 +177,14 @@ fun spareTightness(spare: Long): Tightness = when {
  * departure, [need] minutes at the usual pace with its buffer (see [changeNeed]) and
  * [briskNeed] minutes at a brisk pace without buffer (see [changeBriskNeed]):
  *
- * - relaxed from [RELAXED_SPARE] and normal from [NORMAL_SPARE] minutes beyond [need], as before;
+ * - relaxed from [relaxedSpare] and normal from [normalSpare] minutes beyond [need], as before;
  * - knapp ("Risky") where the change still works at a brisk pace: [gap] at least [briskNeed]
  *   and at least [MIN_KNAPP_MINUTES];
  * - Sprint ("VeryRisky") otherwise: only by running or by luck, and every change of 0 or 1 minute.
  */
 fun paceTightness(gap: Long, need: Long, briskNeed: Long): Tightness = when {
-    gap - need >= RELAXED_SPARE -> Tightness.Comfortable
-    gap - need >= NORMAL_SPARE -> Tightness.Tight
+    gap - need >= relaxedSpare -> Tightness.Comfortable
+    gap - need >= normalSpare -> Tightness.Tight
     // A brisk pace never needs more than the usual one with its buffer.
     gap >= maxOf(minOf(briskNeed, need), MIN_KNAPP_MINUTES) -> Tightness.Risky
     else -> Tightness.VeryRisky
@@ -395,9 +401,15 @@ var transferWalkSeconds: (arriving: Leg, next: Leg) -> Int? = { _, _ -> null }
 /** True when walks of changes count without steps and escalators (the accessibility setting is not "none"). */
 @Volatile
 var stepFreeWalks: Boolean = false
+    set(value) {
+        if (field == value) return
+        field = value
+        ratingSettingsChanged()
+    }
 
 // A change measured over the walking network needs its walk and this much more (getting off,
-// finding the way), and never less than [EXACT_CHANGE_MIN_NEED] between two places.
+// finding the way; the default of [changeBufferSeconds], which the settings can change), and
+// never less than [EXACT_CHANGE_MIN_NEED] between two places.
 const val EXACT_WALK_EXTRA_SECONDS = 30L
 const val EXACT_CHANGE_MIN_NEED = 2L
 
@@ -412,7 +424,7 @@ fun exactWalkNeed(arriving: Leg, next: Leg, walk: (Leg, Leg) -> Int? = transferW
     if (arriving.walking || next.walking) return null
     val seconds = runCatching { walk(arriving, next) }.getOrNull()?.let { pacedSeconds(it) } ?: return null
     if (seconds <= 0) return SAME_PLATFORM_NEED
-    return maxOf(EXACT_CHANGE_MIN_NEED, ceil((seconds + EXACT_WALK_EXTRA_SECONDS) / 60.0).toLong())
+    return maxOf(EXACT_CHANGE_MIN_NEED, ceil((seconds + changeBufferSeconds) / 60.0).toLong())
 }
 
 /** Whole minutes of a walk of [seconds], rounded up. */
@@ -488,15 +500,34 @@ var ridePlatforms: (ride: Leg, boarding: Boolean) -> List<OsmPlatform> = { _, _ 
 // A street stop farther than this from the platform is not judged by the straight line.
 private const val PLATFORM_STOP_MAX_METERS = 400.0
 
+// A change between a platform and a stop in the street needs, beyond the walk on the level and
+// the buffer of every change ([changeBufferSeconds]), this much for the stairs, escalator or
+// lift between platform and street; with the default buffer 60 s in all.
+const val PLATFORM_STOP_STAIRS_SECONDS = 30.0
+
 /**
- * What a change between a train or U-Bahn and a bus or tram needs where OpenStreetMap knows the
- * platform of the train (see [ridePlatforms]) and the stop position of the bus or tram: the
- * walk from the nearest point of the platform to the stop position (see [spotWalkMinutes]) and
- * one minute more, but never less than a change to another platform ([SAME_STATION_NEED],
- * which holds the stairs). The provider measures its walk from the middle of the station (BVG
- * HAFAS at Lichterfelde Ost: the whole wait from the S25 to the bus 184 as the walk), so this
- * comes before its walk. Null where a position is missing or the stop lies far away; then the
- * walk of the provider and the station rule decide.
+ * The minutes a change between a platform and a stop position [meters] apart needs: the walk
+ * at the pace set ([walkSpeedFactor], the way [SPOT_DETOUR] longer than the straight line) and
+ * [changeBufferSeconds] and [PLATFORM_STOP_STAIRS_SECONDS] for getting off and the stairs,
+ * rounded up once, at least
+ * [EXACT_CHANGE_MIN_NEED]. (Before, the walk was rounded up to whole minutes, one minute was
+ * added and the result was raised to 3 whatever the walk: a stop 50 m from the platform needed
+ * 3 minutes.)
+ */
+fun platformStopMinutes(meters: Double, factor: Double = walkSpeedFactor): Long {
+    val seconds = meters * SPOT_DETOUR * factor / SPOT_WALK_METERS_PER_MINUTE * 60.0 + changeBufferSeconds + PLATFORM_STOP_STAIRS_SECONDS
+    return maxOf(EXACT_CHANGE_MIN_NEED, ceil(seconds / 60.0 - 1e-9).toLong())
+}
+
+/**
+ * What a change between a train or U-Bahn and a bus or tram needs where the stop position of
+ * the bus or tram is known: the walk from the nearest point of the platform of the train (see
+ * [ridePlatforms]) to the stop position, else, where OpenStreetMap does not know that
+ * platform, from where the way of the train ends or starts at the station (its stop), see
+ * [platformStopMinutes]. The provider measures its walk from the middle of the station or
+ * stretches it over the whole wait (BVG HAFAS at Lichterfelde Ost: the whole wait from the S25
+ * to the bus 184 as the walk), so this comes before its walk. Null where a position is missing
+ * or the stop lies far away; then the walk of the provider and the station rule decide.
  */
 fun platformStopNeed(arriving: Leg, next: Leg, platforms: (Leg, Boolean) -> List<OsmPlatform> = ridePlatforms): Long? {
     if (arriving.walking || next.walking) return null
@@ -509,9 +540,11 @@ fun platformStopNeed(arriving: Leg, next: Leg, platforms: (Leg, Boolean) -> List
     }
     if (spot == null) return null
     val axes = runCatching { platforms(train, boarding) }.getOrDefault(emptyList())
-    val meters = axes.minOfOrNull { segmentMeters(spot.position, it.a, it.b) } ?: return null
+    val meters = axes.minOfOrNull { segmentMeters(spot.position, it.a, it.b) }
+        ?: (if (boarding) train.path.firstOrNull() else train.path.lastOrNull())?.let { spotMeters(spot.position, it) }
+        ?: return null
     if (meters > PLATFORM_STOP_MAX_METERS) return null
-    return maxOf(SAME_STATION_NEED, spotWalkMinutes(meters) + WALK_EXTRA_NEED)
+    return platformStopMinutes(meters)
 }
 
 /** Metres from [point] to the nearest point of the line from [a] to [b], flat over short distances. */
@@ -654,6 +687,8 @@ data class Warning(
     val links: List<NoticeLink> = emptyList(),
     /** The stop of the departure that carried it; null for the notices of a journey. */
     val stop: Stop? = null,
+    /** The provider's code of the remark (HAFAS "bf" for step-free access, see [noticeKind]); null where it sends none. */
+    val code: String? = null,
 )
 
 /**
@@ -691,6 +726,12 @@ data class TripCourse(
     val providerColor: Int? = null,
     /** The colour of the text on [providerColor] as the provider sends it (ARGB); null where it sends none. */
     val providerTextColor: Int? = null,
+    /**
+     * The hops of [path] that are only air lines between stations, by the index of the stop they
+     * leave (see airHops): a vehicle there stands at a station instead of crossing the fields.
+     * Found on the whole way as the provider sent it, before it is thinned for the map.
+     */
+    val airHops: Set<Int> = emptySet(),
 )
 
 /** One section of a journey: a ride on a line or a walk. */
@@ -821,16 +862,33 @@ fun mergeThroughRuns(journey: Journey): Journey {
     val legs = journey.legs
     if (legs.count { !it.walking } < 2) return journey
     val merged = mutableListOf<Leg>()
-    for (leg in legs) {
+    // For each leg as it came, the index of the leg it is (part of) in [merged].
+    val at = IntArray(legs.size) { -1 }
+    for ((index, leg) in legs.withIndex()) {
         val last = merged.lastOrNull()
         if (last != null && isThroughRun(last, leg)) {
             merged[merged.lastIndex] = joinRides(last, leg)
+            at[index] = merged.lastIndex
         } else {
             merged += leg
+            at[index] = merged.lastIndex
         }
     }
     if (merged.size == legs.size) return journey
-    return journey.copy(legs = merged)
+    // A journey put together from two (a place on the way, a swapped rest) can be one ride over
+    // the seam: the count of legs of its first part follows the joined legs, and the seam is
+    // marked as inside the last leg of that part (see [JourneySplit.tailJoined]).
+    fun countBefore(count: Int): Int = if (count <= 0) count else at[(count - 1).coerceAtMost(legs.lastIndex)] + 1
+    val split = journey.split?.let { split ->
+        val count = split.headLegs
+        if (count <= 0 || count >= legs.size) return@let split.copy(headLegs = countBefore(count))
+        split.copy(headLegs = countBefore(count), tailJoined = split.tailJoined || at[count - 1] == at[count])
+    }
+    // A place on the way at a seam that is now inside a joined ride moves after that ride: the
+    // traveller stays on board there, so the stay counts after the whole ride (see refreshed,
+    // which counts it one more when the ride is split in two again).
+    val via = journey.via?.let { via -> via.copy(afterLegs = via.afterLegs?.let { countBefore(it) }) }
+    return journey.copy(legs = merged, split = split, via = via)
 }
 
 /** True when [next] goes on with the vehicle of [ride] for the traveller (see [mergeThroughRuns]). */
@@ -908,6 +966,25 @@ data class JourneySplit(
      * gets off that ride before its end. Loaded again, that leg is cut at the same stop.
      */
     val headCut: String? = null,
+    /**
+     * The first ride of the second part goes on in the vehicle of the last ride of the first
+     * one and is joined with it (see [mergeThroughRuns]): the leg at [headLegs] - 1 holds both.
+     * Loaded again, the parts are joined anew; one part alone cannot be put in its place.
+     */
+    val tailJoined: Boolean = false,
+)
+
+/**
+ * Another stop where the rides of a journey can be changed: the change number [changeIndex]
+ * (0 between the first and the second ride) at [at] instead, with [walkMinutes] on foot and
+ * rated [rating]. [journey] is that variant as the search found it (without its own variants).
+ */
+data class JourneyAltChange(
+    val changeIndex: Int,
+    val at: String,
+    val walkMinutes: Long,
+    val rating: Tightness,
+    val journey: Journey,
 )
 
 /** A connection from A to B, made of legs. */
@@ -926,6 +1003,11 @@ data class Journey(
      * Not part of [id].
      */
     val foundLevel: TransferComfort? = null,
+    /**
+     * Other stops where the very same rides can be changed (see withAltChanges): the search found
+     * the journey once per change point; it is shown once, with the others on offer. Not part of [id].
+     */
+    val altChanges: List<JourneyAltChange> = emptyList(),
 ) {
     /** Tells journeys apart: planned times and lines of all legs. */
     val id: String = legs.joinToString("|") { leg ->
@@ -966,16 +1048,21 @@ fun spliceJourney(journey: Journey, keepLegs: Int, option: Journey): Journey {
     val before = journey.split
     val headToken = when {
         before == null -> journey.refreshToken
+        // A kept ride that goes on into the second part of an earlier swap: no handle loads it whole.
+        before.tailJoined && keepLegs >= before.headLegs -> null
         // The kept legs all come from the first journey of an earlier swap.
         keepLegs <= before.headLegs -> before.headToken
         else -> null
     }
     // A ride cut short by an earlier swap stays cut as long as it is the last kept leg.
     val headCut = before?.headCut?.takeIf { keepLegs == before.headLegs }
-    return Journey(
-        legs = journey.legs.take(keepLegs) + option.legs,
-        split = JourneySplit(headLegs = keepLegs, headToken = headToken, tailToken = option.refreshToken, headCut = headCut),
-        via = splicedVia(journey, keepLegs, option),
+    // The new rest can go on in the vehicle the traveller sits in: one ride, no change there.
+    return mergeThroughRuns(
+        Journey(
+            legs = journey.legs.take(keepLegs) + option.legs,
+            split = JourneySplit(headLegs = keepLegs, headToken = headToken, tailToken = option.refreshToken, headCut = headCut),
+            via = splicedVia(journey, keepLegs, option),
+        ),
     )
 }
 
@@ -1051,6 +1138,12 @@ data class Vehicle(
     val providerColor: Int? = null,
     /** The colour of the text on [providerColor] as the provider sends it (ARGB); null where it sends none. */
     val providerTextColor: Int? = null,
+    /**
+     * True when the provider placed a train on the air line between two stations (see
+     * onAirLine) and it is shown at a station instead: a course that knows the real tracks
+     * places it by its timetable there.
+     */
+    val onAirLine: Boolean = false,
 )
 
 /**
@@ -1228,8 +1321,18 @@ data class JourneyChange(
     val nextIndex: Int = -1,
     val rating: Tightness? = null,
 ) {
-    /** Minutes to spare by the live times beyond what the change needs (see [neededMinutes]). */
-    val spare: Long get() = changeSpare(arriving, next, walkMinutes)
+    /**
+     * Minutes to spare by the live times beyond what the change needs (see [neededMinutes]).
+     * Worked out once per change: the changes of a journey are kept (see [journeyChangesOf]),
+     * and what a change needs looks up its station and platforms in OpenStreetMap.
+     */
+    val spare: Long by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        if (knownSpare != NO_SPARE) knownSpare else changeSpare(arriving, next, walkMinutes)
+    }
+
+    // The spare of the change this one was copied from where that had worked it out already
+    // (see ChangeRatings.of): set right after the copy, before anyone reads [spare].
+    internal var knownSpare: Long = NO_SPARE
     val tightness: Tightness get() = rating ?: uncertainTightness(this, changeTightness(arriving, next, walkMinutes))
 
     /**
@@ -1243,8 +1346,11 @@ data class JourneyChange(
      * arrival where [arriving] comes from [rawChangesOf], rated by [tightness] (an uncertain
      * change normal at best).
      */
-    val time: ChangeTime get() = changeTime(arriving, next, walkMinutes, tightness)
+    val time: ChangeTime by lazy(LazyThreadSafetyMode.PUBLICATION) { changeTime(arriving, next, walkMinutes, tightness) }
 }
+
+// No spare known yet (see JourneyChange.knownSpare).
+private const val NO_SPARE = Long.MIN_VALUE
 
 /**
  * Every change of [journey] in order, with the walks between the two rides, rated by the station
@@ -1267,47 +1373,32 @@ private fun rawChangesOf(journey: Journey): List<JourneyChange> {
 }
 
 /**
- * The category of every change of [journey], in order: the stricter of two ratings.
- * (1) The station rule (see [changeTightness]): what the change needs at its station, 1
- * minute on one platform, 3 to another, 5 at a station with regional or long-distance
- * trains, a walk and one more, and what it leaves beyond that; between bus and tram stop
- * positions known from OpenStreetMap 1 minute at one stop, else the walk between them and
- * one more (see [stopSpotNeed]). (2) The provider: its searches
- * keep its own minimum change times, so a journey found by a search with a normal or
- * relaxed change time ([Journey.foundLevel]) asks nothing more, while one found only by the
- * search without any change time is risky at least: at its changes that leave less than 2
- * minutes to spare, or else at its tightest one where that leaves no more than the change
- * time of the normal search (4 minutes). Very risky ("Sprint") stays for changes that
- * leave less than they need by the live times (see [spareTightness]).
+ * The category of every change of [journey], in order, by the change itself: the station rule
+ * (see [changeTightness]): what the change needs at its station, 1 minute on one platform, 3 to
+ * another, 5 at a station with regional or long-distance trains, a walk and one more, and what
+ * it leaves beyond that; between bus and tram stop positions known from OpenStreetMap 1 minute
+ * at one stop, else the walk between them and one more (see [stopSpotNeed]); an arrival that is
+ * only estimated makes it normal at best (see [uncertainTightness]).
+ *
+ * Which search found the journey ([Journey.foundLevel]) plays no part any more. Before, a
+ * journey found only by the search without any change time had its changes raised to "knapp",
+ * so the very same change (the same bus to the same train) was "normal" in one journey and
+ * "knapp" in another found by another search. A change is now rated the same in every journey
+ * that holds it; what it leaves below [normalSpare] makes it "knapp" by the rule already.
+ * The overview chart rates its changes by these too (see journeyChangesOf), so a change looks
+ * the same there as in the detail view.
  */
-fun journeyChangeRatings(journey: Journey): List<Tightness> {
-    val changes = rawChangesOf(journey)
-    val rule = changes.map { uncertainTightness(it, changeTightness(it.arriving, it.next, it.walkMinutes)) }
-    val found = journey.foundLevel
-    if (found == null || found.ordinal <= TransferComfort.Normal.ordinal || changes.isEmpty()) return rule
-    val spares = changes.map { it.spare }
-    val raised = rule.indices.map { index ->
-        if (spares[index] < NORMAL_SPARE) maxTightness(rule[index], Tightness.Risky) else rule[index]
-    }
-    if (raised.any { it.ordinal >= Tightness.Risky.ordinal }) return raised
-    // A change with more to spare than any change time of a search adds was not missed for
-    // its change time: a search finds a set number of journeys from a time on and leaves out
-    // those a better one makes pointless, so another search can find a journey this one does
-    // not. Such a change keeps its rating by the rule.
-    val tightest = spares.indices.filter { spares[it] <= TransferComfort.Normal.minutes }
-        .minByOrNull { spares[it] } ?: return raised
-    return raised.mapIndexed { index, rating -> if (index == tightest) maxTightness(rating, Tightness.Risky) else rating }
-}
+fun journeyChangeRatings(journey: Journey): List<Tightness> = ChangeRatings.of(journey).ratings
 
 private fun maxTightness(a: Tightness, b: Tightness): Tightness = if (a.ordinal >= b.ordinal) a else b
 
 /**
  * A change whose arrival is only estimated ([JourneyChange.uncertain]) is never rated safe:
- * normal at best, and risky where the estimate leaves less than [RELAXED_SPARE] to spare.
+ * normal at best, and risky where the estimate leaves less than [relaxedSpare] to spare.
  */
 private fun uncertainTightness(change: JourneyChange, rating: Tightness): Tightness = when {
     !change.uncertain -> rating
-    change.spare < RELAXED_SPARE -> maxTightness(rating, Tightness.Risky)
+    change.spare < relaxedSpare -> maxTightness(rating, Tightness.Risky)
     else -> maxTightness(rating, Tightness.Tight)
 }
 
@@ -1316,10 +1407,155 @@ private fun uncertainTightness(change: JourneyChange, rating: Tightness): Tightn
  * within the journey (see [journeyChangeRatings]). Staying on board (two rides of the same
  * trip) is no change.
  */
-fun journeyChangesOf(journey: Journey): List<JourneyChange> {
-    val changes = rawChangesOf(journey)
-    val ratings = journeyChangeRatings(journey)
-    return changes.mapIndexed { index, change -> change.copy(rating = ratings[index]) }
+fun journeyChangesOf(journey: Journey): List<JourneyChange> = ChangeRatings.of(journey).changes
+
+/** The changes of a journey with their ratings, as [ChangeRatings] keeps them. */
+internal class RatedChanges(val changes: List<JourneyChange>, val ratings: List<Tightness>)
+
+/**
+ * The rated changes of the journeys asked for last, by the identity of the journey (a journey
+ * never changes; fresh live data is a new one). Rating a change is not free: the plausible
+ * times of its rides (see [Journey.plausible]), the station, platforms and walks of
+ * OpenStreetMap (see [transferWalkSeconds]), the records of the same platform. Every view of a
+ * search asks for the same changes again and again (the filter of the levels, the tags, the
+ * chart columns, the detail card), for each journey, on every composition of AppRoot (the clock
+ * every 15 s, every journey refreshed with live data), which kept the connections page
+ * allocating some 40 MB/s while the user only looked at it. An answer is kept as long as
+ * everything the rating reads is the same: the rating settings ([ratingSettingsVersion]), the
+ * data of OpenStreetMap and of the change positions, and the lookups the interface installed.
+ */
+internal object ChangeRatings {
+    // A power of two: the slot of a journey is its identity hash, masked. 256 entries hold the
+    // journeys of several searches; more only kept old live data alive.
+    private const val SIZE = 128
+    private const val MASK = SIZE - 1
+    private const val WAYS = 2
+    private val journeys = arrayOfNulls<Journey>(SIZE * WAYS)
+    private val rated = arrayOfNulls<RatedChanges>(SIZE * WAYS)
+    private val versions = IntArray(SIZE * WAYS)
+    // Per slot the way used last: a new entry takes the other one (least recently used).
+    private val recent = ByteArray(SIZE)
+    // Counts every clearing of the kept answers: an answer worked out before one is not kept.
+    private var epoch = 0
+    private var walks: Any? = null
+    private var platforms: Any? = null
+    private var records: Any? = null
+    private var osm: Any? = null
+    private var positions: Any? = null
+    private var regions: Any? = null
+    // The tuning as plain values too: tests set them without telling (see setTransferTuning).
+    private var normal = Long.MIN_VALUE
+    private var relaxed = Long.MIN_VALUE
+    private var buffer = Long.MIN_VALUE
+    private var pace = Double.NaN
+    private var stepFree = false
+
+    /** How often a rating was asked for, and how often it had to be worked out (for the performance lab). */
+    @Volatile
+    var asked = 0L
+        private set
+
+    @Volatile
+    var computed = 0L
+        private set
+
+    /** The rated changes of [journey]: kept ones where they are still right, else worked out (outside the lock) and kept. */
+    fun of(journey: Journey): RatedChanges {
+        val version = ratingSettingsVersion
+        // The epoch the answer is worked out in: cleared meanwhile (other data, other settings),
+        // it is not kept (see keep).
+        val since = synchronized(this) {
+            kept(journey, version)?.let { return it }
+            epoch
+        }
+        val raw = rawChangesOf(journey)
+        val ratings = raw.map { uncertainTightness(it, changeTightness(it.arriving, it.next, it.walkMinutes)) }
+        val result = RatedChanges(
+            raw.mapIndexed { index, change ->
+                // An uncertain change has worked out its spare for the rating already.
+                change.copy(rating = ratings[index]).also { if (change.uncertain) it.knownSpare = change.spare }
+            },
+            ratings,
+        )
+        keep(journey, version, since, result)
+        return result
+    }
+
+    /** Drops every kept answer, as when memory runs short (see NextStopApp.onTrimMemory). */
+    @Synchronized
+    fun clear() {
+        journeys.fill(null)
+        rated.fill(null)
+        epoch++
+    }
+
+    /** Clears what is kept when anything the rating reads (not a setting) is another object now. Under the lock. */
+    private fun validate() {
+        // Anything the rating reads that is not a setting: when one of them is another object, nothing kept is right.
+        val nowWalks: Any = transferWalkSeconds
+        val nowPlatforms: Any = ridePlatforms
+        val nowRecords: Any = samePlatformRecord
+        val nowOsm = OsmStations.ratingData
+        val nowPositions = ChangePositions.ratingRecords
+        val nowRegions = ChangePositions.ratingRegions
+        if (nowWalks !== walks || nowPlatforms !== platforms || nowRecords !== records || nowOsm !== osm ||
+            nowPositions !== positions || nowRegions !== regions || normalSpare != normal || relaxedSpare != relaxed ||
+            changeBufferSeconds != buffer || walkSpeedFactor != pace || stepFreeWalks != stepFree
+        ) {
+            journeys.fill(null)
+            rated.fill(null)
+            epoch++
+            walks = nowWalks
+            platforms = nowPlatforms
+            records = nowRecords
+            osm = nowOsm
+            positions = nowPositions
+            regions = nowRegions
+            normal = normalSpare
+            relaxed = relaxedSpare
+            buffer = changeBufferSeconds
+            pace = walkSpeedFactor
+            stepFree = stepFreeWalks
+        }
+    }
+
+    /** The kept answer for [journey] at [version], or null. Under the lock (see of). */
+    private fun kept(journey: Journey, version: Int): RatedChanges? {
+        asked++
+        validate()
+        val index = System.identityHashCode(journey) and MASK
+        val slot = index * WAYS
+        for (way in 0 until WAYS) {
+            val at = slot + way
+            if (journeys[at] === journey && versions[at] == version) {
+                recent[index] = way.toByte()
+                return rated[at]
+            }
+        }
+        computed++
+        return null
+    }
+
+    @Synchronized
+    private fun keep(journey: Journey, version: Int, since: Int, result: RatedChanges) {
+        // Data that changed while it was worked out (a pack of OpenStreetMap came in, the cache
+        // was cleared): not kept, the next call works it out again with the new data.
+        validate()
+        if (epoch != since) return
+        val index = System.identityHashCode(journey) and MASK
+        val slot = index * WAYS
+        // The same journey (an older version of the settings) or an empty way first, else the
+        // way not used last in this slot.
+        var way = -1
+        for (w in 0 until WAYS) if (journeys[slot + w] === journey) way = w
+        if (way < 0) for (w in 0 until WAYS) if (way < 0 && journeys[slot + w] == null) way = w
+        if (way < 0) way = (recent[index] + 1) % WAYS
+        recent[index] = way.toByte()
+        val at = slot + way
+        journeys[at] = journey
+        rated[at] = result
+        versions[at] = version
+    }
 }
 
 /**
@@ -1388,11 +1624,13 @@ fun isProductWord(name: String): Boolean = name.trim().lowercase() in PRODUCT_ON
  *   "RJ 171", "ice 29" is "ICE 29"), see [canonicalTrainKind].
  * - The word for a local product in front of the line goes: "Tram 50", "STR 50" and
  *   "Bus 585" are "50" and "585", "Bus M48" is "M48" (see [withoutProductWord]).
+ * - FlixBus and FlixTrain read alike from every provider: "FlixBus 260", "FLX 30" (see
+ *   [flixLineName]).
  *
  * Other names stay as they are.
  */
 fun rapidLineName(name: String?, product: String): String? {
-    val plain = withoutProductWord(name ?: return null)
+    val plain = flixLineName(withoutProductWord(name ?: return null), product)
     val letter = when (product) {
         "suburban" -> "S"
         "subway" -> "U"

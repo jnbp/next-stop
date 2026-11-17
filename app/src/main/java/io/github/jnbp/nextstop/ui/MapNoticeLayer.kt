@@ -181,7 +181,7 @@ fun setNoticeMarkers(style: Style, markers: List<NoticeMarker>, density: Float, 
         val ink: Int?
         if (badge != null) {
             val color = lineColor(badge.line, badge.product, marker.position)
-            label = shortLine(badge.line) ?: badge.line
+            label = badgeLine(badge.line) ?: badge.line
             ground = color.toArgb()
             ink = lineInk(badge.line, badge.product, color, marker.position).toArgb()
         } else if (count > 1) {

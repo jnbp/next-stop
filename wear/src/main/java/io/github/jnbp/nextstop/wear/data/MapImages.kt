@@ -103,7 +103,7 @@ object MapImages {
     /**
      * A kept picture of the streets within [THUMBNAIL_METRES] of ([latitude], [longitude]) (any
      * position when null), the most recently used first, from memory or disk; null when none is
-     * kept. Never asks the phone: the start page shows it as a small preview of the map.
+     * kept. Never asks the phone.
      */
     suspend fun latestNear(context: Context, latitude: Double?, longitude: Double?): MapImage? {
         val x = longitude?.let { WebMercator.x(it) }

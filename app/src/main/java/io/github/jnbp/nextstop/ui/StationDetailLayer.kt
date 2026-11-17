@@ -1,5 +1,8 @@
 package io.github.jnbp.nextstop.ui
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
@@ -8,6 +11,8 @@ import android.graphics.Path as AndroidPath
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.SystemClock
+import android.view.animation.DecelerateInterpolator
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -255,7 +260,7 @@ private fun stationFeatures(station: OsmStation, anchor: String = Property.ICON_
  * race is harmless.
  */
 suspend fun prepareStationDetails() {
-    withContext(Dispatchers.Default) { detailFeatures() }
+    withContext(Dispatchers.Default) { AllocProbe.measureAny(AllocProbe.DETAIL_BUILD) { detailFeatures() } }
 }
 
 /** The sign of an entrance: "U", "S", "SU" (both) or "R" (regional trains only). */
@@ -401,6 +406,7 @@ private fun selectedPositionOpacity(alpha: Any): Expression = Expression.interpo
  * the one before, fading in while it grows past its size and settles. Call on the main thread.
  */
 fun setSelectedPositionsAppear(style: Style, elapsedMillis: Float) {
+    appearFrameAt = SystemClock.uptimeMillis()
     // How far each position has come in, 0 to 1, by its own place in the row.
     val progress = Expression.min(
         Expression.literal(1f),
@@ -498,6 +504,10 @@ fun setSelectedStopPositions(style: Style, stop: Stop?): Int {
     }
     selectedPills = pills
     shownSides = null
+    // New pills: nothing to hold on to, nothing to switch from.
+    placedSides = null
+    switchAnimator?.cancel()
+    switchAnimator = null
     nearSigns = null
     if (pills.isNotEmpty() && style.getImage(PIN_ONLY_IMAGE) == null) {
         style.addImage(PIN_ONLY_IMAGE, selectedPositionBitmap(null, emptyList(), detailDensity, null))
@@ -608,10 +618,14 @@ private var shownSides: List<PillSide>? = null
  * hollow dot.
  */
 private fun pillFeatures(style: Style, pills: List<SelectedPill>, sides: List<PillSide>): List<Feature> = pills.mapIndexed { index, pill ->
+    pillFeature(style, index, pill, sides.getOrNull(index) ?: PillSide.Above)
+}
+
+/** The feature of the pill [pill] (the [index]th) at [side]; a [tappable] one carries the "kind" a tap looks for. */
+private fun pillFeature(style: Style, index: Int, pill: SelectedPill, side: PillSide, tappable: Boolean = true): Feature {
     val position = pill.position
     val feature = Feature.fromGeometry(Point.fromLngLat(position.longitude, position.latitude))
-    feature.addStringProperty("kind", "pos")
-    val side = sides.getOrNull(index) ?: PillSide.Above
+    if (tappable) feature.addStringProperty("kind", "pos")
     val icon = when {
         pill.bare -> pill.icon
         side == PillSide.Above -> pill.icon
@@ -647,23 +661,146 @@ private fun pillFeatures(style: Style, pills: List<SelectedPill>, sides: List<Pi
         feature.addStringProperty("lines", position.lines.joinToString(", ") { it.name })
         feature.addStringProperty("lineCodes", position.lines.joinToString(",") { (if (it.product == "tram") "t" else "b") + it.name })
     }
-    feature
+    return feature
 }
 
 /**
  * Places the pills of the marked stop at [zoom] with the map turned by [bearing] (see
  * placePills): station signs always win; a pill that would cover one moves to a free side with
  * a leader line to its position, else shows as its pin; one that would cover a more important
- * pill shows as its pin alone. Cheap when nothing changes (a few boxes, no allocation of
+ * pill shows as its pin alone. A pill that changes its place cross-fades there instead of
+ * jumping (see animateSwitch). Cheap when nothing changes (a few boxes, no allocation of
  * features); call on the main thread when the camera moved.
  */
 fun declutterSelectedPositions(style: Style, zoom: Double, bearing: Double) {
     val pills = selectedPills
     if (pills.isEmpty()) return
-    val sides = placePills(pills.map { it.box }, signsNear(pills) + vehiclesNear(pills), zoom, bearing)
+    // The places of the pills depend on the zoom, the turn of the map and what they keep clear
+    // of, not on where the map stands: a pan (called for every frame of it) changes nothing.
+    if (shownSides != null && zoom == decluttered[0] && bearing == decluttered[1] && vehicleColumnBoxes === declutteredVehicles) return
+    AllocProbe.begin(AllocProbe.DECLUTTER)
+    try {
+        decluttered[0] = zoom
+        decluttered[1] = bearing
+        declutteredVehicles = vehicleColumnBoxes
+        placeSelectedPositions(style, pills, zoom, bearing)
+    } finally {
+        AllocProbe.end(AllocProbe.DECLUTTER, pills.size)
+    }
+}
+
+// The zoom and turn of the map the pills were last placed for, and the columns of vehicles then (see declutterSelectedPositions).
+private val decluttered = doubleArrayOf(Double.NaN, Double.NaN)
+private var declutteredVehicles: List<SignBox>? = null
+
+/** Places the pills of the marked stop for [zoom] and [bearing]: see declutterSelectedPositions. */
+private fun placeSelectedPositions(style: Style, pills: List<SelectedPill>, zoom: Double, bearing: Double) {
+    val before = placedSides
+    // From where they stand now, so a pill does not flicker between two places (see placePills).
+    val sides = placePills(pills.map { it.box }, signsNear(pills) + vehiclesNear(pills), zoom, bearing, previous = before)
     if (sides == shownSides) return
     shownSides = sides
-    style.getSourceAs<GeoJsonSource>(SELECTED_POS_SOURCE)?.setGeoJson(FeatureCollection.fromFeatures(pillFeatures(style, pills, sides)))
+    placedSides = sides
+    val switched = switchedPills(before, sides)
+    if (before == null || switched.isEmpty() || !switchAnimated()) {
+        // A switch still running ends where this one stands; the pop-in of new pills is left alone.
+        val running = switchAnimator
+        switchAnimator = null
+        running?.cancel()
+        if (running != null) resetSwitch(style)
+        style.getSourceAs<GeoJsonSource>(SELECTED_POS_SOURCE)?.setGeoJson(FeatureCollection.fromFeatures(pillFeatures(style, pills, sides)))
+        return
+    }
+    animateSwitch(style, pills, before, sides, switched)
+}
+
+// The sides the pills of the marked stop were last placed at: where the hysteresis and an
+// animated switch start from; null for pills just put in.
+private var placedSides: List<PillSide>? = null
+
+// The switch of pills between their pin and a side running now, if one does.
+private var switchAnimator: ValueAnimator? = null
+
+// When the marked stop's pills last drew a frame of their pop-in (see setSelectedPositionsAppear).
+private var appearFrameAt = 0L
+
+// A pill moving between its pin and a side cross-fades over this long.
+private const val PILL_SWITCH_MILLIS = 220L
+
+/** True when a switch of pills is animated: animations on, and the pills not popping in right now. */
+private fun switchAnimated(): Boolean =
+    ValueAnimator.areAnimatorsEnabled() && SystemClock.uptimeMillis() - appearFrameAt > 2 * POSITION_POP_MILLIS
+
+/**
+ * Moves the [switched] pills of [pills] from their sides [before] to [after] as a short
+ * cross-fade instead of a jump: the pill at its new place fades and grows in while its picture
+ * at the old place fades out; then only the new ones stay. The others stand still.
+ */
+private fun animateSwitch(style: Style, pills: List<SelectedPill>, before: List<PillSide>, after: List<PillSide>, switched: Set<Int>) {
+    val source = style.getSourceAs<GeoJsonSource>(SELECTED_POS_SOURCE) ?: return
+    switchAnimator?.cancel()
+    val features = ArrayList<Feature>(pills.size + switched.size)
+    pills.forEachIndexed { index, pill ->
+        val feature = pillFeature(style, index, pill, after[index])
+        if (index in switched) {
+            feature.addStringProperty("fade", "in")
+            // The old picture: drawn, never tapped (it has no "kind"), faded out.
+            val old = pillFeature(style, index, pill, before[index], tappable = false)
+            old.addStringProperty("fade", "out")
+            features.add(old)
+        }
+        features.add(feature)
+    }
+    setSwitchShare(style, 0f)
+    source.setGeoJson(FeatureCollection.fromFeatures(features))
+    val final = pillFeatures(style, pills, after)
+    switchAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = PILL_SWITCH_MILLIS
+        interpolator = DecelerateInterpolator()
+        addUpdateListener { animation ->
+            if (style.isFullyLoaded) setSwitchShare(style, animation.animatedValue as Float)
+        }
+        addListener(object : AnimatorListenerAdapter() {
+            private var cancelled = false
+
+            override fun onAnimationCancel(animation: Animator) {
+                cancelled = true
+            }
+
+            override fun onAnimationEnd(animation: Animator) {
+                if (switchAnimator === animation) switchAnimator = null
+                // Cut short by a newer switch or new pills: those have set what is shown.
+                if (cancelled || !style.isFullyLoaded) return
+                resetSwitch(style)
+                style.getSourceAs<GeoJsonSource>(SELECTED_POS_SOURCE)?.setGeoJson(FeatureCollection.fromFeatures(final))
+            }
+        })
+        start()
+    }
+}
+
+/** How far a switch of pills has come, 0 to 1: the new pictures fade and grow in, the old ones fade out. */
+private fun setSwitchShare(style: Style, share: Float) {
+    val fade = Expression.coalesce(Expression.get("fade"), Expression.literal(""))
+    style.getLayer(SELECTED_POS_LAYER)?.setProperties(
+        PropertyFactory.iconOpacity(
+            selectedPositionOpacity(
+                Expression.match(fade, Expression.literal(1f), Expression.stop("in", share), Expression.stop("out", 1f - share)),
+            ),
+        ),
+        PropertyFactory.iconSize(
+            Expression.match(fade, Expression.literal(1f), Expression.stop("in", 0.85f + 0.15f * share), Expression.stop("out", 1f)),
+        ),
+    )
+}
+
+/** The pills as they stand at rest: full, at their size. */
+private fun resetSwitch(style: Style) {
+    if (switchAnimator != null) return
+    style.getLayer(SELECTED_POS_LAYER)?.setProperties(
+        PropertyFactory.iconOpacity(selectedPositionOpacity(1f)),
+        PropertyFactory.iconSize(1f),
+    )
 }
 
 /** A tapped stop position of the marked stop: its number, its stop area's name, its lines and where it is. */
@@ -874,7 +1011,7 @@ private fun addDetailLayer(style: Style, layer: SymbolLayer, below: String) {
 fun setStationDetails(style: Style) {
     val source = style.getSourceAs<GeoJsonSource>(DETAIL_SOURCE) ?: return
     if (!OsmStations.loaded) return
-    source.setGeoJson(detailFeatures())
+    AllocProbe.measure(AllocProbe.STATION_DETAILS) { source.setGeoJson(detailFeatures()) }
 }
 
 /** Shows or hides the details: [shown] while the map is free, and only where the setting is on. */

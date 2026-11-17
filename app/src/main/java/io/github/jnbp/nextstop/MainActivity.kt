@@ -2,9 +2,11 @@ package io.github.jnbp.nextstop
 
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
@@ -21,11 +23,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import io.github.jnbp.nextstop.data.AppLanguage
 import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.ui.ACTION_OPEN_TRIP
 import io.github.jnbp.nextstop.ui.AppLinks
 import io.github.jnbp.nextstop.ui.AppRoot
+import io.github.jnbp.nextstop.ui.BackTouch
+import io.github.jnbp.nextstop.ui.BackWindows
+import io.github.jnbp.nextstop.ui.PerfLabOverlay
+import io.github.jnbp.nextstop.ui.OpenJourneyKeeper
+import io.github.jnbp.nextstop.ui.Resume
+import io.github.jnbp.nextstop.ui.ResumeLog
 import io.github.jnbp.nextstop.ui.SetupState
 import io.github.jnbp.nextstop.ui.SetupWizard
 import io.github.jnbp.nextstop.ui.SplashContinuation
@@ -36,6 +45,7 @@ import io.github.jnbp.nextstop.ui.refreshTripNotification
 import io.github.jnbp.nextstop.ui.theme.AppColors
 import io.github.jnbp.nextstop.ui.theme.Appearance
 import io.github.jnbp.nextstop.ui.theme.DarkChoice
+import io.github.jnbp.nextstop.ui.theme.appPalette
 import io.github.jnbp.nextstop.ui.theme.NextStopTheme
 import io.github.jnbp.nextstop.ui.theme.appInDark
 import io.github.jnbp.nextstop.ui.theme.systemDark
@@ -58,6 +68,9 @@ class MainActivity : ComponentActivity() {
     // True while the end of the splash screen plays in Compose (see SplashContinuation).
     private var splashContinues by mutableStateOf(false)
 
+    // True once this page was started: a later onStart brings back a page that was kept.
+    private var startedOnce = false
+
     // False when the system has animations switched off: the splash then ends plainly.
     private val animationsOn: Boolean by lazy {
         val scale = try {
@@ -72,18 +85,28 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AppLanguage.init(this)
         Appearance.load(this)
-        followBars(
-            when (Appearance.darkChoice) {
-                DarkChoice.Light -> false
-                DarkChoice.Dark -> true
-                DarkChoice.System -> systemDark(this)
-            },
-        )
+        val darkAtStart = when (Appearance.darkChoice) {
+            DarkChoice.Light -> false
+            DarkChoice.Dark -> true
+            DarkChoice.System -> systemDark(this)
+        }
+        followBars(darkAtStart)
+        // Behind the app lies its own ground, not the white of the platform theme: whatever is
+        // not drawn yet when the page comes back (the map's surface, the first frame) is not a flash.
+        followGround(appPalette(this, Appearance.colorChoice, Appearance.accent, darkAtStart).ground.toArgb())
         // A page that is built again keeps what it showed; only a fresh start follows the tap.
         if (savedInstanceState == null) followTap(intent)
         // The setup comes first until it was finished or skipped once.
-        if (!AppPrefs(this).setupDone) SetupState.open = true
-        holdSplash()
+        val prefs = AppPrefs(this)
+        if (!prefs.setupDone) SetupState.open = true
+        // The buffers of the transfer rating and the walking pace as set (also done by NextStopApp
+        // for every entry point; again here in case the settings were restored meanwhile).
+        prefs.applyRatingSettings()
+        // Only a real start keeps the splash screen for its logo; a page that comes back or is
+        // built again (restored after the end of the process) shows what it had at once.
+        if (Resume.created(restored = savedInstanceState != null)) holdSplash() else dropSplash()
+        // The open journey page kept on the device comes back with a restored page (see OpenJourneyKeeper).
+        OpenJourneyKeeper.created(this, restored = savedInstanceState != null)
         setContent {
             NextStopTheme {
                 val dark = appInDark()
@@ -91,6 +114,7 @@ class MainActivity : ComponentActivity() {
                 // The icons of the status and navigation bars, and the notification of a trip, follow the choice.
                 DisposableEffect(dark, palette) {
                     followBars(dark)
+                    followGround(palette.ground.toArgb())
                     refreshTripNotification(this@MainActivity)
                     onDispose {}
                 }
@@ -99,6 +123,8 @@ class MainActivity : ComponentActivity() {
                     Crossfade(targetState = SetupState.open, animationSpec = tween(400), label = "setup") { setup ->
                         if (setup) SetupWizard(onDone = { SetupState.open = false }) else AppRoot()
                     }
+                    // Debug and staging builds, or unlocked developer options: the panel of the performance lab, when opened.
+                    PerfLabOverlay()
                     // The splash screen ends over the app: its blue and logo fade into it.
                     if (splashContinues) {
                         SplashContinuation(
@@ -164,6 +190,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * A page that comes back or is built again: the splash screen the system may show for it
+     * (after the end of the process) goes with the first frame, without the logo or the blue
+     * fading over the app, and nothing waits for it.
+     */
+    private fun dropSplash() {
+        splashScreen.setOnExitAnimationListener { splash -> splash.remove() }
+    }
+
+    // The ground of the window, under everything the app draws.
+    private fun followGround(color: Int) {
+        window.setBackgroundDrawable(ColorDrawable(color))
+    }
+
     // Light icons on dark pages and dark icons on light ones.
     private fun followBars(dark: Boolean) {
         val bar = if (dark) {
@@ -179,7 +219,28 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(statusBarStyle = bar, navigationBarStyle = navigation)
     }
 
+    // Every touch passes BackTouch first: it keeps the progress of a back gesture coming to the
+    // app when something in the page has asked the window not to intercept the touches.
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        BackTouch.beforeDispatch(window, ev, navigationEventDispatcher)
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) ResumeLog.once("first touch")
+        return super.dispatchTouchEvent(ev)
+    }
+
+    // The window is attached now (its view root exists): from here on the system works out the
+    // progress of a back gesture in it and sends it, as it does for a dialog (see BackWindows).
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        BackWindows.handProgressToSystem(this)
+    }
+
     override fun onStart() {
+        // Debug and staging builds: how long the page takes to show and take touches again.
+        if (ResumeLog.on) {
+            ResumeLog.started(if (startedOnce) "page kept" else "page created")
+            startedOnce = true
+            window.decorView.viewTreeObserver.registerFrameCommitCallback { ResumeLog.once("first frame") }
+        }
         super.onStart()
         // The widgets get the position of the app and fresh data while it is in front.
         WidgetUpdates.onAppForeground(this)

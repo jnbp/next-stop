@@ -121,10 +121,14 @@ private val SPACES = Regex("\\s+")
  * K.-Liebknecht-Str]" is "S+U Alexanderplatz" with the part "Bus K.-Liebknecht-Str." where the
  * app is used in Berlin ([home], see [LocalTown]), "S Golm (Potsdam)" keeps its town there.
  * Brackets that belong to a town's name ("Frankfurt (Oder)") stay. The raw name stays what
- * requests and ids use; this is only for showing it. The watch has a twin of this, [sameTown]
+ * requests and ids use; this is only for showing it. Generic English endings of names from
+ * Europe-wide data come in the app's language already (see [localStopTerms], applied where a
+ * provider's answer is read, where the position tells whether the stop lies in Germany);
+ * [language] is no longer used here. The watch has a twin of this, [sameTown]
  * and [dominantTown] in its data/StopNames.kt: change both together.
  */
-fun stopNameParts(name: String, home: String? = LocalTown.reference): StopNameParts {
+@Suppress("UNUSED_PARAMETER")
+fun stopNameParts(name: String, home: String? = LocalTown.reference, language: String = AppLanguage.code): StopNameParts {
     var rest = name.trim().replace(SPACES, " ")
     val parts = ArrayList<String>(1)
     while (true) {
@@ -132,9 +136,27 @@ fun stopNameParts(name: String, home: String? = LocalTown.reference): StopNamePa
         parts.add(0, match.groupValues[2].trim().replace(STREET_WITHOUT_DOT, "."))
         rest = match.groupValues[1].trim()
     }
+    // Generic English words at the end came in the app's language already where the provider's
+    // answer was read (see localStopTerms, which knows there whether the stop lies in Germany).
+    // An address with the house number in front ("32 Musterstraße") as Germans write it.
+    rest = germanStreetOrder(rest)
+    // "S+U Zoologischer Garten Bhf" as "S+U Zoologischer Garten": the S+U says it is a station.
+    rest = withoutRedundantStationWord(rest)
     val town = townInBrackets(rest)
-    val title = if (town != null && town.town != null && sameTown(town.town, home)) town.stop else rest
+    val title = when {
+        town != null && town.town != null && sameTown(town.town, home) -> town.stop
+        else -> withoutTownAfterComma(rest, home)
+    }
     return StopNameParts(title.ifEmpty { name.trim() }, parts.filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { null })
+}
+
+// "Stop, Town" at the end of a name.
+private val TOWN_AFTER_COMMA = Regex("""^(.*\S),\s*([^,()\[\]]+)$""")
+
+/** [name] without ", Town" at its end where that town is [home] ("Rathaus, Springfield" in Springfield); else as it is. */
+private fun withoutTownAfterComma(name: String, home: String?): String {
+    val match = TOWN_AFTER_COMMA.matchEntire(name) ?: return name
+    return if (sameTown(match.groupValues[2].trim(), home)) match.groupValues[1].trim() else name
 }
 
 /** The part of a big station the stop [this] is, as a small line below its name (see [stopNameParts]); null for none. */
@@ -194,16 +216,29 @@ private const val MIN_TOWN_STOPS = 3
 /** The town [name] names (see [splitStopTown]); null where it names none. */
 fun townOf(name: String?): String? = name?.let { splitStopTown(it).town }
 
+// A stop part that is only the word for the main station or a station of its town, as the
+// regional providers name the stations of other towns ("Leipzig, Hauptbahnhof", "Bitterfeld, Bahnhof").
+private val MAIN_STATION_WORD = Regex("^(?:hauptbahnhof|hbf\\.?)$", RegexOption.IGNORE_CASE)
+private val STATION_ONLY_WORD = Regex("^(?:bahnhof|bf\\.?|bhf\\.?)$", RegexOption.IGNORE_CASE)
+
 /**
  * The name of a stop to show in a list that belongs to the town [reference] (a board, a
  * ride): the stop alone where it lies in that town or its name says no town, else compactly
  * "Kirchstr. · Zagelsdorf". Without a [reference] a town the name says is always shown.
+ *
+ * A station named only by its town ("Leipzig, Hauptbahnhof", "Bitterfeld, Bahnhof", as the
+ * regional providers name long-distance stations elsewhere) reads as the railway names it:
+ * "Leipzig Hbf" always, "Bitterfeld" in another town; in its own town a plain "Bahnhof" stays
+ * (the station of the town a local bus runs to), never "Hauptbahnhof · Leipzig".
  */
 fun townedStopName(name: String, reference: String?): String {
     val split = splitStopTown(name)
     val town = split.town ?: return name.plainStopName()
     val stop = split.stop.plainStopName().ifEmpty { name.plainStopName() }
-    return if (sameTown(town, reference)) stop else "$stop · $town"
+    if (MAIN_STATION_WORD.matches(stop)) return "$town Hbf"
+    if (sameTown(town, reference)) return stop
+    if (STATION_ONLY_WORD.matches(stop)) return town
+    return "$stop · $town"
 }
 
 /**

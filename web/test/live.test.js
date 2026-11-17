@@ -291,6 +291,26 @@ test('the demo trip runs through every state without network', async () => {
   delete global.window;
 });
 
+test('the rides of the demo follow dense ways that pass every stop', async () => {
+  global.window = {};
+  delete require.cache[require.resolve('../live/demo.js')];
+  require('../live/demo.js');
+  const demo = global.window.NextStopDemo.create({ toBase64Url: live.toBase64Url, hash: '#demo&at=10' });
+  const j = live.parseFragment(demo.hash);
+  const metres = (a, b) => Math.hypot((a[0] - b[0]) * 111320, (a[1] - b[1]) * 111320 * Math.cos((a[0] * Math.PI) / 180));
+  for (const leg of j.legs.filter((l) => !l.walk)) {
+    const body = await (await demo.fetch(live.tripUrl(leg))).json();
+    const way = body.trip.polyline.features.map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+    // No straight line across the fields: a point at least every 50 m.
+    for (let i = 1; i < way.length; i++) assert.ok(metres(way[i - 1], way[i]) <= 50, 'gap in the way of ' + leg.line);
+    for (const stop of body.trip.stopovers) {
+      const at = [stop.stop.location.latitude, stop.stop.location.longitude];
+      assert.ok(Math.min(...way.map((p) => metres(p, at))) < 25, stop.stop.name + ' lies on the way of ' + leg.line);
+    }
+  }
+  delete global.window;
+});
+
 const fromKotlin = process.argv[2];
 if (fromKotlin) {
   test('a fragment made by the app (Kotlin base64Url) decodes', () => {

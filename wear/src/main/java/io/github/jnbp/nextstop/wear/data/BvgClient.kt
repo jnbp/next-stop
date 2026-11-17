@@ -157,8 +157,10 @@ class BvgClient(baseUrl: String = DEFAULT_URL) {
             )
         }
         val id = item.str("id") ?: return null
-        val name = item.str("name") ?: return null
         val location = item.optJSONObject("location")
+        val name = item.str("name")?.let {
+            localStopTerms(it, latitude = location?.dbl("latitude"), longitude = location?.dbl("longitude"))
+        } ?: return null
         return Place(
             id = id,
             name = name,
@@ -192,7 +194,7 @@ class BvgClient(baseUrl: String = DEFAULT_URL) {
         return Departure(
             line = lineName(line) ?: "?",
             product = line?.str("product") ?: "",
-            direction = item.str("direction") ?: "",
+            direction = localStopTerms(item.str("direction") ?: ""),
             time = item.millis("when") ?: item.millis("plannedWhen"),
             delayMinutes = if (item.isNull("delay")) null else item.optInt("delay") / 60,
             platform = item.str("platform"),
@@ -238,7 +240,7 @@ class BvgClient(baseUrl: String = DEFAULT_URL) {
             departureDelayMinutes = if (item.isNull("departureDelay")) 0 else item.optInt("departureDelay") / 60,
             arrivalDelayMinutes = if (item.isNull("arrivalDelay")) 0 else item.optInt("arrivalDelay") / 60,
             platform = item.str("departurePlatform"),
-            direction = item.str("direction"),
+            direction = item.str("direction")?.let { localStopTerms(it) },
             cancelled = item.optBoolean("cancelled", false),
             stopTimes = times,
             arrivalPlatform = item.str("arrivalPlatform"),

@@ -12,12 +12,12 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
 import io.github.jnbp.nextstop.R
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.stringResource
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.StartOffsetType
@@ -247,18 +247,41 @@ fun RollingText(
 fun trainOffset(progress: Float, trackWidth: Float, trainWidth: Float): Float =
     -trainWidth + progress.coerceIn(0f, 1f) * (trackWidth + trainWidth)
 
-// One run of the little train across its track, in milliseconds: slow and even.
-private const val TRAIN_RUN_MILLIS = 2_400
+/**
+ * The pace of the little train through one run, as the share of the way it has gone at [time]
+ * (both 0..1): quick while it is still hidden, slowing as it comes in so its front is in sight
+ * for a good moment, a calm steady middle, then speeding up again as it leaves. A cubic around
+ * the middle: speed 1 - [TRAIN_GLIDE_CALM] there and 1 + 2 * [TRAIN_GLIDE_CALM] at both ends.
+ */
+fun trainGlide(time: Float): Float {
+    val s = time.coerceIn(0f, 1f) - 0.5f
+    return 0.5f + (1f - TRAIN_GLIDE_CALM) * s + 4f * TRAIN_GLIDE_CALM * s * s * s
+}
 
-// Gentle at both ends, like a train pulling out and braking in: cubic-bezier(.45,.05,.55,.95).
-private val TRAIN_EASING = CubicBezierEasing(0.45f, 0.05f, 0.55f, 0.95f)
+/** How much slower the train is in the middle of its run than at its ends (see [trainGlide]). */
+const val TRAIN_GLIDE_CALM = 0.5f
+
+/** The widest share of its track the train may take, so it is always seen whole for a while. */
+const val TRAIN_MAX_TRACK_SHARE = 0.5f
+
+/** Pixels per unit of the train's drawing on a track [trackWidth] wide: [preferred], or less on a short track. */
+fun trainUnit(preferred: Float, trackWidth: Float): Float =
+    minOf(preferred, trackWidth * TRAIN_MAX_TRACK_SHARE / TRAIN_LENGTH_UNITS)
+
+// One run of the little train across its track, in milliseconds: a calm pass, slower than a
+// quick dash (2.0 s at an even speed went by too fast to see the front of the train).
+private const val TRAIN_RUN_MILLIS = 3_400
+
+// Ease out coming in, steady in the middle, ease in going out (see trainGlide). An even speed,
+// and an ease in and out before it, both spent too little of the run with the whole train in sight.
+private val TRAIN_EASING = Easing { trainGlide(it) }
 
 // Dp per unit of the drawing (a car is 30 x 18 units) on the phone.
 private const val TRAIN_SCALE = 0.75f
 
 /**
  * While content is on its way: a train of three plain rounded cars in the colour of the app
- * gliding over a dashed track from the left to the right, eased in and out
+ * gliding over a dashed track from the left to the right, slowing down while it is in sight
  * ([TRAIN_EASING], [TRAIN_RUN_MILLIS]), again and again; it fades in at the left edge and out
  * at the right one. No wheels, no couplings, nothing bobs. Standing in the middle when the
  * system has animations switched off. [description] is read out to accessibility services
@@ -294,7 +317,7 @@ fun TrainLoader(
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .then(if (label.isEmpty()) Modifier else Modifier.semantics { contentDescription = label }),
     ) {
-        val unit = TRAIN_SCALE.dp.toPx()
+        val unit = trainUnit(TRAIN_SCALE.dp.toPx(), size.width)
         val trainWidth = TRAIN_LENGTH_UNITS * unit
         val left = if (on) trainOffset(run, size.width, trainWidth) else (size.width - trainWidth) / 2
         drawMinimalTrain(left, unit, color, TRACK_GREY)
@@ -315,7 +338,7 @@ fun LoadingRow(text: String, modifier: Modifier = Modifier, compact: Boolean = f
         horizontalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp),
     ) {
         // The text says it: the train itself is not read out a second time.
-        TrainLoader(width = if (compact) 56.dp else 72.dp, description = "")
+        TrainLoader(width = if (compact) 80.dp else 96.dp, description = "")
         Text(
             text = text,
             color = AppColors.Muted,

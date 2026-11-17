@@ -9,7 +9,7 @@ import org.junit.Test
 /**
  * The rating of a change by the time it needs at its station: 1 minute across one platform,
  * 3 to another platform, 5 at a large rail station, a walk and one minute more; relaxed from
- * 5 minutes to spare, normal from 2, risky from 0, very risky below. Made-up stops only.
+ * 5 minutes to spare, normal from 1, risky from 0, very risky below. Made-up stops only.
  */
 class TransferRuleTest {
     private val start: OffsetDateTime = OffsetDateTime.parse("2026-01-01T10:00:00+01:00")
@@ -52,7 +52,7 @@ class TransferRuleTest {
         assertEquals(Tightness.Comfortable, spareTightness(5))
         assertEquals(Tightness.Tight, spareTightness(4))
         assertEquals(Tightness.Tight, spareTightness(2))
-        assertEquals(Tightness.Risky, spareTightness(1))
+        assertEquals(Tightness.Tight, spareTightness(1))
         assertEquals(Tightness.Risky, spareTightness(0))
         // Less than the change needs by the live times: a sprint.
         assertEquals(Tightness.VeryRisky, spareTightness(-1))
@@ -78,9 +78,9 @@ class TransferRuleTest {
 
     @Test
     fun largeRailStationNeedsFive() {
-        // 8 minutes at a station with regional trains: 3 to spare is normal; 6 minutes is risky.
+        // 8 minutes at a station with regional trains: 3 to spare is normal; 5 minutes is risky.
         assertEquals(Tightness.Tight, changeTightness(ride("suburban", a, railHub, 0, 10), ride("regional", railHub, b, 18, 40)))
-        assertEquals(Tightness.Risky, changeTightness(ride("suburban", a, railHub, 0, 10), ride("regional", railHub, b, 16, 40)))
+        assertEquals(Tightness.Risky, changeTightness(ride("suburban", a, railHub, 0, 10), ride("regional", railHub, b, 15, 40)))
     }
 
     @Test
@@ -152,10 +152,10 @@ class TransferRuleTest {
 
     @Test
     fun providerNormalJourneyKeepsStationRule() {
-        // Found with normal change times, but only 1 minute to spare at a station with regional
-        // trains (S-Bahn to S-Bahn, 6 minutes, 5 needed): still risky, the stricter rating wins.
+        // Found with normal change times, but nothing to spare at a station with regional
+        // trains (S-Bahn to S-Bahn, 5 minutes, 5 needed): still risky, the stricter rating wins.
         val journey = Journey(
-            listOf(ride("suburban", a, railHub, 0, 10), ride("suburban", railHub, b, 16, 30)),
+            listOf(ride("suburban", a, railHub, 0, 10), ride("suburban", railHub, b, 15, 30)),
             foundLevel = TransferComfort.Normal,
         )
         assertEquals(listOf(Tightness.Risky), journeyChangeRatings(journey))
@@ -166,21 +166,18 @@ class TransferRuleTest {
     }
 
     @Test
-    fun foundOnlyWithoutChangeTimeIsRiskyAtLeast() {
-        // 6 minutes at a U-Bahn station is normal by the rule, but only the search without any
-        // change time found the journey: it is risky.
-        val legs = listOf(ride("subway", a, hub, 0, 10), ride("subway", hub, b, 16, 20))
-        assertEquals(TransferComfort.Normal, journeyComfort(Journey(legs, foundLevel = TransferComfort.Normal)))
-        assertEquals(TransferComfort.Normal, journeyComfort(Journey(legs, foundLevel = TransferComfort.Relaxed)))
-        val risky = Journey(legs, foundLevel = TransferComfort.Risky)
-        assertEquals(listOf(Tightness.Risky), journeyChangeRatings(risky))
-        assertEquals(TransferComfort.Risky, journeyComfort(risky))
-        // Of two changes only the tightest is marked.
-        val two = Journey(
-            listOf(ride("subway", a, hub, 0, 10), ride("subway", hub, other, 20, 30), ride("subway", other, b, 36, 40)),
-            foundLevel = TransferComfort.Risky,
-        )
-        assertEquals(listOf(Tightness.Comfortable, Tightness.Risky), journeyChangeRatings(two))
+    fun theSearchThatFoundAJourneyDoesNotChangeItsRatings() {
+        // 3 minutes across one platform are normal by the rule, whichever search found the
+        // journey: the same change rates the same in every journey that holds it.
+        val legs = listOf(ride("subway", a, hub, 0, 10, platformTo = "2"), ride("subway", hub, b, 13, 20, platformFrom = "2"))
+        TransferComfort.entries.forEach { level ->
+            assertEquals(listOf(Tightness.Tight), journeyChangeRatings(Journey(legs, foundLevel = level)))
+        }
+        assertEquals(listOf(Tightness.Tight), journeyChangeRatings(Journey(legs)))
+        // Less than the normal buffer to spare is knapp by the rule itself.
+        val tight = listOf(ride("subway", a, hub, 0, 10), ride("subway", hub, b, 13, 20))
+        assertEquals(listOf(Tightness.Risky), journeyChangeRatings(Journey(tight, foundLevel = TransferComfort.Normal)))
+        assertEquals(listOf(Tightness.Risky), journeyChangeRatings(Journey(tight, foundLevel = TransferComfort.Risky)))
         assertEquals(TransferComfort.Risky, loosestLevel(listOf(TransferComfort.Risky)))
         assertEquals(TransferComfort.Normal, loosestLevel(listOf(TransferComfort.Risky, TransferComfort.Normal)))
     }
@@ -212,10 +209,10 @@ class TransferRuleTest {
     @Test
     fun changeRatingFollowsTheJourney() {
         val journey = Journey(
-            listOf(ride("subway", a, hub, 0, 10), ride("subway", hub, b, 16, 20)),
+            listOf(ride("subway", a, hub, 0, 10, platformTo = "2"), ride("subway", hub, b, 13, 20, platformFrom = "2")),
             foundLevel = TransferComfort.Risky,
         )
-        assertEquals(Tightness.Risky, changeRatingAt(journey, 1))
+        assertEquals(Tightness.Tight, changeRatingAt(journey, 1))
         assertEquals(null, changeRatingAt(journey, 0))
     }
 
@@ -289,13 +286,15 @@ class TransferRuleTest {
 
     @Test
     fun foundOnlyWithoutChangeTimeKeepsARoomyChange() {
-        // 10 minutes from the S-Bahn to the bus at one station need 3: 7 to spare is more than
-        // the change time of any search, so being found only by the search without change
-        // time says nothing about this change.
+        // 10 minutes from the S-Bahn to the bus at one station need 3: 7 to spare. Which search
+        // found the journey says nothing about the change.
         val legs = listOf(ride("suburban", a, hub, 0, 10), ride("bus", hub, b, 20, 30))
         assertEquals(listOf(Tightness.Comfortable), journeyChangeRatings(Journey(legs, foundLevel = TransferComfort.Risky)))
-        // With 4 to spare it is risky, as before.
+        // 7 minutes leave 4 to spare and are longer than the normal change time: normal.
         val closer = listOf(ride("suburban", a, hub, 0, 10), ride("bus", hub, b, 17, 30))
-        assertEquals(listOf(Tightness.Risky), journeyChangeRatings(Journey(closer, foundLevel = TransferComfort.Risky)))
+        assertEquals(listOf(Tightness.Tight), journeyChangeRatings(Journey(closer, foundLevel = TransferComfort.Risky)))
+        // 3 minutes leave nothing beyond the 3 needed: risky by the rule.
+        val short = listOf(ride("suburban", a, hub, 0, 10), ride("bus", hub, b, 13, 30))
+        assertEquals(listOf(Tightness.Risky), journeyChangeRatings(Journey(short, foundLevel = TransferComfort.Risky)))
     }
 }

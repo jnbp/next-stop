@@ -93,7 +93,8 @@ class RidePlaceTest {
         assertEquals("Sp 1910", rapidLineName("Sp 1910", "regional"))
         assertEquals("R 650", rapidLineName("R 650", "regional"))
         assertEquals("Ex 1", rapidLineName("Ex 1", "regional"))
-        assertEquals("Bus 585", rapidLineName("Bus 585", "bus"))
+        // The word for a local product goes (see withoutProductWord): "Bus 585" is "585".
+        assertEquals("585", rapidLineName("Bus 585", "bus"))
         assertEquals("re 5", rapidLineName("re 5", "bus"))
         assertEquals("4a", rapidLineName("4a", "tram"))
         assertEquals("S 1", rapidLineName("S 1", "suburban"))

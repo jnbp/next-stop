@@ -85,6 +85,8 @@ import io.github.jnbp.nextstop.wear.data.WatchStore
 import io.github.jnbp.nextstop.wear.data.currentPosition
 import io.github.jnbp.nextstop.wear.data.hasLocationPermission
 import io.github.jnbp.nextstop.wear.data.locationGrants
+import io.github.jnbp.nextstop.wear.data.listedStopName
+import io.github.jnbp.nextstop.wear.data.platformWithoutLine
 
 private val client = BvgClient()
 
@@ -310,7 +312,7 @@ fun NearbyStopsScreen(onStop: (Place) -> Unit) {
     }
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
     ScreenScaffold(scrollState = listState) { contentPadding ->
-        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
             item { ListHeader { Text(stringResource(R.string.nearby_departures), maxLines = 2, overflow = TextOverflow.Ellipsis) } }
             if (loading) item { LoadingNote(stringResource(R.string.loading)) }
             problem?.let { current ->
@@ -360,7 +362,8 @@ private fun StopButton(stop: Place, nearest: Boolean, onClick: () -> Unit) {
         modifier = Modifier.fillMaxWidth().then(press.modifier),
         interactionSource = press.source,
         colors = if (nearest) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
-        label = { Text(stop.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        // As the start page's header names it: without the town the watch is used in (see stopNameParts).
+        label = { Text(listedStopName(stop.name), maxLines = 2, overflow = TextOverflow.Ellipsis) },
         secondaryLabel = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 stop.distanceMeters?.let { meters ->
@@ -403,12 +406,14 @@ private fun productLabel(product: String): String = when (product) {
  * the departures are the rows of the start page with big minutes that count down on the
  * page's own clock, in two lines each (badge, platform and delay; the direction below; see
  * DepartureRow). When a request fails the last loaded board (also from an earlier run of the
- * app, see [DepartureCache]) stays with its age, under the reason and a retry. Below the
- * departures two full-size buttons start a route search from this stop ([onRouteFrom], the
- * destination is chosen next) or to it ([onRouteTo], from the user's position).
+ * app, see [DepartureCache]) stays with its age, under the reason and a retry. The header says
+ * "Departures" above the stop's name, so the page says what it is. Two full-size buttons start
+ * a route search from this stop ([onRouteFrom], the destination is chosen next) or to it
+ * ([onRouteTo], from the user's position): below the departures, or for a [favorite] (usually
+ * a destination) right under the header, "to here" first.
  */
 @Composable
-fun DeparturesScreen(stop: Place?, onRouteFrom: (Place) -> Unit = {}, onRouteTo: (Place) -> Unit = {}) {
+fun DeparturesScreen(stop: Place?, onRouteFrom: (Place) -> Unit = {}, onRouteTo: (Place) -> Unit = {}, favorite: Boolean = false) {
     val context = LocalContext.current
     val stopId = stop?.id
     // The cached board is read off the main thread, first thing of the loading below.
@@ -452,17 +457,25 @@ fun DeparturesScreen(stop: Place?, onRouteFrom: (Place) -> Unit = {}, onRouteTo:
     // The header at the top, the first departure in the middle of the screen (as on the start page).
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 1)
     ScreenScaffold(scrollState = listState) { contentPadding ->
-        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
             item {
                 if (stop == null) {
                     ListHeader { Text(stringResource(R.string.nearby_departures), maxLines = 2, overflow = TextOverflow.Ellipsis) }
                 } else {
-                    StopHeader(name = stop.name, detail = stop.distanceMeters?.let { stringResource(R.string.distance_m, it) })
+                    StopHeader(
+                        name = stop.name,
+                        detail = stop.distanceMeters?.let { stringResource(R.string.distance_m, it) },
+                        kicker = stringResource(R.string.board_kicker),
+                    )
                 }
             }
             if (stop == null) {
                 item { Note(stringResource(R.string.no_results)) }
                 return@ScalingLazyColumn
+            }
+            if (favorite) {
+                item { BoardAction(R.string.route_to_here, R.drawable.ic_place, onClick = { onRouteTo(stop) }) }
+                item { BoardAction(R.string.route_from_here, R.drawable.ic_route, onClick = { onRouteFrom(stop) }) }
             }
             val current = shown
             if (loading && current == null) item { LoadingNote(stringResource(R.string.loading)) }
@@ -474,8 +487,10 @@ fun DeparturesScreen(stop: Place?, onRouteFrom: (Place) -> Unit = {}, onRouteTo:
                     Box(modifier = Modifier.watchAppear()) { DepartureRow(departure, now = now, details = true) }
                 }
             }
-            item { BoardAction(R.string.route_from_here, R.drawable.ic_route, onClick = { onRouteFrom(stop) }) }
-            item { BoardAction(R.string.route_to_here, R.drawable.ic_place, onClick = { onRouteTo(stop) }) }
+            if (!favorite) {
+                item { BoardAction(R.string.route_from_here, R.drawable.ic_route, onClick = { onRouteFrom(stop) }) }
+                item { BoardAction(R.string.route_to_here, R.drawable.ic_place, onClick = { onRouteTo(stop) }) }
+            }
         }
     }
 }
@@ -497,12 +512,14 @@ private fun BoardAction(label: Int, icon: Int, onClick: () -> Unit) {
     )
 }
 
-/** "Gl. 2" for plain numbers; texts such as "Pos. 11" already say what they are. */
+/**
+ * "Gl. 2" for plain numbers; texts such as "Pos. 11" already say what they are. Without the
+ * [line] in brackets that some providers add ("1 (U7)"): its badge beside it says it.
+ */
 @Composable
-internal fun platformText(platform: String?): String? = when {
-    platform.isNullOrBlank() -> null
-    platform.first().isDigit() -> stringResource(R.string.platform, platform)
-    else -> platform
+internal fun platformText(platform: String?, line: String? = null): String? {
+    val shown = platformWithoutLine(platform, line) ?: return null
+    return if (shown.first().isDigit()) stringResource(R.string.platform, shown) else shown
 }
 
 /**
@@ -554,7 +571,7 @@ fun RouteScreen(
         onUnavailable = { matches = Load.Failed },
     )
     ScreenScaffold(scrollState = listState) { contentPadding ->
-        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
             item { ListHeader { Text(stringResource(R.string.destination)) } }
             if (origin != null) item { Note(stringResource(R.string.from_place, origin.name)) }
             // Shown whenever the phone does not answer, even with places cached from earlier.
@@ -586,7 +603,7 @@ fun RouteScreen(
                             onClick = { onDestination(place) },
                             modifier = Modifier.fillMaxWidth().then(press3.modifier),
                             interactionSource = press3.source,
-                            label = { Text(place.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                            label = { Text(if (place.kind == PlaceKind.Stop) listedStopName(place.name) else place.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                         )
                     }
                 }
@@ -836,7 +853,7 @@ fun ResultsScreen(origin: Place? = null, destination: Place?, onStarted: () -> U
     }
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
     ScreenScaffold(scrollState = listState) { contentPadding ->
-        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
             item {
                 ListHeader {
                     Text(destination?.name ?: stringResource(R.string.results), maxLines = 2, overflow = TextOverflow.Ellipsis)

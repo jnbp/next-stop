@@ -60,4 +60,19 @@ class DistanceFormatTest {
         assertEquals(1L to 10L, walkSpan(70))
         assertEquals(2L to 0L, walkSpan(120))
     }
+
+    @Test
+    fun durationsReadAsHoursAndMinutes() {
+        // "143 min" is hard to read: 2 h 23 min.
+        assertEquals(2L to 23L, durationSpan(143))
+        assertEquals(null to 48L, durationSpan(48))
+        assertEquals(null to 0L, durationSpan(0))
+        assertEquals(1L to null, durationSpan(60))
+        assertEquals(2L to null, durationSpan(120))
+        assertEquals(1L to 1L, durationSpan(61))
+        // A long ride: 413 min is "6 h 53 min", more than a day stays hours ("41 h 3 min"), never minutes alone.
+        assertEquals(6L to 53L, durationSpan(413))
+        assertEquals(41L to 3L, durationSpan(2463))
+        assertEquals(null to 59L, durationSpan(59))
+    }
 }

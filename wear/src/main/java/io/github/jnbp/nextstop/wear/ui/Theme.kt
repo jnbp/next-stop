@@ -30,6 +30,12 @@ object Brand {
 
     /** Secondary text on [Blue]: still above 4.5:1. */
     val OnBlueSoft = Color(0xFFDCE5FF)
+
+    /** A late time or delay: the phone's dark-scheme delay red (see DepartureTones). */
+    val Late = Color(0xFFFF6F66)
+
+    /** A time on time or early, an early delay: the phone's dark-scheme green (see DepartureTones). */
+    val Early = Color(0xFF5BD68A)
 }
 
 /** The main action of a page: filled in the brand blue. */

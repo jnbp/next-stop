@@ -50,6 +50,29 @@ fun leaveWalkSeconds(
     return pacedSeconds(ceil(meters / LEAVE_METERS_PER_MINUTE * 60.0).toInt(), factor)
 }
 
+/** The walk from [here] to [stop] at the pace set (see [leaveWalkSeconds]); null without its place or too far. */
+fun leaveStopWalkSeconds(here: Pair<Double, Double>, stop: Stop): Int? = stop.position?.let { leaveWalkSeconds(here, it) }
+
+/**
+ * Where the departures of a stop [walkSeconds] away are asked from for "when to leave": not
+ * before the user can be there, less the [keptSeconds] a missed one stays listed (see
+ * [catchableLeaves]); [from] (a time the user picked) when that is later, and [from] as it is
+ * (null: now) without a walk. Asked from now, a busy stop farther away brought only departures
+ * that leave before the user gets there, all dropped as missed, and the stop vanished from
+ * "when to leave" while the order by departure showed it.
+ */
+fun leaveDeparturesFrom(
+    walkSeconds: Int?,
+    from: OffsetDateTime?,
+    now: OffsetDateTime,
+    keptSeconds: Long = LEAVE_MISSED_KEPT_SECONDS,
+): OffsetDateTime? {
+    val ahead = (walkSeconds ?: 0) - keptSeconds
+    if (ahead <= 0) return from
+    val reachable = now.plusSeconds(ahead)
+    return if (from != null && !from.isBefore(reachable)) from else reachable
+}
+
 /** True when [stop] is close enough to [here] to walk to (see [LEAVE_MAX_METERS]). */
 fun walkableFrom(here: Pair<Double, Double>, stop: Stop?): Boolean {
     val position = stop?.position ?: return false

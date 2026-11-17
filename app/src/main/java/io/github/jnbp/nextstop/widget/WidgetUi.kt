@@ -52,6 +52,7 @@ import io.github.jnbp.nextstop.data.replacedProduct
 import io.github.jnbp.nextstop.ui.ACTION_OPEN_TRIP
 import io.github.jnbp.nextstop.ui.SEV_MARK
 import io.github.jnbp.nextstop.ui.StepKind
+import io.github.jnbp.nextstop.ui.TripStep
 import io.github.jnbp.nextstop.ui.boardingHint
 import io.github.jnbp.nextstop.ui.boardingPositionOf
 import io.github.jnbp.nextstop.ui.clock
@@ -60,6 +61,7 @@ import io.github.jnbp.nextstop.ui.onLineColor
 import io.github.jnbp.nextstop.ui.placeLine
 import io.github.jnbp.nextstop.ui.rideAfter
 import io.github.jnbp.nextstop.ui.shortLine
+import io.github.jnbp.nextstop.ui.badgeLine
 import io.github.jnbp.nextstop.ui.stepDelay
 import io.github.jnbp.nextstop.ui.tripStep
 import io.github.jnbp.nextstop.ui.theme.AppPalette
@@ -269,7 +271,7 @@ internal fun LineBadge(line: String?, product: String, height: Dp = 20.dp, size:
             .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Label(shortLine(line) ?: "", ColorProvider(onLineColor(ground)), size = size, bold = true)
+        Label(badgeLine(line) ?: "", ColorProvider(onLineColor(ground)), size = size, bold = true)
     }
 }
 
@@ -605,7 +607,7 @@ internal fun TripBody(journey: Journey, colors: WidgetColors, now: OffsetDateTim
                     LineBadge(leg.line, leg.product, height = 18.dp, size = 11.sp, color = lineColor(leg).toArgb())
                     Gap(width = 4.dp)
                 }
-                Label(stepText(context, step.kind, leg?.line), colors.ink, size = 13.sp, bold = true, modifier = GlanceModifier.defaultWeight())
+                Label(stepText(context, step, leg?.line), colors.ink, size = 13.sp, bold = true, modifier = GlanceModifier.defaultWeight())
             }
         }
         return
@@ -627,7 +629,7 @@ internal fun TripBody(journey: Journey, colors: WidgetColors, now: OffsetDateTim
                 LineBadge(leg.line, leg.product, height = 18.dp, size = 11.sp, color = lineColor(leg).toArgb())
                 Gap(width = 5.dp)
             }
-            Label(stepText(context, step.kind, leg?.line), colors.ink, size = 14.sp, bold = true)
+            Label(stepText(context, step, leg?.line), colors.ink, size = 14.sp, bold = true)
         }
         Label(placeLine(context, step, journey), colors.muted, size = 12.sp)
         val hint = if (layout.roomy) boardingHint(context, step, journey) else null
@@ -661,10 +663,15 @@ internal fun TripBody(journey: Journey, colors: WidgetColors, now: OffsetDateTim
 }
 
 /** "Take U7", "Get off", "Walk", "Arrived": the step in a few words. */
-private fun stepText(context: Context, kind: StepKind, line: String?): String = when (kind) {
-    StepKind.Board -> context.getString(R.string.widget_take_line, shortLine(line) ?: "")
+private fun stepText(context: Context, step: TripStep, line: String?): String = when (step.kind) {
+    // Before the walk to the first ride: when to leave ("Leave 05:07"), not the ride.
+    StepKind.Board -> if (step.leave) {
+        context.getString(R.string.widget_leave_at, clockOf(step.time.toInstant().toEpochMilli()))
+    } else {
+        context.getString(R.string.widget_take_line, shortLine(line) ?: "")
+    }
     StepKind.GetOff -> context.getString(R.string.widget_get_off)
-    StepKind.WalkToEnd -> context.getString(R.string.widget_walk)
+    StepKind.WalkToEnd -> context.getString(if (step.cycling) R.string.widget_cycle else R.string.widget_walk)
     StepKind.Arrived -> context.getString(R.string.arrived)
 }
 

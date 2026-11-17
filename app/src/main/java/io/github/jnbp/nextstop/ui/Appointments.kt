@@ -5,6 +5,10 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
@@ -211,11 +215,23 @@ fun AppointmentTile(
                             }
                         }
                     }
-                    // Right: when to leave, in the accent colour; never cut short.
+                    // Right: when to leave, in the accent colour; never cut short. It comes once the
+                    // connection is known: it grows in from the right edge and pops up, the title
+                    // making room for it; its last time stays while it goes again.
                     val leave = state.leaveAt
-                    if (leave != null && !state.placeMissing) {
+                    // A plain holder, not state: kept for the exit only, read in the same pass.
+                    val lastLeave = remember { arrayOfNulls<OffsetDateTime>(1) }
+                    if (leave != null) lastLeave[0] = leave
+                    AnimatedVisibility(
+                        visible = leave != null && !state.placeMissing,
+                        enter = expandHorizontally(LEAVE_PILL_SPRING, expandFrom = Alignment.End) +
+                            scaleIn(LEAVE_PILL_SCALE, initialScale = 0.6f) + fadeIn(),
+                        exit = shrinkHorizontally(LEAVE_PILL_SPRING, shrinkTowards = Alignment.End) +
+                            scaleOut(targetScale = 0.6f) + fadeOut(),
+                    ) {
+                        val pill = lastLeave[0] ?: return@AnimatedVisibility
                         Text(
-                            text = stringResource(R.string.leave_pill, leave.clock()),
+                            text = stringResource(R.string.leave_pill, pill.clock()),
                             color = AppColors.OnBlue,
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 14.sp,
@@ -259,6 +275,10 @@ fun AppointmentTile(
         }
     }
 }
+
+// The leave pill grows in with a slight bounce (see AppointmentCard).
+private val LEAVE_PILL_SPRING = spring<IntSize>(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)
+private val LEAVE_PILL_SCALE = spring<Float>(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow)
 
 // The further appointments open and close with the spring of the other folding parts of the app;
 // the card, and the sheet around it, grow and shrink with them.

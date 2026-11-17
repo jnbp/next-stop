@@ -17,8 +17,8 @@ android {
         minSdk = 30
         // Wear OS 6 is API 36; the watch images of the emulator go no higher yet.
         targetSdk = 36
-        versionCode = 1_000_002
-        versionName = "0.1.1"
+        versionCode = 1_000_003
+        versionName = "0.1.2"
     }
 
     buildTypes {

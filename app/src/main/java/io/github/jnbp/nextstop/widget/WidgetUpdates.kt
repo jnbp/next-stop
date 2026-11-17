@@ -198,7 +198,7 @@ object WidgetUpdates {
         val now = OffsetDateTime.now()
         val signature = journey?.let {
             val step = tripStep(it, now)
-            "${it.id}/${step.kind}/${minutesBetween(now, step.time)}/${step.leg?.departure}/${step.leg?.arrival}"
+            "${it.id}/${step.kind}/${step.leave}/${minutesBetween(now, step.time)}/${step.leg?.departure}/${step.leg?.arrival}"
         }
         if (signature == tripSignature) return
         tripSignature = signature

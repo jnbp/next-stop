@@ -11,7 +11,7 @@ class WaitToneTest {
     @Test
     fun sprintAndKnappFollowTheTightness() {
         assertEquals(WaitTone.Sprint, tone(4, 6))
-        assertEquals(WaitTone.Tight, tone(4, 3))
+        assertEquals(WaitTone.Tight, tone(3, 3))
         // The journey's own rating wins over the minutes for these two.
         assertEquals(WaitTone.Sprint, waitTone(Tightness.VeryRisky, 30, 3))
         assertEquals(WaitTone.Tight, waitTone(Tightness.Risky, 30, 3))

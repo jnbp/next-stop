@@ -47,8 +47,9 @@ import io.github.jnbp.nextstop.ui.theme.storedPalette
 /**
  * A faster way to the destination of the followed trip, found on the way. [journey] is the
  * followed journey with that way in place, ready to be taken; [basedOn] the id of the journey
- * it was found for. [place] is where the new way starts, [line] its first other ride, and
- * [onBoard] tells whether the traveller changes there from the vehicle on board.
+ * it was found for. [place] is where the new way starts, [line] its first other ride, [time]
+ * when that ride leaves there, and [onBoard] tells whether the traveller changes there from
+ * the vehicle on board.
  */
 data class FasterOffer(
     val key: String,
@@ -62,6 +63,8 @@ data class FasterOffer(
     val before: OffsetDateTime,
     /** True for a made-up way of the developer option, never a real connection. */
     val simulated: Boolean = false,
+    /** When the ride to change to ([line]) leaves [place]; null where it is not known. */
+    val time: OffsetDateTime? = null,
 ) {
     val gainMinutes: Long get() = gainSeconds / 60
 }
@@ -288,6 +291,7 @@ object FasterWatch {
                                     onBoard = point.onBoard,
                                     arrival = option.arrival,
                                     before = current.plausible().arrival,
+                                    time = ride?.departure ?: option.departure,
                                 )
                                 TripState.faster.value = offer
                                 notifyOffer(context, offer, alert = offer.key != alerted)
@@ -337,6 +341,7 @@ object FasterWatch {
             arrival = faster.arrival,
             before = journey.arrival,
             simulated = true,
+            time = ride.departure,
         )
     }
 
@@ -373,6 +378,7 @@ object FasterWatch {
             arrival = end,
             before = end.plusMinutes(3),
             simulated = true,
+            time = start,
         )
     }
 
@@ -388,12 +394,19 @@ object FasterWatch {
         return if (offer.simulated) context.getString(R.string.faster_simulation, title) else title
     }
 
-    /** The offer in words: "Change to the S41 at …" or "Take the S41 from …". */
+    /**
+     * The offer in words, with where and when: "Change at … at 10:42 to the S41" or "Take the
+     * S41 from … at 10:42"; without a known time as before.
+     */
     fun offerText(context: Context, offer: FasterOffer): String {
         val line = offer.line?.let { shortLine(it) ?: it }
+        val time = offer.time?.clock()
         return when {
+            line == null && time != null -> context.getString(R.string.faster_other_way_at, offer.place, time)
             line == null -> context.getString(R.string.faster_other_way, offer.place)
+            offer.onBoard && time != null -> context.getString(R.string.faster_change_at, offer.place, line, time)
             offer.onBoard -> context.getString(R.string.faster_change, offer.place, line)
+            time != null -> context.getString(R.string.faster_take_at, offer.place, line, time)
             else -> context.getString(R.string.faster_take, offer.place, line)
         }
     }

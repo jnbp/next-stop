@@ -23,7 +23,6 @@
     <string name="setup_restart_short">Colours, view, changes and notifications, step by step with previews.</string>
     <!-- The setup: sprint note, vehicles on the track, the two "faster" features. -->
     <string name="setup_sprint_note">Sprint (0–1 min): only by running or with luck – often unrealistic.</string>
-    <string name="setup_vehicles_timetable_legend">No dot: timetable</string>
     <string name="setup_tag_remembered">Setting, for every trip</string>
     <string name="setup_tag_per_trip">Per trip, switched on in a connection</string>
     <string name="setup_shortcut_short">While you follow a trip, the app alerts you when something changed since your choice, for example a faster way.</string>

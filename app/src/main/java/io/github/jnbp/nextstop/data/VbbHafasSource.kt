@@ -42,7 +42,7 @@ class VbbHafasSource(
 
     override suspend fun nearbyStops(latitude: Double, longitude: Double, results: Int): List<Stop> =
         withContext(Dispatchers.IO) {
-            val root = get("location.nearbystops", "originCoordLat=$latitude&originCoordLong=$longitude&maxNo=$results&r=1000&type=S")
+            val root = get("location.nearbystops", "originCoordLat=$latitude&originCoordLong=$longitude&maxNo=$results&r=$NEARBY_RADIUS_MAX&type=S")
             locations(root).filter { it.kind == PlaceKind.Stop }
         }
 
@@ -318,11 +318,21 @@ class VbbHafasSource(
         return classifyProduct(raw, name, product.optString("operator").trim().ifEmpty { null })
     }
 
+    /**
+     * The name of the line of [product]. A train whose line is only its number ("174" for the
+     * RJ 174) gets its kind from the name or category the entry has (see [withTrainKind]).
+     */
     private fun lineName(product: JSONObject): String? {
         val raw = product.optString("line").ifEmpty { null }
             ?: product.optString("displayNumber").ifEmpty { null }
             ?: product.optString("name").trim().ifEmpty { null }
-        return rapidLineName(raw, productKey(product))
+        val key = productKey(product)
+        val named = withTrainKind(
+            raw, key, product.optString("num").trim().ifEmpty { null },
+            product.optString("name"), product.optString("catOutS"), product.optString("catOut"),
+            product.optString("catOutL"), product.optString("catCode").takeIf { it.any { char -> char.isLetter() } },
+        )
+        return rapidLineName(named, key)
     }
 
     /** The shape of a leg or trip: "Polyline" with "crd" as longitude, latitude, … in degrees. */
@@ -358,12 +368,15 @@ class VbbHafasSource(
         ensureKey()
         // The key is part of the address: this address is never logged.
         val url = "$baseUrl/$service?accessId=${enc(accessId)}&format=json&lang=${language()}&$query"
+        val started = System.nanoTime()
         val connection = URL(url).openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = 10_000
             connection.readTimeout = 20_000
             connection.setRequestProperty("Accept", "application/json")
             val code = connection.responseCode
+            // The service alone: the address holds the key.
+            logHttpAnswer("vbb", service, code, started)
             // A wrong key comes back as 401 or 403: like a server error, the next source answers.
             if (code !in 200..299) throw HttpStatusException(if (code == 404) 502 else code)
             val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })

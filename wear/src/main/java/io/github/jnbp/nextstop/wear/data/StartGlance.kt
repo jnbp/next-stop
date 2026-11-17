@@ -27,6 +27,30 @@ fun upcomingDepartures(departures: List<Departure>, now: Long, count: Int): List
         .take(count)
 }
 
+/** What the live card of the start page shows below the header of its stop (see [liveBoard]). */
+enum class LiveBoard {
+    /** The next departures. */
+    Departures,
+
+    /** A load that reached the network found nothing in the next hour: "No departures in the next hour". */
+    NoneSoon,
+
+    /** Nothing current to show because the load failed (only old kept departures): an error with a retry. */
+    NotLoaded,
+}
+
+/**
+ * What the live card shows for [departures] at [now] (at most [count] rows): the departures
+ * that can still be caught; else, when they came fresh from the network ([fresh]), that none
+ * leaves in the next hour; else (a failed load fell back to departures kept earlier, all of
+ * them gone by now) that they could not be loaded. A failed request is never "no departures".
+ */
+fun liveBoard(departures: List<Departure>, fresh: Boolean, now: Long, count: Int): LiveBoard = when {
+    upcomingDepartures(departures, now, count).isNotEmpty() -> LiveBoard.Departures
+    fresh -> LiveBoard.NoneSoon
+    else -> LiveBoard.NotLoaded
+}
+
 /** The one departure a favourite stop shows: the next that can be caught (see [upcomingDepartures]); null when none. */
 fun nextCatchable(departures: List<Departure>?, now: Long): Departure? =
     if (departures == null) null else upcomingDepartures(departures, now, 1).firstOrNull()

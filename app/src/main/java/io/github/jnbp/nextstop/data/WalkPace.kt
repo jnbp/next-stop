@@ -8,7 +8,7 @@ import kotlin.math.ceil
  * platforms of one complex, PlatformChange; walks between stop positions of buses and trams)
  * are timed at the usual pace of 75 m a minute, stairs, escalators and lifts included.
  *
- * - Relaxed and normal: the walk at the usual pace and its buffer (changeNeed), and 5 or 2
+ * - Relaxed and normal: the walk at the usual pace and its buffer (changeNeed), and 5 or 1
  *   minutes to spare beyond that.
  * - Knapp: the change still works at a brisk pace, the walk x [BRISK_WALK_FACTOR] and no buffer
  *   beyond rounding up to whole minutes (changeBriskNeed), and it is at least
@@ -34,6 +34,11 @@ fun walkFactor(slower: Boolean): Double = if (slower) SLOWER_WALK_FACTOR else 1.
 /** The factor of the setting now (see [walkFactor]); set by the interface. */
 @Volatile
 var walkSpeedFactor: Double = 1.0
+    set(value) {
+        if (field == value) return
+        field = value
+        ratingSettingsChanged()
+    }
 
 /** [seconds] of a walk at the pace of [factor], rounded up; 0 (one place) stays 0. */
 fun pacedSeconds(seconds: Int, factor: Double = walkSpeedFactor): Int =

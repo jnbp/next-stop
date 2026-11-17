@@ -1,6 +1,7 @@
 package io.github.jnbp.nextstop.ui
 
 import io.github.jnbp.nextstop.data.PlaceKind
+import io.github.jnbp.nextstop.data.STREET_STOP_OWN_SIGN_METERS
 import io.github.jnbp.nextstop.data.Stop
 import io.github.jnbp.nextstop.data.dhidOf
 import io.github.jnbp.nextstop.data.normalStationId
@@ -16,9 +17,11 @@ import kotlin.math.sqrt
  * "München Hbf" and "München Hbf (tief)"; OpenStreetMap draws some complexes as several
  * stations ("Berlin Hauptbahnhof Tunnel (S-Bahn)" beside "Hauptbahnhof"). On the map each
  * would be a sign of its own. The rail stops of one station become one sign at the main
- * stop's place with the roundels of all of them; the bus and tram stops in the street stay
- * signs of their own ("H"), so their vehicles do not seem to leave from the middle of the
- * station. Pure logic, no Android.
+ * stop's place with the roundels of all of them. A bus or tram stop right at the station
+ * (the night buses in front of a U-Bahn station, the bus station of a main station) joins
+ * that sign; one farther off in the street keeps a sign of its own ("H"), so its vehicles do
+ * not seem to leave from the middle of the station. Bus and tram stops of one name close
+ * together (a tram and a bus stop of one square) are one "H". Pure logic, no Android.
  */
 
 // The products of a rail station: their stops are merged, the others ("H") never.
@@ -70,8 +73,18 @@ data class StationGroup(val main: Stop, val members: List<Stop> = emptyList()) {
  * or the same station complex [complexOf] (OpenStreetMap's, which knows that 900003201 and
  * 900003200 are both Berlin Hauptbahnhof; null: none known). Two stops of OpenStreetMap only
  * (whose ids come from its tags, not always right) need a word of their names in common for
- * the id. The main stop of a station is a provider's (its id has departures), then the one
- * with the most rail products, then one without a bracket in its name, then the first.
+ * the id. A provider's stop without any products (Transitous may name no modes) counts as a
+ * possible part of a station here.
+ *
+ * Then the stops in the street (see joinStreetStops): a bus or tram stop that belongs to a
+ * station (its number or name, at most STREET_STOP_OWN_SIGN_METERS from it; or the station's
+ * bus station, "Bahnhof", "ZOB", "Fernbusse", at most STATION_NAME_MERGE_METERS) becomes part
+ * of it, and bus and tram stops of one name or number close together (a bus and a tram stop of
+ * one square, at most STREET_MERGE_METERS) are one sign. Each keeps its id among the members,
+ * so the departures and the stop positions of all of them stay at hand.
+ *
+ * The main stop of a station is a provider's (its id has departures), then the one with the
+ * most rail products, then one without a bracket in its name, then the first.
  * Every other stop is a group of its own.
  */
 fun stationGroups(stops: List<Stop>, complexOf: (Stop) -> String? = { null }): List<StationGroup> {
@@ -87,7 +100,7 @@ fun stationGroups(stops: List<Stop>, complexOf: (Stop) -> String? = { null }): L
     }
     // A stop the provider names as the bus or tram part of a station ("S+U Alexanderplatz (Bln)
     // [Bus K.-Liebknecht-Str]") is a stop in the street, whatever products it lists.
-    val rail = stops.indices.filter { isRailStop(stops[it]) && stops[it].position != null && !STREET_PART.containsMatchIn(stops[it].name) }
+    val rail = stops.indices.filter { stationPart(stops[it]) }
     if (rail.size >= 2) {
         val keys = rail.associateWith { stationBaseKey(stops[it].name) }
         val places = rail.associateWith { stopPlaceKey(stops[it].id) }
@@ -111,6 +124,11 @@ fun stationGroups(stops: List<Stop>, complexOf: (Stop) -> String? = { null }): L
             }
         }
     }
+    val street = stops.indices.filter { index ->
+        val stop = stops[index]
+        stop.kind == PlaceKind.Stop && stop.position != null && index !in rail
+    }
+    joinStreetStops(stops, rail, street) { a, b -> parent[root(a)] = root(b) }
     val byRoot = LinkedHashMap<Int, MutableList<Int>>()
     for (index in stops.indices) byRoot.getOrPut(root(index)) { ArrayList(1) }.add(index)
     return byRoot.values.map { indices ->
@@ -124,6 +142,101 @@ fun stationGroups(stops: List<Stop>, complexOf: (Stop) -> String? = { null }): L
         StationGroup(stops[main], indices.filter { it != main }.map { stops[it] })
     }
 }
+
+/**
+ * Bus and tram stops of one name or one stop place at most this far apart are one sign:
+ * the tram and the bus stop of one square (a few dozen to some 150 m apart). Farther, they are
+ * stops of their own streets ("H" each).
+ */
+const val STREET_MERGE_METERS = 200.0
+
+/**
+ * True for a stop that may be a part of a station (see stationGroups): a rail stop, or a
+ * provider's stop of no known products; never one the provider names as the bus or tram part
+ * of a station.
+ */
+private fun stationPart(stop: Stop): Boolean {
+    if (stop.position == null || STREET_PART.containsMatchIn(stop.name)) return false
+    if (isRailStop(stop)) return true
+    return stop.kind == PlaceKind.Stop && stop.products.isEmpty() && !isOsmOnlyStop(stop.id)
+}
+
+/**
+ * Joins the bus and tram stops [street] of [stops] (by [join] of two indices) to the station
+ * of [rail] they belong to, else to the stops of their name nearby. A street stop joins the
+ * nearest station stop that it names or whose number it has, at most
+ * STREET_STOP_OWN_SIGN_METERS away (the station's sign stands for it: two signs would
+ * cover each other), or whose bus station it is ("Bahnhof", "ZOB", "Fernbusse" by
+ * [isForecourtOf]) at most STATION_NAME_MERGE_METERS away. The others are joined to the
+ * first stop of their name or stop place within STREET_MERGE_METERS: always to that first
+ * one, never on from stop to stop, so a row of stops of one name along a long street stays
+ * apart.
+ */
+private fun joinStreetStops(stops: List<Stop>, rail: List<Int>, street: List<Int>, join: (Int, Int) -> Unit) {
+    if (street.isEmpty()) return
+    val keys = HashMap<Int, String>()
+    fun key(index: Int) = keys.getOrPut(index) { stationBaseKey(stops[index].name) }
+    val places = HashMap<Int, String?>()
+    fun place(index: Int) = places.getOrPut(index) { stopPlaceKey(stops[index].id) }
+    val attached = HashSet<Int>()
+    for (index in street) {
+        val at = stops[index].position ?: continue
+        var best = -1
+        var bestMeters = Double.MAX_VALUE
+        for (station in rail) {
+            val other = stops[station].position ?: continue
+            val apart = metersApart(at, other)
+            if (apart > STATION_NAME_MERGE_METERS || apart >= bestMeters) continue
+            val samePlace = place(index) != null && place(index) == place(station)
+            val named = keysContain(key(index), key(station))
+            val fits = ((samePlace || named) && apart <= STREET_STOP_OWN_SIGN_METERS) ||
+                isForecourtOf(key(index), key(station))
+            if (fits) {
+                best = station
+                bestMeters = apart
+            }
+        }
+        if (best >= 0) {
+            join(index, best)
+            attached.add(index)
+        }
+    }
+    val seeds = ArrayList<Int>()
+    for (index in street) {
+        if (index in attached) continue
+        val at = stops[index].position ?: continue
+        val seed = seeds.firstOrNull { seed ->
+            val other = stops[seed].position ?: return@firstOrNull false
+            if (metersApart(at, other) > STREET_MERGE_METERS) return@firstOrNull false
+            val samePlace = place(index) != null && place(index) == place(seed)
+            val sameName = key(index).isNotEmpty() && key(index) == key(seed)
+            samePlace || sameName
+        }
+        if (seed != null) join(index, seed) else seeds.add(index)
+    }
+}
+
+/** Two keys of [stationBaseKey]: equal, or the shorter one (at least 5 letters) inside the other ("alexanderplatz" in "alexanderplatzdircksenstr"). */
+internal fun keysContain(a: String, b: String): Boolean {
+    if (a.isEmpty() || b.isEmpty()) return false
+    if (a == b) return true
+    val (short, long) = if (a.length <= b.length) a to b else b to a
+    return short.length >= 5 && long.contains(short)
+}
+
+/**
+ * True when a bus or tram stop of the key [stopKey] (see stationBaseKey) is the bus station
+ * in front of the station [stationKey]: named "Bahnhof", "Hbf", "ZOB", "Busbahnhof",
+ * "Fernbusse" and the like, alone or behind the station's name ("Göttingen Fernbusse").
+ */
+internal fun isForecourtOf(stopKey: String, stationKey: String): Boolean {
+    if (stopKey.isEmpty()) return false
+    val rest = if (stationKey.length >= 3 && stopKey.startsWith(stationKey)) stopKey.substring(stationKey.length) else stopKey
+    return FORECOURT.matches(rest)
+}
+
+// The names of the bus station in front of a railway station.
+private val FORECOURT = Regex("(bahnhof|bf|hbf|hauptbahnhof|bahnhofsvorplatz|bahnhofsplatz|zob|busbahnhof|bahnhofzob|zobbahnhof|fernbus|fernbusse|fernbusbahnhof|bahnhoffernbus|bahnhoffernbusse)")
 
 /**
  * The signs of the map for [stops], one per station (see stationGroups), without the station of

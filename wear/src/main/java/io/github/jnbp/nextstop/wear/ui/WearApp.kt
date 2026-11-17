@@ -71,6 +71,13 @@ object Routes {
     const val START = "start"
     const val NEARBY = "nearby"
     const val DEPARTURES = "departures"
+
+    /**
+     * The departures of a stop opened as a favourite of the start page (its route buttons come
+     * first): a route of its own, so whether it was opened that way belongs to the page and can
+     * not reach a board opened any other way.
+     */
+    const val FAVORITE_DEPARTURES = "departures-favorite"
     const val TRIP = "trip"
     const val ROUTE = "route"
     const val RESULTS = "results"
@@ -115,6 +122,11 @@ fun WearApp() {
                     }
                 }
             }
+            // The departure board of [stop]; [favorite]: opened as a favourite (see Routes.FAVORITE_DEPARTURES).
+            fun openDepartures(stop: Place, favorite: Boolean) {
+                Selection.stop = stop
+                navController.navigate(if (favorite) Routes.FAVORITE_DEPARTURES else Routes.DEPARTURES)
+            }
             SwipeDismissableNavHost(navController = navController, startDestination = Routes.START) {
                 screen(Routes.START) {
                     StartScreen(
@@ -125,15 +137,11 @@ fun WearApp() {
                             navController.navigate(Routes.ROUTE)
                         },
                         onMap = { navController.navigate(Routes.MAP) },
-                        onStop = { stop ->
-                            Selection.stop = stop
-                            navController.navigate(Routes.DEPARTURES)
-                        },
+                        onStop = { stop -> openDepartures(stop, favorite = false) },
                         onSettings = { navController.navigate(Routes.SETTINGS) },
                         onPlace = { place ->
                             if (place.kind == PlaceKind.Stop && !place.id.contains(':')) {
-                                Selection.stop = place
-                                navController.navigate(Routes.DEPARTURES)
+                                openDepartures(place, favorite = true)
                             } else {
                                 Selection.origin = null
                                 Selection.destination = place
@@ -143,15 +151,13 @@ fun WearApp() {
                     )
                 }
                 screen(Routes.NEARBY) {
-                    NearbyStopsScreen(onStop = { stop ->
-                        Selection.stop = stop
-                        navController.navigate(Routes.DEPARTURES)
-                    })
+                    NearbyStopsScreen(onStop = { stop -> openDepartures(stop, favorite = false) })
                 }
-                screen(Routes.DEPARTURES) {
+                for ((route, favorite) in listOf(Routes.DEPARTURES to false, Routes.FAVORITE_DEPARTURES to true)) screen(route) {
                     val stop = Selection.stop
                     DeparturesScreen(
                         stop = stop,
+                        favorite = favorite,
                         // From this stop: the destination is chosen next, on the destination page.
                         onRouteFrom = { from ->
                             Selection.origin = from
@@ -166,10 +172,7 @@ fun WearApp() {
                     )
                 }
                 screen(Routes.MAP) {
-                    MapScreen(onStop = { stop ->
-                        Selection.stop = stop
-                        navController.navigate(Routes.DEPARTURES)
-                    })
+                    MapScreen(onStop = { stop -> openDepartures(stop, favorite = false) })
                 }
                 screen(Routes.SETTINGS) { SettingsScreen(onTileTarget = { navController.navigate(Routes.TILE_TARGET) }) }
                 screen(Routes.TRIP) {
@@ -239,7 +242,7 @@ fun SettingsScreen(onTileTarget: () -> Unit) {
     val places by WatchStore.places.collectAsState()
     val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
     ScreenScaffold(scrollState = listState) { contentPadding ->
-        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
             item { ListHeader { Text(stringResource(R.string.settings)) } }
             item {
                 // Follows the choice, which changes on the page opened from here.
@@ -353,7 +356,7 @@ fun TileTargetScreen(onChosen: () -> Unit) {
     val chosenTarget by WatchStore.tileTargetChoice.collectAsState()
     val chosen = WatchStore.tileTarget(chosenTarget, places)
     ScreenScaffold(scrollState = listState) { contentPadding ->
-        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
             item { ListHeader { Text(stringResource(R.string.tile_target), maxLines = 2) } }
             val options = (places.favorites + places.saved).distinctBy { it.place.id }
             if (options.isEmpty()) item { Note(stringResource(R.string.no_favorites)) }
@@ -444,8 +447,8 @@ fun TripCard(trip: TripSnapshot, onClick: () -> Unit) {
 
 @Composable
 fun stepText(trip: TripSnapshot): String = when (trip.kind) {
-    StepKind.Board -> stringResource(R.string.step_board, trip.line ?: "", trip.place)
+    StepKind.Board -> if (trip.leave) stringResource(R.string.step_leave, clock(trip.time)) else stringResource(R.string.step_board, trip.line ?: "", trip.place)
     StepKind.GetOff -> stringResource(R.string.step_get_off, trip.place)
-    StepKind.WalkToEnd -> stringResource(R.string.step_walk, trip.place)
+    StepKind.WalkToEnd -> stringResource(if (trip.walk?.cycling == true) R.string.step_cycle else R.string.step_walk, trip.place)
     StepKind.Arrived -> stringResource(R.string.arrived)
 }

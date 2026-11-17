@@ -142,4 +142,18 @@ class DepartureStopsTest {
         val ofM48 = boardDisruptions(departures, setOf("M48"))
         assertEquals(listOf("Aufzug defekt", "Bauarbeiten"), ofM48.map { it.summary })
     }
+
+    @Test
+    fun nearbyStopCountGrowsWithTheRadiusUpToTheCap() {
+        assertEquals(NEARBY_STOPS_FLOOR, nearbyStopsKept(NEARBY_RADIUS_MIN))
+        assertEquals(10, nearbyStopsKept(NEARBY_RADIUS_DEFAULT))
+        assertEquals(20, nearbyStopsKept(1_000))
+        assertEquals(NEARBY_STOPS_CAP, nearbyStopsKept(NEARBY_RADIUS_MAX))
+        // Never fewer for a larger radius, and always asked for more than kept.
+        val radii = (NEARBY_RADIUS_MIN..NEARBY_RADIUS_MAX step NEARBY_RADIUS_STEP).toList()
+        radii.zipWithNext().forEach { (a, b) -> assertTrue(nearbyStopsKept(b) >= nearbyStopsKept(a)) }
+        radii.forEach { assertTrue(nearbyStopsAsked(it) > nearbyStopsKept(it)) }
+        // The upper range of the slider makes a difference: 2 km keeps more than 1.2 km.
+        assertTrue(nearbyStopsKept(NEARBY_RADIUS_MAX) > nearbyStopsKept(1_200))
+    }
 }

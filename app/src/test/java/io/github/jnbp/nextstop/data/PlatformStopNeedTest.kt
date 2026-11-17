@@ -61,16 +61,21 @@ class PlatformStopNeedTest {
     }
 
     @Test
-    fun fiveMinutesToTheBusAreNormal() {
+    fun fourAndFiveMinutesToTheBusAreNormal() {
         val previous = ridePlatforms
         ridePlatforms = platforms
         try {
             val journey = Journey(listOf(s25, walk, bus), foundLevel = TransferComfort.Normal)
             assertEquals(listOf(Tightness.Tight), journeyChangeRatings(journey))
             assertEquals(listOf(2L), transferBuffers(journey))
-            // 4 minutes leave 1: risky.
-            val closer = Journey(listOf(s25, walk.copy(arrival = at(14), plannedArrival = at(14)), bus.copy(departure = at(14), plannedDeparture = at(14))), foundLevel = TransferComfort.Normal)
-            assertEquals(listOf(Tightness.Risky), journeyChangeRatings(closer))
+            // 4 minutes leave 1: still normal (95 m and the stairs need 3).
+            fun inMinutes(minutes: Long) = Journey(
+                listOf(s25, walk.copy(arrival = at(10 + minutes), plannedArrival = at(10 + minutes)), bus.copy(departure = at(10 + minutes), plannedDeparture = at(10 + minutes))),
+                foundLevel = TransferComfort.Normal,
+            )
+            assertEquals(listOf(Tightness.Tight), journeyChangeRatings(inMinutes(4)))
+            // 3 minutes leave nothing: knapp.
+            assertEquals(listOf(Tightness.Risky), journeyChangeRatings(inMinutes(3)))
         } finally {
             ridePlatforms = previous
         }

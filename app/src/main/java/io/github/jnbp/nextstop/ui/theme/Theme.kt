@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.graphics.ColorUtils
@@ -41,6 +42,26 @@ enum class MapStyleChoice { Light, Colorful, Dark, Auto }
  * must stay as they are. How the direction is drawn is the map's matter (see DirectionStyle).
  */
 enum class VehicleDirectionChoice { Off, On }
+
+/**
+ * Which live vehicles the map shows: [All] everywhere, also far zoomed out; [Dynamic] only
+ * zoomed in close (from DYNAMIC_VEHICLE_MIN_ZOOM), fewer and smaller requests, which spares
+ * data and battery; [Off] none (recommended for less powerful phones). The names are stored,
+ * so they must stay as they are.
+ */
+enum class MapVehiclesChoice { All, Dynamic, Off }
+
+/**
+ * The stored choice of the map vehicles: by its name [stored]; before there was one, the old
+ * switch [legacyOn] where it was stored (on: [MapVehiclesChoice.All], off: [MapVehiclesChoice.Off]);
+ * else [MapVehiclesChoice.Dynamic], the default: vehicles only zoomed in close.
+ */
+fun mapVehiclesChoice(stored: String?, legacyOn: Boolean?): MapVehiclesChoice =
+    MapVehiclesChoice.entries.firstOrNull { it.name == stored } ?: when (legacyOn) {
+        true -> MapVehiclesChoice.All
+        false -> MapVehiclesChoice.Off
+        null -> MapVehiclesChoice.Dynamic
+    }
 
 /** How a followed trip shows in the notifications. The names are stored, so they must stay as they are. */
 enum class NotificationLook { LiveUpdate, AppLook }
@@ -214,6 +235,56 @@ private fun hsl(hue: Float, saturation: Float, lightness: Float): Color {
     return Color(ColorUtils.HSLToColor(floatArrayOf(h, saturation.coerceIn(0f, 1f), lightness.coerceIn(0f, 1f))))
 }
 
+/** The WCAG contrast ratio of two opaque colours (1 to 21). */
+fun contrastOf(a: Color, b: Color): Float {
+    val la = a.luminance()
+    val lb = b.luminance()
+    return (maxOf(la, lb) + 0.05f) / (minOf(la, lb) + 0.05f)
+}
+
+// Text on its ground reads at least at this contrast (WCAG AA), large marks and icons at the second.
+private const val TEXT_CONTRAST = 4.5f
+private const val MARK_CONTRAST = 3f
+
+/**
+ * [ink] where it reads on [ground] (at least [minimum]:1); else moved step by step towards
+ * near-black or white, whichever stands out more from the ground, until it does. The hue is
+ * kept as long as it can be, so a tinted text stays tinted.
+ */
+fun readableOn(ground: Color, ink: Color, minimum: Float = TEXT_CONTRAST): Color {
+    if (contrastOf(ground, ink) >= minimum) return ink
+    val darkEnd = Color(0xFF101114)
+    val target = if (contrastOf(ground, darkEnd) >= contrastOf(ground, Color.White)) darkEnd else Color.White
+    for (step in 1..10) {
+        val moved = lerp(ink, target, step / 10f)
+        if (contrastOf(ground, moved) >= minimum) return moved
+    }
+    return target
+}
+
+/**
+ * The palette with every pair of a colour and the colour drawn on it readable: text on the
+ * grounds (cards, sheets, chips), on the main colour, its container and the highlight. The
+ * colours of the wallpaper (Material You) and an own accent can come out in any lightness,
+ * so a pair that reads in one scheme may not in another; this moves only those that fall short.
+ */
+private fun AppPalette.readable(): AppPalette {
+    val grounds = listOf(card, ground, chip, plainGround)
+    fun onGrounds(color: Color, minimum: Float): Color = grounds.fold(color) { ink, under -> readableOn(under, ink, minimum) }
+    val shownInk = onGrounds(ink, TEXT_CONTRAST)
+    // The main colour is also the colour of links, icons and selected marks on the grounds.
+    val shownBlue = onGrounds(blue, MARK_CONTRAST)
+    return copy(
+        ink = shownInk,
+        onInk = readableOn(shownInk, onInk),
+        muted = onGrounds(muted, TEXT_CONTRAST),
+        blue = shownBlue,
+        onBlue = readableOn(shownBlue, onBlue),
+        onBlueContainer = readableOn(blueContainer, onBlueContainer),
+        onLime = readableOn(lime, onLime),
+    )
+}
+
 /** Dark ink on a light ground, white on a dark one. */
 private fun inkOn(ground: Color, dark: Color = Color(0xFF16130A)): Color =
     if (ground.luminance() > 0.3f) dark else Color.White
@@ -238,7 +309,7 @@ private fun accentPalette(accent: Int, dark: Boolean): AppPalette {
         onBlueContainer = if (dark) hsl(hue, 0.9f, 0.9f) else hsl(hue, 0.9f, 0.15f),
         lime = hsl(highlightHue, 0.8f, 0.68f),
         onLime = hsl(highlightHue, 0.9f, 0.12f),
-    )
+    ).readable()
 }
 
 /** The colours of the wallpaper (Material You), with the status colours of the app. */
@@ -270,7 +341,7 @@ private fun dynamicPalette(scheme: ColorScheme, dark: Boolean): AppPalette {
         fogTint = scheme.surface.copy(alpha = if (dark) 0.69f else 0.66f),
         innerCard = Color.White.copy(alpha = if (dark) 0.14f else 0.58f),
         innerBorder = Color.White.copy(alpha = if (dark) 0.10f else 0.5f),
-    )
+    ).readable()
 }
 
 /** The palette and the Material colours for one choice. Not composable: the notification uses it too. */
@@ -315,6 +386,10 @@ object Appearance {
         private set
     var notificationLook by mutableStateOf(NotificationLook.AppLook)
         private set
+
+    /** Which live vehicles the map shows (see AppPrefs.mapVehicles). */
+    var mapVehicles by mutableStateOf(MapVehiclesChoice.Dynamic)
+        private set
     private var loaded = false
 
     /** Reads the stored settings once per process. */
@@ -328,6 +403,7 @@ object Appearance {
         mapStyle = prefs.mapStyle
         vehicleDirection = prefs.vehicleDirection
         notificationLook = prefs.notificationLook
+        mapVehicles = prefs.mapVehicles
     }
 
     fun changeColorChoice(context: Context, value: ColorChoice) {
@@ -353,6 +429,11 @@ object Appearance {
     fun changeAccent(context: Context, value: Int) {
         accent = value
         AppPrefs(context).accentColor = value
+    }
+
+    fun changeMapVehicles(context: Context, value: MapVehiclesChoice) {
+        mapVehicles = value
+        AppPrefs(context).mapVehicles = value
     }
 
     fun changeNotificationLook(context: Context, value: NotificationLook) {

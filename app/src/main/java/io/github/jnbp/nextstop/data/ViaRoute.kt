@@ -62,9 +62,15 @@ suspend fun composeVia(
         .sortedBy { it.departure }
 }
 
-/** [head] to the place on the way, then [tail] from there: one journey that is loaded again half by half. */
-fun joinedVia(head: Journey, tail: Journey, via: Via): Journey = Journey(
-    legs = head.legs + tail.legs,
-    split = JourneySplit(headLegs = head.legs.size, headToken = head.refreshToken, tailToken = tail.refreshToken),
-    via = JourneyVia(via.place, via.minutes, head.legs.size),
+/**
+ * [head] to the place on the way, then [tail] from there: one journey that is loaded again half
+ * by half. Where [tail] goes on in the vehicle [head] arrives with (a place on the way the
+ * traveller passes seated), that is one ride, not a change (see [mergeThroughRuns]).
+ */
+fun joinedVia(head: Journey, tail: Journey, via: Via): Journey = mergeThroughRuns(
+    Journey(
+        legs = head.legs + tail.legs,
+        split = JourneySplit(headLegs = head.legs.size, headToken = head.refreshToken, tailToken = tail.refreshToken),
+        via = JourneyVia(via.place, via.minutes, head.legs.size),
+    ),
 )

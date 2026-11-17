@@ -4,6 +4,7 @@ import io.github.jnbp.nextstop.data.Journey
 import io.github.jnbp.nextstop.data.TransferComfort
 import io.github.jnbp.nextstop.data.journeyChangesOf
 import io.github.jnbp.nextstop.data.journeyComfort
+import io.github.jnbp.nextstop.data.withoutDominated
 
 /**
  * The journeys of a search as every view of it shows them (chart, list and plan), and those
@@ -29,7 +30,8 @@ class JourneySelection(
  * more relaxed, never when it is tighter. The category always comes from the very journey that
  * is drawn (see [journeyComfort]), so the filter can never disagree with its tag or the marks
  * of its changes; [levels] is not asked for it. A journey without a change (also two rides
- * of one trip, staying on board) has no risk of missing one and is always shown.
+ * of one trip, staying on board) has no risk of missing one and is always shown. Of journeys
+ * that only differ in a tighter change the one with more room is kept (see withoutDominated).
  */
 fun journeySelection(
     journeys: List<Journey>?,
@@ -39,8 +41,24 @@ fun journeySelection(
     if (journeys == null) return JourneySelection(null, emptyList(), emptySet(), null, 0)
     fun levelOf(journey: Journey) = journeyComfort(journey)
     fun direct(journey: Journey) = journeyChangesOf(journey).isEmpty()
-    val (shown, filtered) = journeys.partition { direct(it) || levelOf(it).ordinal <= threshold.ordinal }
+    // A twin with a tighter change than another of the same lines and times is no choice of its
+    // own (see withoutDominated); the one kept has at least as much room, so it is shown at every
+    // level the twin would be.
+    val (shown, filtered) = withoutDominated(journeys).partition { direct(it) || levelOf(it).ordinal <= threshold.ordinal }
     val filteredLevels = filtered.map { levelOf(it) }
     val next = filteredLevels.minByOrNull { it.ordinal }
     return JourneySelection(shown, filtered, filteredLevels.toSet(), next, filteredLevels.count { it == next })
+}
+
+/**
+ * The journey of [shown] to keep in view when another transfer level is chosen: [anchor] itself
+ * where the new list still has it (by its id), else the first that leaves no earlier than it,
+ * else the last that leaves before it. So the list stays where it was instead of jumping to its
+ * start. Null without an anchor or journeys.
+ */
+fun levelAnchor(anchor: Journey?, shown: List<Journey>): Journey? {
+    if (anchor == null || shown.isEmpty()) return null
+    shown.firstOrNull { it.id == anchor.id }?.let { return it }
+    return shown.firstOrNull { !it.departure.isBefore(anchor.departure) }
+        ?: shown.lastOrNull { it.departure.isBefore(anchor.departure) }
 }

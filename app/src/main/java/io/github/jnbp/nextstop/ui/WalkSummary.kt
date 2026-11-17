@@ -69,6 +69,11 @@ fun walkSummaryText(
                     passage.climb < 0 -> context.getString(R.string.walk_sum_escalator_down)
                     else -> context.getString(R.string.map_escalator)
                 }
+                PassageKind.Stairs -> when {
+                    passage.climb > 0 -> context.getString(R.string.walk_sum_stairs_up)
+                    passage.climb < 0 -> context.getString(R.string.walk_sum_stairs_down)
+                    else -> context.getString(R.string.walk_sum_stairs)
+                }
             },
         )
     }

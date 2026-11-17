@@ -12,9 +12,12 @@ import kotlinx.coroutines.withContext
  * Where the postal address of a contact lies. The whole address (street, postcode, town,
  * country) is searched without any bias towards the user's area, and a hit only counts when
  * its postcode or its town agrees with the contact's: a street of the same name elsewhere is
- * never taken. In turn: the place search of the providers, the geocoder of the device, and
- * at last the town alone, whose name then carries [approximateNote]. Null when none of these
- * finds the place.
+ * never taken. A stop is never taken for the address, even one named after its street: the
+ * journey has to end at the house, with a walk from the last stop. In turn: an address of the
+ * providers with the street and the house number, the geocoder of the device, the best other
+ * address of the providers in that street, and at last the town alone, whose name then
+ * carries [approximateNote]. The place found is named after the contact's address (see
+ * [contactPlaceName]), not after the hit. Null when none of these finds the place.
  */
 suspend fun resolveContactPlace(
     context: Context,
@@ -25,10 +28,6 @@ suspend fun resolveContactPlace(
     val postcode = contact.postcode
     val city = contact.city
     val query = contactQuery(contact)
-    // Without a postcode and a town there is nothing to check a hit against: the written
-    // address is resolved as before.
-    if (postcode == null && city == null) return source.resolvePlace(query)
-
     val covered: (Double, Double) -> Boolean = (source as? RoutingSource)?.let { routing -> routing::covers }
         ?: { _, _ -> true }
 
@@ -40,27 +39,47 @@ suspend fun resolveContactPlace(
         emptyList()
     }
 
-    // 1. The providers, with the whole address and with street and town alone.
+    fun named(found: Pair<Double, Double>) = Stop(
+        id = "address:${found.first},${found.second}",
+        name = contactPlaceName(contact),
+        latitude = found.first,
+        longitude = found.second,
+        distanceMeters = null,
+        kind = PlaceKind.Address,
+    )
+
+    // Without a postcode and a town there is nothing to check a hit against: the written
+    // address is resolved as any other address, still never as a stop; failing that, the
+    // device's geocoder takes the written address as it is.
+    if (postcode == null && city == null) {
+        source.resolvePlace(query)
+            ?.takeIf { it.kind != PlaceKind.Stop }
+            ?.position
+            ?.let { return named(it) }
+        return geocode(context, query, null, null)
+            ?.takeIf { (latitude, longitude) -> covered(latitude, longitude) }
+            ?.let { named(it) }
+    }
+
+    // 1. The providers, with the whole address and with street and town alone: only an
+    // address with the street and its house number counts here.
     val streetForm = listOfNotNull(contact.street, listOfNotNull(postcode, city).joinToString(" ").ifEmpty { null })
         .joinToString(", ")
-    for (form in listOf(query, streetForm).filter { it.isNotBlank() }.distinct()) {
-        val pick = pickMatching(search(form), postcode, city)
-        if (pick != null) return pick
+    val forms = listOf(query, streetForm).filter { it.isNotBlank() }.distinct()
+    val found = mutableListOf<Stop>()
+    for (form in forms) {
+        val results = search(form)
+        found += results
+        pickAddress(results, contact.street, postcode, city, exact = true)?.position?.let { return named(it) }
     }
 
     // 2. The geocoder of the device, with the whole address.
     geocode(context, query, postcode, city)?.let { (latitude, longitude) ->
-        if (covered(latitude, longitude)) {
-            return Stop(
-                id = "address:$latitude,$longitude",
-                name = contact.street?.let { street -> listOfNotNull(street, city).joinToString(", ") } ?: contact.address,
-                latitude = latitude,
-                longitude = longitude,
-                distanceMeters = null,
-                kind = PlaceKind.Address,
-            )
-        }
+        if (covered(latitude, longitude)) return named(latitude to longitude)
     }
+
+    // 2b. The best other address the providers found in that street or town; never a stop.
+    pickAddress(found, contact.street, postcode, city, exact = false)?.position?.let { return named(it) }
 
     // 3. The town alone, marked as an approximate place.
     if (city != null || postcode != null) {
@@ -88,6 +107,71 @@ fun contactQuery(contact: ContactAddress): String {
     val parts = listOfNotNull(contact.street, town, contact.country)
     return if (parts.isEmpty()) contact.address else parts.joinToString(", ")
 }
+
+/**
+ * The name a place found for a contact address carries: the street with its house number and
+ * the town (as "Musterstraße 12, Musterstadt"), or the written address without those fields.
+ */
+fun contactPlaceName(contact: ContactAddress): String =
+    contact.street?.let { street -> listOfNotNull(street, contact.city).joinToString(", ") } ?: contact.address
+
+/**
+ * The place among [candidates] that stands for the street address [street] (as
+ * "Musterstraße 12") in [postcode] / [city]. A stop never does, even one named after the
+ * street; a found place has to agree with the postcode or the town where these are known.
+ * With [exact], only an address or a point with the street's name and its house number
+ * counts. Otherwise the best match is taken: such an exact one, else an address in that
+ * street, else any address. The first of equally good ones wins. Null when none fits.
+ */
+fun pickAddress(candidates: List<Stop>, street: String?, postcode: String?, city: String?, exact: Boolean): Stop? {
+    val number = street?.let { houseNumberOf(it) }
+    val streetWords = street?.let { streetWordsOf(it) }.orEmpty()
+    fun score(place: Stop): Int {
+        if (place.position == null || place.kind == PlaceKind.Stop) return 0
+        val texts = listOfNotNull(place.name, place.detail) + place.areas
+        if ((postcode != null || city != null) && !addressAgrees(place.postcode, texts, postcode, city)) return 0
+        val textWords = texts.map { streetSpelling(words(it)) }
+        val inStreet = streetWords.isNotEmpty() && textWords.any { containsRun(it, streetWords) }
+        // The street and its number in one text: a number elsewhere (a postcode part, another
+        // field) does not make the place that house.
+        val sameHouse = number != null && textWords.any { containsRun(it, streetWords) && number in it }
+        return when {
+            inStreet && sameHouse -> 3
+            exact -> 0
+            place.kind != PlaceKind.Address -> 0
+            inStreet -> 2
+            else -> 1
+        }
+    }
+    var best: Stop? = null
+    var bestScore = 0
+    for (place in candidates) {
+        val score = score(place)
+        if (score > bestScore) {
+            best = place
+            bestScore = score
+        }
+    }
+    return best
+}
+
+/**
+ * The house number at the end of a street address ("12", "12a", "12-14", also right after an
+ * abbreviation as in "Musterstr.12"), in lower case; null without one.
+ */
+fun houseNumberOf(street: String): String? =
+    Regex("(?:\\s|(?<=\\.))(\\d+\\s?[a-zA-Z]?(?:\\s?[-/]\\s?\\d+\\s?[a-zA-Z]?)?)\\s*$").find(street.trim())
+        ?.groupValues?.get(1)?.let { words(it).firstOrNull() }
+
+/** The words of a street address without its house number. */
+private fun streetWordsOf(street: String): List<String> {
+    val number = Regex("(?:\\s|(?<=\\.))\\d.*$").replace(street.trim(), "")
+    return streetSpelling(words(number))
+}
+
+/** Street words with "str" / "str." written out, so "Musterstr. 12" is "Musterstraße 12". */
+private fun streetSpelling(list: List<String>): List<String> =
+    list.map { word -> if (word.endsWith("str")) word + "asse" else word }
 
 /** The first of [candidates] that agrees with the [postcode] or the [city] of an address. */
 fun pickMatching(candidates: List<Stop>, postcode: String?, city: String?): Stop? =
@@ -134,7 +218,8 @@ private fun containsRun(list: List<String>, run: List<String>): Boolean {
 
 /**
  * The position the device's geocoder gives for [query], taking only a result that agrees
- * with [postcode] or [city]. Null without a geocoder, without network or without such a result.
+ * with [postcode] or [city]; with neither known, the first result. Null without a geocoder,
+ * without network or without such a result.
  */
 private suspend fun geocode(context: Context, query: String, postcode: String?, city: String?): Pair<Double, Double>? =
     withContext(Dispatchers.IO) {
@@ -144,12 +229,14 @@ private suspend fun geocode(context: Context, query: String, postcode: String?, 
             val results = Geocoder(context, Locale.getDefault()).getFromLocationName(query, 5).orEmpty()
             results.firstOrNull { address ->
                 address.hasLatitude() && address.hasLongitude() &&
-                    addressAgrees(
-                        address.postalCode,
-                        listOfNotNull(address.locality, address.subAdminArea, address.subLocality),
-                        postcode,
-                        city,
-                    )
+                    (
+                        (postcode == null && city == null) || addressAgrees(
+                            address.postalCode,
+                            listOfNotNull(address.locality, address.subAdminArea, address.subLocality),
+                            postcode,
+                            city,
+                        )
+                        )
             }?.let { it.latitude to it.longitude }
         } catch (e: CancellationException) {
             throw e

@@ -30,6 +30,17 @@ const val WALK_TIME_MAX_METERS = 5_000.0
 /** True where a time on foot to a place [meters] away is worth showing. */
 fun walkTimeShown(meters: Double): Boolean = !meters.isNaN() && meters <= WALK_TIME_MAX_METERS
 
+/**
+ * A duration of [minutes] (a journey, a ride) split for the label: below an hour the minutes
+ * alone (hours null), from an hour on the whole hours and the minutes left, those null for whole
+ * hours ("2 h", not "2 h 0 min"). Never below 0.
+ */
+fun durationSpan(minutes: Long): Pair<Long?, Long?> {
+    val safe = minutes.coerceAtLeast(0L)
+    if (safe < 60L) return null to safe
+    return safe / 60L to (safe % 60L).takeIf { it > 0L }
+}
+
 /** A walk of [minutes] split for the label: whole hours and the minutes left, hours null below one hour. */
 fun walkSpan(minutes: Long): Pair<Long?, Long> {
     val safe = minutes.coerceAtLeast(1L)

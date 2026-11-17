@@ -19,4 +19,7 @@
         <item quantity="one">%d notice here</item>
         <item quantity="other">%d notices here</item>
     </plurals>
+    <!-- The kind of vehicle a line badge shows as a small icon where its name does not tell it, read out before the name. -->
+    <string name="mode_bus">Bus</string>
+    <string name="mode_train">Train</string>
 </resources>

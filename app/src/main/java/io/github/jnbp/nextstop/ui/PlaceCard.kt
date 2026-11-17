@@ -50,6 +50,11 @@ import kotlin.math.ceil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.github.jnbp.nextstop.R
+import io.github.jnbp.nextstop.data.Stop
+import io.github.jnbp.nextstop.data.germanStreetOrder
+import io.github.jnbp.nextstop.data.shortStopName
+import io.github.jnbp.nextstop.data.stopNamePart
+import io.github.jnbp.nextstop.data.streetWithNumber
 import io.github.jnbp.nextstop.ui.theme.AppColors
 
 /** What the device's geocoder knows of a place: a name for it and its address in one line. */
@@ -66,15 +71,18 @@ suspend fun reverseGeocode(context: Context, latitude: Double, longitude: Double
             @Suppress("DEPRECATION")
             val address = Geocoder(context, Locale.getDefault()).getFromLocation(latitude, longitude, 1)?.firstOrNull()
                 ?: return@withContext null
-            val street = listOfNotNull(address.thoroughfare, address.subThoroughfare).joinToString(" ").ifEmpty { null }
+            // The street first, then the number ("Musterstraße 32"), whatever the language of the geocoder.
+            val street = streetWithNumber(address.thoroughfare, address.subThoroughfare)
             val town = listOfNotNull(address.postalCode, address.locality).joinToString(" ").ifEmpty { null }
             // A named place (a shop, a park) has a feature name other than its house number.
             val feature = address.featureName?.takeIf { name ->
-                name.isNotBlank() && name != address.subThoroughfare && name != street && name.any { it.isLetter() }
+                name.isNotBlank() && name != address.subThoroughfare && name != street && name.any { it.isLetter() } &&
+                    // A house number with a letter ("10b") is no name of a place.
+                    !name.trim().first().isDigit()
             }
             PlaceDetails(
                 title = feature ?: street,
-                address = listOfNotNull(street, town).joinToString(", ").ifEmpty { address.getAddressLine(0) },
+                address = listOfNotNull(street, town).joinToString(", ").ifEmpty { address.getAddressLine(0)?.let { germanStreetOrder(it, address = true) } },
             )
         } catch (e: CancellationException) {
             throw e
@@ -311,6 +319,85 @@ fun PlaceContent(
     }
 }
 
+/**
+ * What the start sheet shows for a stop tapped on its map: its name (and the part of a big
+ * station it is), how far it is, and what to do with it, its departures first. With [onClose]
+ * a small button in the corner lets go of it again.
+ */
+@Composable
+fun StopPickContent(
+    stop: Stop,
+    onDepartures: () -> Unit,
+    onFrom: () -> Unit,
+    onTo: () -> Unit,
+    onClose: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stop.name.shortStopName(),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val part = stop.name.stopNamePart()
+                val distance = stop.distanceMeters?.let { formatDistance(it) }
+                val detail = listOfNotNull(part, distance).joinToString(" \u00B7 ")
+                if (detail.isNotEmpty()) {
+                    Text(
+                        text = detail,
+                        color = AppColors.Muted,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+            if (onClose != null) {
+                RoundButton(
+                    glyph = Glyph.Close,
+                    description = stringResource(R.string.map_stop_close),
+                    onClick = onClose,
+                    size = 36.dp,
+                    solid = true,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+        PrimaryButton(
+            text = stringResource(R.string.departures_here),
+            onClick = onDepartures,
+            modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+            shape = RoundedCornerShape(26.dp),
+            minHeight = 50.dp,
+        )
+        Row(
+            modifier = Modifier.padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            SecondaryButton(
+                text = stringResource(R.string.from_here),
+                onClick = onFrom,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(26.dp, 10.dp, 10.dp, 26.dp),
+                minHeight = 44.dp,
+            )
+            SecondaryButton(
+                text = stringResource(R.string.to_here),
+                onClick = onTo,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp, 26.dp, 26.dp, 10.dp),
+                minHeight = 44.dp,
+            )
+        }
+    }
+}
+
 /** Shares a place as text: its name and address, a geo: link and a link to OpenStreetMap. */
 fun sharePlace(context: Context, position: Pair<Double, Double>, title: String, address: String?) {
     val (latitude, longitude) = position
@@ -340,6 +427,30 @@ fun openInMaps(context: Context, position: Pair<Double, Double>) {
         context.startActivity(view)
     } catch (e: ActivityNotFoundException) {
         Toast.makeText(context, R.string.no_maps_app, Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * A duration for people (a journey, a ride): "48 min" below an hour, "2 h 23 min" ("2 Std 23 min")
+ * and "2 h" from it, never one big number of minutes (see [durationSpan]).
+ */
+@Composable
+fun durationLabel(minutes: Long): String {
+    val (hours, rest) = durationSpan(minutes)
+    return when {
+        hours == null -> stringResource(R.string.walk_rest_minutes, rest ?: 0L)
+        rest == null -> stringResource(R.string.span_whole_hours, hours)
+        else -> stringResource(R.string.span_hours, hours, rest)
+    }
+}
+
+/** [durationLabel] outside of the interface, for texts to share. */
+fun durationText(context: Context, minutes: Long): String {
+    val (hours, rest) = durationSpan(minutes)
+    return when {
+        hours == null -> context.getString(R.string.walk_rest_minutes, rest ?: 0L)
+        rest == null -> context.getString(R.string.span_whole_hours, hours)
+        else -> context.getString(R.string.span_hours, hours, rest)
     }
 }
 

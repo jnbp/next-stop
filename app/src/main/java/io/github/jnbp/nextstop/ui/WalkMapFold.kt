@@ -50,6 +50,12 @@ import io.github.jnbp.nextstop.data.walkDetails
 import io.github.jnbp.nextstop.data.shownWalkMinutes
 import io.github.jnbp.nextstop.data.walkMinutesFor
 import io.github.jnbp.nextstop.data.stopSpotMeters
+import io.github.jnbp.nextstop.data.ChangeMapEnds
+import io.github.jnbp.nextstop.data.OsmPlatform
+import io.github.jnbp.nextstop.data.changeMapEnds
+import io.github.jnbp.nextstop.data.changeMovesPlace
+import io.github.jnbp.nextstop.data.ChangeMapKind
+import io.github.jnbp.nextstop.data.changeMapKind
 import io.github.jnbp.nextstop.ui.theme.AppColors
 
 /*
@@ -168,6 +174,105 @@ fun hasSpotWalkMap(arriving: Leg, next: Leg): Boolean {
     return meters > SAME_SPOT_METERS
 }
 
+/**
+ * The ends of the change from [arriving] to [next] for its small map (see [changeMapEnds]),
+ * with the platform of a rail ride from OpenStreetMap where its way and stop position are not known.
+ */
+fun changeEndsOf(arriving: Leg, next: Leg): ChangeMapEnds? = changeMapEnds(
+    arriving,
+    next,
+    alightPlatform = OsmStations.ridePlatforms(arriving, boarding = false).firstOrNull()?.let(::platformMiddle),
+    boardPlatform = OsmStations.ridePlatforms(next, boarding = true).firstOrNull()?.let(::platformMiddle),
+)
+
+private fun platformMiddle(platform: OsmPlatform): Pair<Double, Double> =
+    (platform.a.first + platform.b.first) / 2 to (platform.a.second + platform.b.second) / 2
+
+/**
+ * True when the change from [arriving] to [next], without a walk leg of its own, gets the small
+ * map of [ChangeWalkMap]: the next ride is boarded elsewhere (see [changeMovesPlace]), as from a
+ * bus stop in the street to a platform of the same name, and no map of two stop positions of
+ * buses or trams ([hasSpotWalkMap]) shows it already.
+ */
+fun hasChangeMap(arriving: Leg, next: Leg): Boolean {
+    if (arriving.walking || next.walking || hasSpotWalkMap(arriving, next)) return false
+    if (OsmStations.samePlatform(arriving, next)) return false
+    return changeMovesPlace(arriving, next, changeEndsOf(arriving, next))
+}
+
+/**
+ * The small map of the change from [arriving] to [next] with the walk leg [walk] between them
+ * (null for none, [walkMinutes] long), by [changeMapKind]: the walk's own, else the two stop
+ * positions, else the change as known. Null where it shows none.
+ */
+fun changeWalkMapKind(arriving: Leg, next: Leg, walk: Leg?, walkMinutes: Long): ChangeMapKind = changeMapKind(
+    arriving,
+    next,
+    changeEndsOf(arriving, next),
+    walkMinutes = walkMinutes,
+    walkHasMap = walk != null && hasWalkMap(walk),
+    samePlatform = OsmStations.samePlatform(arriving, next),
+)
+
+/** The small map of [kind] for the change from [arriving] to [next] with the walk leg [walk] (see changeWalkMapKind). */
+@Composable
+fun ChangeMapOf(kind: ChangeMapKind, arriving: Leg, next: Leg, walk: Leg?, onFocusWalk: (Leg) -> Unit) {
+    when (kind) {
+        ChangeMapKind.Walk -> if (walk != null) WalkMap(walk, onFocusWalk)
+        ChangeMapKind.Spots -> SpotWalkMap(arriving, next, onFocusWalk)
+        ChangeMapKind.Change -> ChangeWalkMap(arriving, next, onFocusWalk)
+        ChangeMapKind.None -> Unit
+    }
+}
+
+/**
+ * The small map of a change without a walk of its own between any two rides (see
+ * [hasChangeMap]): from where [arriving] is left to where [next] is boarded, by the stop
+ * positions, platforms or stops known (see [changeEndsOf]), along the real way on foot once it
+ * is known, the straight line until then. A tap shows it on the full map.
+ */
+@Composable
+fun ChangeWalkMap(arriving: Leg, next: Leg, onFocusWalk: (Leg) -> Unit) {
+    val ends = remember(arriving, next) { changeEndsOf(arriving, next) } ?: return
+    val start = ends.start
+    val end = ends.end
+    val from = arriving.alightingSpot
+    val to = next.boardingSpot
+    // Drawn again once the real way on foot came in.
+    val footVersion by FootPaths.version.collectAsState()
+    val path = remember(start, end, footVersion) { FootPaths.wayBetween(start, end) }
+    val straight = remember(start, end, footVersion) { FootPaths.statusBetween(start, end) == FootWay.Straight }
+    LaunchedEffect(start, end) { FootPaths.wantWay(start, end) }
+    val walk = remember(arriving, next, path) { spotWalk(arriving, next, path) }
+    val details = remember(path, end, from, to) {
+        val points = if (path.lastOrNull() != end) path + end else path
+        walkDetails(points, targetPos = to?.label, startPos = from?.label)
+    }
+    val broken = rememberBrokenLifts(details)
+    val context = LocalContext.current
+    Column(modifier = Modifier.fillMaxWidth()) {
+        WalkMiniMap(
+            path = path,
+            target = end,
+            targetLabel = to?.label,
+            onClick = { onFocusWalk(walk) },
+            startLabel = from?.label,
+            startColor = lineColor(arriving).toArgb(),
+            targetColor = lineColor(next).toArgb(),
+            startLines = remember(from) { from?.let { OsmStations.linesAt(it) }.orEmpty() },
+            targetLines = remember(to) { to?.let { OsmStations.linesAt(it) }.orEmpty() },
+            straight = straight,
+            details = details,
+            brokenLifts = broken,
+            targetIsPosition = to != null,
+        )
+        val summary = remember(details, broken, path) {
+            walkSummaryText(context, details, to?.label, walkMinutesFor(routeMeters(path)), broken)
+        }
+        WalkSummaryLine(summary, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+    }
+}
+
 /** The small map of [walk] (see [WalkMiniMap]); a tap shows the walk on the full map. */
 @Composable
 fun WalkMap(walk: Leg, onFocusWalk: (Leg) -> Unit) {
@@ -200,8 +305,9 @@ fun WalkMap(walk: Leg, onFocusWalk: (Leg) -> Unit) {
                 else -> target.label?.takeIf { it.length <= 3 } ?: stringResource(R.string.walk_minimap_entrance)
             },
             onClick = { onFocusWalk(walk) },
-            // The exit of the station the walk leaves by, with its letter where it is a short one.
-            startLabel = walk.walkExit?.label?.takeIf { it.length <= 3 },
+            // The exit of the station the walk leaves by, with its letter where it is a short one,
+            // where the way starts there (a way through it from the platform shows it on the way).
+            startLabel = walk.walkExit?.takeIf { it.position == path.firstOrNull() }?.label?.takeIf { it.length <= 3 },
             targetLines = remember(target) { target?.let { OsmStations.linesAt(it) }.orEmpty() },
             straight = straight,
             details = details,

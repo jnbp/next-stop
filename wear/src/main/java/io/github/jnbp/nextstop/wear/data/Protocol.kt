@@ -259,6 +259,8 @@ data class NextRide(
     val samePlatform: Boolean = false,
     /** The colour of the line as ARGB, as the phone works it out from the ride itself ("color"); null where it sends none. */
     val color: Long? = null,
+    /** The way to this ride is ridden by bike ("bike"), not walked. */
+    val cycling: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("line", line ?: JSONObject.NULL)
@@ -274,6 +276,7 @@ data class NextRide(
         map?.let { put("map", it.toJson()) }
         if (samePlatform) put("samePlatform", true)
         color?.let { put("color", it) }
+        if (cycling) put("bike", true)
     }
 
     companion object {
@@ -292,6 +295,7 @@ data class NextRide(
             map = item.optJSONObject("map")?.let { ChangeMap.parse(it) },
             samePlatform = item.optBoolean("samePlatform", false),
             color = lineColorOf(item),
+            cycling = item.optBoolean("bike", false),
         )
     }
 }
@@ -422,6 +426,8 @@ data class PlanRide(
     val cancelled: Boolean = false,
     /** The colour of the line as ARGB, as the phone works it out from the ride itself ("color"); null where it sends none. */
     val color: Long? = null,
+    /** The way before this ride ([walkBefore]) is ridden by bike ("bikeBefore"). */
+    val bikeBefore: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("line", line ?: JSONObject.NULL)
@@ -439,6 +445,7 @@ data class PlanRide(
         gap?.let { put("gap", it) }
         if (cancelled) put("cancelled", true)
         color?.let { put("color", it) }
+        if (bikeBefore) put("bikeBefore", true)
     }
 
     companion object {
@@ -462,6 +469,7 @@ data class PlanRide(
                     gap = if (item.has("gap") && !item.isNull("gap")) item.optInt("gap") else null,
                     cancelled = item.optBoolean("cancelled", false),
                     color = lineColorOf(item),
+                    bikeBefore = item.optBoolean("bikeBefore", false),
                 )
             }
         }
@@ -490,6 +498,8 @@ data class WalkSketch(
     val toLatitude: Double,
     val toLongitude: Double,
     val minutes: Int,
+    /** Ridden by bike (the bike combo of the phone, "bike"), not walked. */
+    val cycling: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("from", from)
@@ -499,6 +509,7 @@ data class WalkSketch(
         .put("toLat", toLatitude)
         .put("toLon", toLongitude)
         .put("minutes", minutes)
+        .apply { if (cycling) put("bike", true) }
 
     companion object {
         fun parse(item: JSONObject): WalkSketch? {
@@ -512,6 +523,7 @@ data class WalkSketch(
                 toLatitude = values[2],
                 toLongitude = values[3],
                 minutes = item.optInt("minutes"),
+                cycling = item.optBoolean("bike", false),
             )
         }
     }
@@ -575,6 +587,8 @@ data class TripSnapshot(
     /** Every ride of the connection for the overview ("plan"), the walk after the last one ("planWalkEnd", minutes). */
     val plan: List<PlanRide> = emptyList(),
     val planWalkEnd: Int = 0,
+    /** The way after the last ride ([planWalkEnd]) is ridden by bike ("planBikeEnd"). */
+    val planBikeEnd: Boolean = false,
     /** The ride of this step in [plan] ("planIndex"); [plan].size after the last ride; -1 when unknown. */
     val planIndex: Int = -1,
     /** With [StepKind.Board] after another ride: how tight that change is and the minutes it leaves. */
@@ -586,6 +600,16 @@ data class TripSnapshot(
     val map: ChangeMap? = null,
     /** The colour of the line as ARGB, as the phone works it out from the ride itself ("color"); null where it sends none. */
     val color: Long? = null,
+    /**
+     * With [StepKind.Board] before a journey that starts on foot and whose walk has not begun:
+     * the step is setting off, [time] is when to leave and [departure] when the ride leaves.
+     * On the wire "time" stays the ride's departure and "leaveAt" carries [time], so a watch
+     * that knows nothing of leaving still shows boarding at the right time. [delayMinutes]
+     * stays the ride's delay.
+     */
+    val leave: Boolean = false,
+    /** With [leave]: the departure of the ride the walk leads to. */
+    val departure: Long = 0,
 ) {
     /**
      * True for a trip of the phone that no longer runs there although the phone never said so
@@ -606,7 +630,9 @@ data class TripSnapshot(
         put("direction", direction ?: JSONObject.NULL)
         put("place", place)
         put("platform", platform ?: JSONObject.NULL)
-        put("time", time)
+        // As the phone sends it: "time" the ride's departure, "leaveAt" when to set off.
+        put("time", if (leave) departure else time)
+        if (leave) put("leaveAt", time)
         put("delay", delayMinutes)
         put("hint", hint ?: JSONObject.NULL)
         put("progress", progress.toDouble())
@@ -633,6 +659,7 @@ data class TripSnapshot(
         if (plan.isNotEmpty()) {
             put("plan", JSONArray().apply { plan.forEach { put(it.toJson()) } })
             put("planWalkEnd", planWalkEnd)
+            if (planBikeEnd) put("planBikeEnd", true)
         }
         put("planIndex", planIndex)
         rating?.let { put("rating", it.name) }
@@ -664,7 +691,7 @@ data class TripSnapshot(
                     direction = root.text("direction"),
                     place = root.optString("place", ""),
                     platform = root.text("platform"),
-                    time = root.optLong("time"),
+                    time = root.optLong("leaveAt").takeIf { it > 0 } ?: root.optLong("time"),
                     delayMinutes = root.optInt("delay"),
                     hint = root.text("hint"),
                     progress = root.optDouble("progress", 0.0).toFloat(),
@@ -688,12 +715,15 @@ data class TripSnapshot(
                     stops = RideStop.parseList(root.optJSONArray("stops")),
                     plan = PlanRide.parseList(root.optJSONArray("plan")),
                     planWalkEnd = root.optInt("planWalkEnd"),
+                    planBikeEnd = root.optBoolean("planBikeEnd", false),
                     planIndex = root.optInt("planIndex", -1),
                     rating = ChangeRating.parse(root.optString("rating", "")),
                     spare = if (root.has("spare") && !root.isNull("spare")) root.optInt("spare") else null,
                     gap = if (root.has("gap") && !root.isNull("gap")) root.optInt("gap") else null,
                     map = root.optJSONObject("map")?.let { ChangeMap.parse(it) },
                     color = lineColorOf(root),
+                    leave = root.optLong("leaveAt") > 0,
+                    departure = if (root.optLong("leaveAt") > 0) root.optLong("time") else 0,
                 )
             } catch (e: Exception) {
                 NONE
@@ -737,7 +767,8 @@ fun snapshotOf(journey: Journey, now: Long): TripSnapshot {
                 time = riding.arrival,
                 delayMinutes = riding.arrivalDelayMinutes,
                 stopsLeft = left,
-                alert = if (left > 0) left <= 1 else soon,
+                // On a long last hop the buzz waits for the last minutes, not hours ahead.
+                alert = if (left > 0) left <= 1 && getOffSoon(riding.arrival, now) else soon,
                 alertKey = "${riding.line}|${riding.to}|${riding.departure}",
                 change = rides.indexOf(riding) < rides.lastIndex,
                 platform = riding.arrivalPlatform,
@@ -751,7 +782,12 @@ fun snapshotOf(journey: Journey, now: Long): TripSnapshot {
             val planIndex = rides.indexOf(upcoming)
             val before = walkingBefore(legs, index)
             val previous = legs.subList(0, index).lastOrNull { !it.walking }
+            // Before the walk to the first ride: when to leave, not when the ride departs.
+            val leave = if (planIndex == 0) leaveTimeOf(legs, index) else null
+            val leaving = leave != null && now < leave
             planBase.copy(
+                leave = leaving,
+                departure = if (leaving) upcoming.departure else 0,
                 planIndex = planIndex,
                 stops = stopsOf(upcoming),
                 rating = plan.getOrNull(planIndex)?.rating,
@@ -764,7 +800,7 @@ fun snapshotOf(journey: Journey, now: Long): TripSnapshot {
                 direction = upcoming.direction,
                 place = upcoming.from,
                 platform = upcoming.platform,
-                time = upcoming.departure,
+                time = if (leaving) leave!! else upcoming.departure,
                 delayMinutes = upcoming.departureDelayMinutes,
                 rideTo = upcoming.to,
                 rideArrival = upcoming.arrival,
@@ -782,6 +818,17 @@ fun snapshotOf(journey: Journey, now: Long): TripSnapshot {
         )
         else -> planBase.copy(kind = StepKind.Arrived, place = destination, time = journey.arrival, progress = 1f, planIndex = rides.size)
     }
+}
+
+/**
+ * When to set off for a journey whose first ride, at [firstRide] in [legs], follows a walk: the
+ * start of that walk. Null without a walk of its own before it, or with walks of 0 m only (as on the phone).
+ */
+internal fun leaveTimeOf(legs: List<Leg>, firstRide: Int): Long? {
+    if (firstRide <= 0) return null
+    val walks = legs.subList(0, firstRide)
+    if (walks.any { !it.walking } || walks.all { it.inStation }) return null
+    return legs.first().departure.takeIf { it < legs[firstRide].departure }
 }
 
 /** The walking legs right before the leg at [index] ([legs].size for the end). */

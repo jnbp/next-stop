@@ -40,10 +40,20 @@ data class StopDepartures(val stop: Stop, val departures: List<Departure>, val f
  * with its stop (the rows then name it), a run that calls at two of them once, at the first
  * board that has it. The board ends where the first [StopDepartures.full] board ends, so no stop
  * seems to have nothing later only because fewer of its departures were asked for.
+ *
+ * With [walkSeconds] (for "when to leave", the walk to each stop) that end is measured in the
+ * time to set off, not the time of departure: a full board of a near stop then cuts the
+ * departures of a far stop where their time to set off passes its own, not where their
+ * departure does. Measured by departure, the near stop's short board cut a far stop down to
+ * the few departures it can no longer reach on foot, and "when to leave" showed the near stop
+ * alone.
  */
-fun mergeStopBoards(boards: List<StopDepartures>): List<Departure> {
+fun mergeStopBoards(boards: List<StopDepartures>, walkSeconds: (Stop) -> Int? = { null }): List<Departure> {
+    val walks = boards.associate { board -> board.stop.id to (walkSeconds(board.stop) ?: 0).toLong() }
+    fun leaveInstant(departure: Departure, stopId: String) =
+        departureOrderTime(departure)?.toInstant()?.minusSeconds(walks[stopId] ?: 0L)
     val horizon = boards.filter { it.full }
-        .mapNotNull { board -> board.departures.mapNotNull { departureOrderTime(it)?.toInstant() }.maxOrNull() }
+        .mapNotNull { board -> board.departures.mapNotNull { leaveInstant(it, board.stop.id) }.maxOrNull() }
         .minOrNull()
     val seenRuns = HashSet<String>()
     val all = boards.flatMap { board ->
@@ -51,7 +61,7 @@ fun mergeStopBoards(boards: List<StopDepartures>): List<Departure> {
         board.departures.map { it.copy(stop = stop, at = it.at ?: stop.position) }
     }.filter { departure -> departure.tripId == null || seenRuns.add(departure.tripId) }
         .filter { departure ->
-            val time = departureOrderTime(departure)?.toInstant()
+            val time = departure.stop?.let { leaveInstant(departure, it.id) }
             horizon == null || time == null || !time.isAfter(horizon)
         }
     return inDepartureOrder(all)
@@ -89,4 +99,48 @@ fun departureKeys(departures: List<Departure>): List<String> {
         seen[base] = count
         if (count == 1) base else "$base#$count"
     }
+}
+
+/** The least radius of "all stops nearby", in metres. */
+const val NEARBY_RADIUS_MIN = 100
+
+/** The largest radius of "all stops nearby", in metres. */
+const val NEARBY_RADIUS_MAX = 2_000
+
+/** The radius of "all stops nearby" moves in steps of this many metres. */
+const val NEARBY_RADIUS_STEP = 50
+
+/** The radius of "all stops nearby" until the user picks another. */
+const val NEARBY_RADIUS_DEFAULT = 500
+
+/** The most stops "all stops nearby" asks departures of, however large the radius: one request each, every round. */
+const val NEARBY_STOPS_CAP = 30
+
+/** The fewest stops "all stops nearby" keeps (the count of old, enough for the default radius). */
+const val NEARBY_STOPS_FLOOR = 10
+
+/**
+ * How many of the nearest stops "all stops nearby" keeps within [radius] metres: more with a
+ * larger radius (one per 50 m of it, so 10 at the default 500 m, 20 at 1 km), never fewer than
+ * [NEARBY_STOPS_FLOOR] nor more than [NEARBY_STOPS_CAP]. In a sparse area all stops within the
+ * radius fit; in a dense one the farthest are left out, so the requests stay bounded.
+ */
+fun nearbyStopsKept(radius: Int): Int =
+    (nearbyRadiusOf(radius) / NEARBY_RADIUS_STEP).coerceIn(NEARBY_STOPS_FLOOR, NEARBY_STOPS_CAP)
+
+/**
+ * How many stops to ask the provider for, to keep [nearbyStopsKept] of them within [radius]:
+ * twice as many, since some answers are no stops or lie outside the circle (the provider
+ * counts its own walk), at most two times [NEARBY_STOPS_CAP].
+ */
+fun nearbyStopsAsked(radius: Int): Int = nearbyStopsKept(radius) * 2
+
+/**
+ * [meters] as a radius of "all stops nearby": within [NEARBY_RADIUS_MIN] and
+ * [NEARBY_RADIUS_MAX], on the nearest step of [NEARBY_RADIUS_STEP] (a stored 300, 500 or 800 of
+ * the former fixed choices stays as it is).
+ */
+fun nearbyRadiusOf(meters: Int): Int {
+    val stepped = Math.round(meters.toDouble() / NEARBY_RADIUS_STEP).toInt() * NEARBY_RADIUS_STEP
+    return stepped.coerceIn(NEARBY_RADIUS_MIN, NEARBY_RADIUS_MAX)
 }

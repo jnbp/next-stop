@@ -95,4 +95,83 @@ class RouteLinkTest {
             routeLinkJson(listOf(leg), "B", null, null, 5),
         )
     }
+
+    @Test
+    fun aWayByBikeSaysSo() {
+        // The bike combo: the way to the first stop is ridden; the page then says so instead of "on foot".
+        val ride = RouteLeg(
+            provider = null, trip = null, line = null, product = null, direction = null, walk = true, bike = true,
+            from = RoutePlace("A", null, null, null, 10),
+            to = RoutePlace("B", null, null, null, 20),
+        )
+        assertEquals(
+            "{\"legs\":[{\"from\":{\"name\":\"A\",\"dep\":10},\"to\":{\"name\":\"B\",\"arr\":20},\"walk\":true,\"bike\":true}]," +
+                "\"dest\":{\"name\":\"B\"},\"t\":5}",
+            routeLinkJson(listOf(ride), "B", null, null, 5),
+        )
+        // Only a way on the street can be ridden by bike.
+        val train = ride.copy(walk = false, line = "S1")
+        assertTrue(!routeLinkJson(listOf(train), "B", null, null, 5).contains("bike"))
+    }
+
+    /** A curve of [radius] metres through [degrees], one point per degree. */
+    private fun curve(radius: Double, degrees: Int, startLat: Double = 52.5, startLon: Double = 13.4): List<Pair<Double, Double>> =
+        (0..degrees).map { step ->
+            val angle = Math.toRadians(step.toDouble())
+            (startLat + radius * Math.sin(angle) / 111_320.0) to
+                (startLon + radius * (1 - Math.cos(angle)) / (111_320.0 * Math.cos(Math.toRadians(startLat))))
+        }
+
+    /** The largest change of direction between two segments of [points], in degrees. */
+    private fun sharpestTurn(points: List<Pair<Double, Double>>): Double {
+        val k = Math.cos(Math.toRadians(points[0].first))
+        val headings = points.zipWithNext { a, b -> Math.atan2(b.first - a.first, (b.second - a.second) * k) }
+        return headings.zipWithNext { a, b ->
+            var d = Math.toDegrees(b - a)
+            while (d > 180) d -= 360
+            while (d < -180) d += 360
+            Math.abs(d)
+        }.maxOrNull() ?: 0.0
+    }
+
+    @Test
+    fun rideShapesKeepTheirCurvesRound() {
+        // A ride through a curve of 300 m radius: no corner sharper than 25 degrees in the link.
+        val shape = routeShape(curve(300.0, 90), RIDE_SHAPE_TOLERANCE_M, ROUTE_SHAPE_MAX_POINTS)!!
+        assertTrue("turn of ${sharpestTurn(decodeForTest(shape))} degrees", sharpestTurn(decodeForTest(shape)) <= 25.0)
+    }
+
+    @Test
+    fun aLongWindingRideStaysAReasonableLink() {
+        // 20 km of rails that wind all the way (a point every 10 m): the link stays a few kilobytes.
+        val winding = (0 until 2000).map { i -> (52.4 + i * 0.00009) to (13.3 + Math.sin(i / 40.0) * 0.004) }
+        val shape = routeShape(winding, RIDE_SHAPE_TOLERANCE_M, ROUTE_SHAPE_MAX_POINTS)!!
+        assertTrue("shape of ${shape.length} chars", shape.length < 2500)
+        assertTrue(decodeForTest(shape).size <= ROUTE_SHAPE_MAX_POINTS)
+    }
+
+    /** A Google encoded polyline (precision 5) back to points, as decodePolyline in web/shared/core.js. */
+    private fun decodeForTest(text: String): List<Pair<Double, Double>> {
+        val out = mutableListOf<Pair<Double, Double>>()
+        var index = 0
+        var lat = 0L
+        var lon = 0L
+        fun next(): Long {
+            var result = 0L
+            var shift = 0
+            while (true) {
+                val b = text[index++].code - 63
+                result = result or ((b and 0x1f).toLong() shl shift)
+                shift += 5
+                if (b < 0x20) break
+            }
+            return if (result and 1L != 0L) (result shr 1).inv() else result shr 1
+        }
+        while (index < text.length) {
+            lat += next()
+            lon += next()
+            out.add(lat / 1e5 to lon / 1e5)
+        }
+        return out
+    }
 }

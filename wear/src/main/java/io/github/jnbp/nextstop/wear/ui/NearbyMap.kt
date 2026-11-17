@@ -31,8 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -90,6 +88,7 @@ import io.github.jnbp.nextstop.wear.data.WebMercator
 import io.github.jnbp.nextstop.wear.data.currentPosition
 import io.github.jnbp.nextstop.wear.data.hasLocationPermission
 import io.github.jnbp.nextstop.wear.data.locationGrants
+import io.github.jnbp.nextstop.wear.data.listedStopName
 import io.github.jnbp.nextstop.wear.data.nearbyStopsWithFallback
 import io.github.jnbp.nextstop.wear.data.phonePosition
 
@@ -217,7 +216,7 @@ fun MapScreen(onStop: (Place) -> Unit) {
     if (origin == null || stops.isEmpty()) {
         val listState = rememberScalingLazyListState(initialCenterItemIndex = 0)
         ScreenScaffold(scrollState = listState) { contentPadding ->
-            ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+            ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
                 item { ListHeader { Text(stringResource(R.string.map)) } }
                 if (loading) {
                     item {
@@ -343,14 +342,6 @@ private fun StopsMap(
     }
     val density = LocalDensity.current
     val hitRadius = with(density) { HIT_RADIUS.toPx() }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        try {
-            focus.requestFocus()
-        } catch (e: IllegalStateException) {
-            // Not attached yet: the crown then does nothing, the touch gestures still work.
-        }
-    }
     val textMeasurer = rememberTextMeasurer()
     val signGreen = Color(0xFF00854A)
     val signYellow = Color(0xFFF6D500)
@@ -403,7 +394,7 @@ private fun StopsMap(
                         span = (span * exp(event.verticalScrollPixels / ROTARY_PIXELS_PER_E)).coerceIn(MIN_SPAN, MAX_SPAN)
                         true
                     }
-                    .focusRequester(focus)
+                    .crownFocus()
                     .focusable()
                     .pointerInput(origin) {
                         // Drag moves, pinch zooms. A drag from the left edge is left to the
@@ -528,7 +519,7 @@ private fun StopsMap(
                         sqrt(east * east + north * north).roundToInt()
                     }
                     SmallAction(
-                        text = chosen.place.name + (distance?.let { " · " + distanceLabel(it.toDouble()) } ?: ""),
+                        text = listedStopName(chosen.place.name) + (distance?.let { " · " + distanceLabel(it.toDouble()) } ?: ""),
                         onClick = { onStop(chosen.place) },
                         icon = R.drawable.ic_schedule,
                         primary = true,

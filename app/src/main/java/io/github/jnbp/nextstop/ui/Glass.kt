@@ -1,6 +1,9 @@
 package io.github.jnbp.nextstop.ui
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
 import android.view.TextureView
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.border
@@ -23,13 +26,18 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.ImageShader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -54,6 +62,33 @@ private const val BACKDROP_DOWNSCALE = 8
 class Backdrop {
     var image by mutableStateOf<ImageBitmap?>(null)
     var scale by mutableFloatStateOf(1f)
+
+    /**
+     * False while the map draws into a surface of its own (a SurfaceView, see
+     * PerfLab.textureMap): such a map cannot be read back at once, its picture comes only from
+     * snapshots taken while the camera rests (see MapBackground). Until the first one is there,
+     * or with no snapshots at all, the glass shows a frosted tint (see glassGround).
+     */
+    var readback by mutableStateOf(true)
+
+    // While the camera pans or zooms, the picture is not taken again for every frame: it moves
+    // and grows with the map instead (see BackdropCamera.follow in MapBackground). [shiftX] and [shiftY]
+    // are where the top left corner of the picture lies on the screen now, in pixels, [grow]
+    // how much the map was zoomed since it was taken. Read only while drawing.
+    var shiftX by mutableFloatStateOf(0f)
+    var shiftY by mutableFloatStateOf(0f)
+    var grow by mutableFloatStateOf(1f)
+
+    // The picture as a brush that repeats its edge pixels, for a picture that was moved: the
+    // map that came into view since then is filled with the blurred colours at its edge.
+    internal var brush: ShaderBrush? = null
+
+    /** Puts the picture back where it was taken: the map has not moved since. */
+    fun settle() {
+        shiftX = 0f
+        shiftY = 0f
+        grow = 1f
+    }
 }
 
 /**
@@ -102,26 +137,55 @@ fun glassGround(
             } else {
                 null
             }
+            // Glass over a map that cannot be read back (a SurfaceView): the tint alone, made
+            // opaque enough that the sharp map under it does not show through the text, a touch
+            // lighter at the top, like the soft light of the glass. Smooth, with no noise.
+            val frost = Brush.verticalGradient(listOf(frosted(tint, FROST_TOP_ALPHA), frosted(tint, FROST_BOTTOM_ALPHA)))
             onDrawBehind {
+                AllocProbe.begin(AllocProbe.GLASS_DRAW)
                 val image = backdrop?.image
                 if (backdrop == null || image == null) {
-                    drawRect(fallback)
+                    // No picture yet: a map that is a surface gets the frosted tint until its first snapshot.
+                    if (backdrop != null && !backdrop.readback) drawRect(frost) else drawRect(fallback)
                 } else {
-                    val ratio = backdrop.scale
+                    val shiftX = backdrop.shiftX
+                    val shiftY = backdrop.shiftY
+                    val ratio = backdrop.scale * backdrop.grow
                     val at = origin.value
+                    val brush = backdrop.brush
                     withTransform({
-                        translate(left = -at.x, top = -at.y)
+                        translate(left = shiftX - at.x, top = shiftY - at.y)
                         scale(ratio, ratio, Offset.Zero)
                     }) {
-                        drawImage(image)
+                        if (brush == null || (shiftX == 0f && shiftY == 0f && backdrop.grow == 1f)) {
+                            drawImage(image)
+                        } else {
+                            // Moved with the map: the part of the picture behind this element,
+                            // its edge colours carried on where the picture ends.
+                            drawRect(
+                                brush,
+                                topLeft = Offset((at.x - shiftX) / ratio, (at.y - shiftY) / ratio),
+                                size = Size(size.width / ratio, size.height / ratio),
+                            )
+                        }
                     }
-                    drawRect(tint)
+                    // As opaque as the text on it needs over this map (see GlassContrast).
+                    drawRect(readableGlassTint(tint, inner))
                 }
                 if (inner.alpha > 0f) drawRect(inner)
                 if (shine != null) drawRect(shine, size = size.copy(height = depth))
+                AllocProbe.end(AllocProbe.GLASS_DRAW)
             }
         }
 }
+
+// How opaque the tint of the glass is over a map that cannot be read back, at the top and at
+// the bottom of the element: the map under it is sharp, not blurred, so it may only shimmer through.
+private const val FROST_TOP_ALPHA = 0.88f
+private const val FROST_BOTTOM_ALPHA = 0.94f
+
+/** [tint] at least as opaque as [alpha]. */
+private fun frosted(tint: Color, alpha: Float): Color = if (tint.alpha >= alpha) tint else tint.copy(alpha = alpha)
 
 /** Frosted surface that sits above the map. */
 @Composable
@@ -184,27 +248,47 @@ fun Modifier.fadeEdges(
     length: Dp = 20.dp,
     edgeAlpha: () -> Float = { 0f },
 ): Modifier = this
-    // The fade erases what is drawn; in a layer of its own it cannot erase what lies behind.
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithContent {
-        drawContent()
-        val extent = if (horizontal) size.width else size.height
-        val fade = length.toPx()
-        val start = cutAtStart()
-        val end = cutAtEnd()
-        val edge = Color.Black.copy(alpha = edgeAlpha().coerceIn(0f, 1f))
-        if ((start || end) && extent > fade * 2f && edge.alpha < 1f) {
-            val share = fade / extent
-            val stops = arrayOf(
-                0f to (if (start) edge else Color.Black),
-                share to Color.Black,
-                1f - share to Color.Black,
-                1f to (if (end) edge else Color.Black),
-            )
-            val mask = if (horizontal) Brush.horizontalGradient(*stops) else Brush.verticalGradient(*stops)
-            drawRect(brush = mask, blendMode = BlendMode.DstIn)
+    // The fade erases what is drawn; in a layer of its own it cannot erase what lies behind. Only
+    // a fade needs that layer: without one the content is drawn straight, with no extra pass.
+    .graphicsLayer {
+        compositingStrategy = if ((cutAtStart() || cutAtEnd()) && edgeAlpha() < 1f) {
+            CompositingStrategy.Offscreen
+        } else {
+            CompositingStrategy.Auto
         }
     }
+    .drawWithContent {
+        drawContent()
+        AllocProbe.begin(AllocProbe.FADE_EDGES)
+        fadeMask(horizontal, length, cutAtStart, cutAtEnd, edgeAlpha)
+        AllocProbe.end(AllocProbe.FADE_EDGES)
+    }
+
+/** The mask of [fadeEdges] over what was drawn. */
+private fun ContentDrawScope.fadeMask(
+    horizontal: Boolean,
+    length: Dp,
+    cutAtStart: () -> Boolean,
+    cutAtEnd: () -> Boolean,
+    edgeAlpha: () -> Float,
+) {
+    val extent = if (horizontal) size.width else size.height
+    val fade = length.toPx()
+    val start = cutAtStart()
+    val end = cutAtEnd()
+    val edge = Color.Black.copy(alpha = edgeAlpha().coerceIn(0f, 1f))
+    if ((start || end) && extent > fade * 2f && edge.alpha < 1f) {
+        val share = fade / extent
+        val stops = arrayOf(
+            0f to (if (start) edge else Color.Black),
+            share to Color.Black,
+            1f - share to Color.Black,
+            1f to (if (end) edge else Color.Black),
+        )
+        val mask = if (horizontal) Brush.horizontalGradient(*stops) else Brush.verticalGradient(*stops)
+        drawRect(brush = mask, blendMode = BlendMode.DstIn)
+    }
+}
 
 /**
  * Fading edges for content moved by a scroll state. Each fade grows with the scroll offset on
@@ -212,8 +296,11 @@ fun Modifier.fadeEdges(
  * past it, so it never pops in as scrolling starts or stops.
  */
 fun Modifier.fadeEdges(state: ScrollState, horizontal: Boolean, length: Dp = 20.dp): Modifier = this
-    // The fade erases what is drawn; in a layer of its own it cannot erase what lies behind.
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    // The fade erases what is drawn; in a layer of its own it cannot erase what lies behind. Only
+    // content that can scroll fades: other content (a chart that fits its card) needs no layer.
+    .graphicsLayer {
+        compositingStrategy = if (state.maxValue > 0) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+    }
     .drawWithContent {
         drawContent()
         val extent = if (horizontal) size.width else size.height
@@ -252,25 +339,61 @@ internal class BackdropCapture(private val backdrop: Backdrop, private val blurR
     private var raw: Bitmap? = null
     private var frames: List<Bitmap> = emptyList()
     private var images: List<ImageBitmap> = emptyList()
+    private var brushes: List<ShaderBrush> = emptyList()
     private var pixels = IntArray(0)
     private var scratch = IntArray(0)
     private var turn = 0
 
-    /** Reads the map as it is drawn right now and publishes it, small and blurred. Call on the main thread. */
-    suspend fun update(texture: TextureView) {
-        val width = texture.width / BACKDROP_DOWNSCALE
-        val height = texture.height / BACKDROP_DOWNSCALE
-        if (!texture.isAvailable || width < 8 || height < 8) return
+    /**
+     * Reads the map as it is drawn right now and publishes it, small and blurred; false where
+     * there was nothing to read. Call on the main thread.
+     */
+    suspend fun update(texture: TextureView): Boolean {
+        if (!texture.isAvailable) return false
+        val source = prepare(texture.width, texture.height) ?: return false
+        texture.getBitmap(source)
+        publish(source, texture.width)
+        return true
+    }
+
+    /**
+     * Publishes a [snapshot] of a map of [viewWidth] by [viewHeight] pixels (MapLibreMap.snapshot),
+     * small and blurred; false where the map is too small. The snapshot is only read: the caller
+     * still owns it. Call on the main thread.
+     */
+    suspend fun update(snapshot: Bitmap, viewWidth: Int, viewHeight: Int): Boolean {
+        val source = prepare(viewWidth, viewHeight) ?: return false
+        withContext(Dispatchers.Default) {
+            Canvas(source).drawBitmap(snapshot, null, Rect(0, 0, source.width, source.height), scalePaint)
+        }
+        publish(source, viewWidth)
+        return true
+    }
+
+    // Smooth scaling of a snapshot down to the small picture.
+    private val scalePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    /** The bitmap a map of [viewWidth] by [viewHeight] pixels is read into, made anew for a new size; null where it is too small. */
+    private fun prepare(viewWidth: Int, viewHeight: Int): Bitmap? {
+        val width = viewWidth / BACKDROP_DOWNSCALE
+        val height = viewHeight / BACKDROP_DOWNSCALE
+        if (width < 8 || height < 8) return null
         if (raw?.width != width || raw?.height != height) {
             release()
             raw = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             frames = List(2) { Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888) }
             images = frames.map { it.asImageBitmap() }
+            brushes = images.map { ShaderBrush(ImageShader(it, TileMode.Clamp, TileMode.Clamp)) }
             pixels = IntArray(width * height)
             scratch = IntArray(width * height)
         }
-        val source = raw ?: return
-        texture.getBitmap(source)
+        return raw
+    }
+
+    /** Blurs [source] (the small picture of a map [viewWidth] pixels wide) into the frame not on screen and shows it. */
+    private suspend fun publish(source: Bitmap, viewWidth: Int) {
+        val width = source.width
+        val height = source.height
         turn = 1 - turn
         val frame = frames[turn]
         val buffer = pixels
@@ -280,18 +403,22 @@ internal class BackdropCapture(private val backdrop: Backdrop, private val blurR
             blurPixels(buffer, spare, width, height, blurRadius)
             frame.setPixels(buffer, 0, width, 0, 0, width, height)
         }
-        backdrop.scale = texture.width.toFloat() / width
+        backdrop.scale = viewWidth.toFloat() / width
+        backdrop.brush = brushes[turn]
         backdrop.image = images[turn]
     }
 
     /** Takes the picture off the screen first, then gives the bitmaps back. */
     fun release() {
         backdrop.image = null
+        backdrop.brush = null
+        backdrop.settle()
         raw?.recycle()
         frames.forEach { it.recycle() }
         raw = null
         frames = emptyList()
         images = emptyList()
+        brushes = emptyList()
     }
 
     companion object {

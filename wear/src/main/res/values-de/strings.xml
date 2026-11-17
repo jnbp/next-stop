@@ -11,18 +11,26 @@
     <string name="no_favorites">Noch keine Favoriten. Leg welche in der App auf dem Handy an.</string>
     <string name="now">jetzt</string>
     <string name="in_min">%d Min.</string>
+    <string name="in_hours">%1$d Std. %2$d Min.</string>
+    <string name="in_whole_hours">%1$d Std.</string>
     <string name="min_short">%d\'</string>
     <string name="platform">Gl. %s</string>
     <string name="cancelled">fällt aus</string>
-    <string name="delay_plus">+%d</string>
+    <string name="delay_plus">%+d</string>
     <string name="from_phone_position">Standort des Handys</string>
     <string name="step_board">%1$s ab %2$s</string>
+    <string name="step_leave">Losgehen um %s</string>
+    <string name="leave_short">Los</string>
     <string name="step_get_off">Aussteigen: %s</string>
     <string name="step_walk">Zu Fuß zu %s</string>
+    <string name="step_cycle">Mit dem Rad zu %s</string>
     <string name="arrived">Angekommen</string>
-    <string name="towards">Ri. %s</string>
+    <string name="towards">Richtung %s</string>
+    <string name="towards_arrow">→ %s</string>
     <string name="stops_left">%d Stationen</string>
     <string name="next_stop_get_off">Nächste Station aussteigen!</string>
+    <string name="get_off_in_at">Aussteigen in %1$s, um %2$s</string>
+    <string name="change_in_at">Umsteigen in %1$s, um %2$s</string>
     <string name="arrival_at">Ankunft %s</string>
     <string name="end_trip">Fahrt beenden</string>
     <string name="destination">Ziel</string>
@@ -49,6 +57,9 @@
     <string name="phone_not_connected">Handy nicht verbunden – Next Stop auf dem Handy öffnen.</string>
     <string name="phone_no_app">Next Stop auf dem Handy nicht gefunden. Dort installieren oder öffnen.</string>
     <string name="phone_waiting">Handy verbunden, noch keine Orte. Next Stop auf dem Handy öffnen.</string>
+    <string name="phone_off_info">Handy nicht verbunden – Favoriten und Begleiter werden nicht abgeglichen. Abfahrten kommen trotzdem.</string>
+    <string name="phone_off_icon">Handy nicht verbunden</string>
+    <string name="phone_off_close">Schließen</string>
     <string name="reconnect">Erneut verbinden</string>
     <string name="appointments">Termine</string>
     <string name="contacts">Kontakte</string>
@@ -92,6 +103,7 @@
     <string name="map_show">Karte</string>
     <string name="map_hide">Karte zu</string>
     <string name="walk_distance">%1$d m · %2$d min zu Fuß</string>
+    <string name="cycle_distance">%1$d m · %2$d min mit dem Rad</string>
     <string name="alight_reminders">Erinnerung vor dem Aussteigen</string>
     <string name="on">An</string>
     <string name="off">Aus</string>
@@ -113,6 +125,7 @@
     <string name="arrive_clock">an %s</string>
     <string name="next_stop_name">Nächster Halt: %s</string>
     <string name="walk_on_foot">%d min zu Fuß</string>
+    <string name="cycle_minutes">%d min mit dem Rad</string>
     <string name="no_walk">kein Fußweg</string>
     <string name="rating_spare">%1$s · %2$s min Puffer</string>
     <string name="to_destination">Zum Ziel</string>
@@ -123,6 +136,7 @@
     <string name="map">Karte</string>
     <string name="map_hint">Halt antippen</string>
     <string name="rating_gap">%1$s · %2$d min Umstieg</string>
+    <string name="rating_gap_span">%1$s · %2$s Umstieg</string>
     <string name="map_finding_position">Suche Standort…</string>
     <string name="map_loading_stops">Lade Haltestellen…</string>
     <string name="tile_target_hint">Nach links wischen am Zifferblatt zeigt die nächste Verbindung hierhin</string>
@@ -130,6 +144,7 @@
     <string name="map_no_phone">Kein Handy verbunden</string>
     <string name="map_retry">Karte nicht geladen · Erneut versuchen</string>
     <string name="walk_meters">%d m zu Fuß</string>
+    <string name="cycle_meters">%d m mit dem Rad</string>
     <string name="same_platform">gleicher Bahnsteig</string>
     <!-- The style of the map pictures of the phone (watch setting). -->
     <string name="map_style">Kartenstil</string>
@@ -146,6 +161,8 @@
     <!-- A route search from or to the stop of a departure board. -->
     <string name="route_from_here">Route von hier</string>
     <string name="route_to_here">Route hierhin</string>
+    <!-- Small above the stop's name in the header of its departures. -->
+    <string name="board_kicker">Abfahrten</string>
     <string name="from_place">Von %s</string>
     <!-- The destination page: the whole lists of recent destinations and contacts. -->
     <string name="show_all">Alle anzeigen (%d)</string>
@@ -161,7 +178,8 @@
     <string name="about_on_phone">Lizenzen und Datenquellen findest du in den Einstellungen auf dem Handy.</string>
     <!-- Start page (live departures, favourites) and the ride page of a trip. -->
     <string name="all_departures">Alle Abfahrten</string>
-    <string name="start_nearby_offline">Offline – tippen zum Öffnen</string>
+    <string name="other_stop">Andere Haltestelle ›</string>
+    <string name="start_departures_failed">Abfahrten konnten nicht geladen werden – erneut versuchen</string>
     <string name="start_nearby_no_permission">Erlaube den Standort, um sie hier zu sehen</string>
     <string name="minutes_short">%d\'</string>
     <string name="ride_stops_to_go">Halte bis zum Aussteigen</string>
@@ -169,4 +187,7 @@
     <string name="ride_change_at">Umsteigen: %1$s</string>
     <string name="live_departures_setting">Live-Abfahrten auf der Startseite</string>
     <string name="animations_setting">Animationen</string>
+    <!-- The kind of vehicle a line badge shows as a small icon where its name does not tell it, read out before the name. -->
+    <string name="mode_bus">Bus</string>
+    <string name="mode_train">Zug</string>
 </resources>

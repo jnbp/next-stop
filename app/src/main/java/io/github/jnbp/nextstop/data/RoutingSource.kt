@@ -7,8 +7,16 @@ import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * A provider of transit data the app can ask. A local one covers its [area] and is preferred
@@ -170,6 +178,29 @@ class RoutingSource(
     // it: the tram and bus stops beside a rail station, or the same station of another provider.
     private val complexes = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
 
+    // The answer of a provider other than Transitous to the latest query, by provider and query: the
+    // search and the search for far stations, asked at once, share one request (see sharedHits).
+    private val providerHits = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<List<Stop>>>()
+
+    /** The stops [source] finds for [query], asked once for the search and the far stations together. */
+    private suspend fun sharedHits(source: DataSource, query: String, results: Int): List<Stop> {
+        val prefix = "${source.name}|"
+        val key = prefix + query
+        val fresh = CompletableDeferred<List<Stop>>()
+        val known = providerHits.putIfAbsent(key, fresh)
+        if (known != null) return known.await()
+        // Only the latest query of each provider is kept.
+        providerHits.keys.removeIf { it != key && it.startsWith(prefix) }
+        return try {
+            client(source).searchStops(query, results).also { fresh.complete(it) }
+        } catch (e: Throwable) {
+            providerHits.remove(key, fresh)
+            // One who waits for it is not cancelled with the one who asked: a plain failure for it.
+            fresh.completeExceptionally(if (e is CancellationException) IOException("search cancelled") else e)
+            throw e
+        }
+    }
+
     /**
      * Remembers [members] as further stops of the station shown as [host] (one sign on the map
      * for the parts of a big station, see stationGroups), so its departures come from all of them.
@@ -225,7 +256,16 @@ class RoutingSource(
         // All providers in use are asked at once, and OpenStreetMap (Photon) for the points of
         // interest and addresses they lack; one that fails leaves the results of the others.
         val asked = choice().active.map { source ->
-            source to async { attempt { client(source).searchStops(query, results).map { signed(source, it) } } }
+            source to async {
+                attempt {
+                    val found = if (source == DataSource.Transitous) {
+                        client(source).searchStops(query, results)
+                    } else {
+                        sharedHits(source, query, results)
+                    }
+                    found.map { signed(source, it) }
+                }
+            }
         }
         val fromOsm = async { attempt { photon.search(query, near, results, bias = region) } }
         val found = asked.map { (source, answer) -> source to answer.await() }
@@ -241,7 +281,30 @@ class RoutingSource(
         val extra = osm.getOrDefault(emptyList())
             .filter { place -> choice().covers(place.latitude ?: 0.0, place.longitude ?: 0.0) }
             .filter { place -> providers.none { known -> known.kind != PlaceKind.Stop && sameSpot(known, place) } }
-        rankPlaces(query, providers + extra, near, region).take(results)
+        // One town found by two sources ("Stuttgart", "Stuttgart") shows once.
+        withoutTwinTowns(rankPlaces(query, providers + extra, near, region)).take(results)
+    }
+
+    override val searchCenter: Pair<Double, Double>? get() = searchNear ?: searchRegion
+
+    override suspend fun searchLongDistance(query: String, results: Int): List<Stop> = coroutineScope {
+        // Without the bias for the region: "Hamburg" in Berlin asks Transitous for the stations of
+        // Hamburg; the other providers have no bias, so the answer of the search asked at the same
+        // time serves (see sharedHits) instead of a second request.
+        val asked = choice().active.map { source ->
+            source to async {
+                attempt {
+                    val found = if (source == DataSource.Transitous) {
+                        transitous.searchStopsNear(query, results, null)
+                    } else {
+                        sharedHits(source, query, results)
+                    }
+                    found.map { signed(source, it) }
+                }
+            }
+        }
+        val found = asked.flatMap { (_, answer) -> answer.await().getOrDefault(emptyList()) }
+        longDistanceStations(query, found, local = emptyList(), region = searchNear ?: searchRegion)
     }
 
     /** Vehicles of the provider for the middle of the box; Transitous has them only for small boxes. */
@@ -255,7 +318,11 @@ class RoutingSource(
     ): List<Vehicle> {
         val source = sourceAt((north + south) / 2, (west + east) / 2)
         return client(source).vehicles(north, west, south, east, results, products).map { vehicle ->
-            vehicle.copy(tripId = source.prefix + vehicle.tripId)
+            vehicle.copy(
+                tripId = source.prefix + vehicle.tripId,
+                direction = localStopTerms(vehicle.direction),
+                nextStop = vehicle.nextStop?.let { localStopTerms(it) },
+            )
         }
     }
 
@@ -271,8 +338,222 @@ class RoutingSource(
 
     override suspend fun tripCourse(tripId: String): TripCourse {
         val source = sourceOf(tripId)
-        return marked(source, client(source).tripCourse(plain(source, tripId)))
+        val course = withTrack(source, marked(source, client(source).tripCourse(plain(source, tripId))))
+        // The hops still without a way: its vehicle stands at their stations (see TripTrack).
+        return course.copy(airHops = airHops(course.path, course.stops.map { it.place?.position }))
     }
+
+    /**
+     * [course] with the tracks of its train where its source sends only air lines between
+     * stations (see airHops): the regional HAFAS (BVG, VBB) for an ICE, an IC or a regional
+     * train from elsewhere. The same run at Transitous, found by its line and planned departure
+     * at one of its first stations, lends its way for those hops (see spliceTrack). The course
+     * as it is when Transitous is not in use, does not know the run or takes too long.
+     */
+    private suspend fun withTrack(source: DataSource, course: TripCourse): TripCourse {
+        if (!wantsTrack(source, course.product, course.line)) return course
+        val stops = course.stops.map { it.place?.position }
+        if (airHops(course.path, stops).isEmpty()) return course
+        val boards = course.stops.mapNotNull { stop ->
+            val position = stop.place?.position ?: return@mapNotNull null
+            val planned = stop.plannedDeparture ?: stop.departure ?: return@mapNotNull null
+            position to planned
+        }
+        val track = foregroundTrack(course.tripId, course.line, course.direction, boards) ?: return course
+        return course.copy(path = spliceTrack(course.path, stops, track))
+    }
+
+    /** True when a trip of [product] from [source] may get its tracks from Transitous (see withTrack). */
+    private fun wantsTrack(source: DataSource, product: String, line: String?): Boolean =
+        source != DataSource.Transitous && runsOnRails(product, line) && Backend.Transitous in choice().inUse
+
+    /**
+     * [boundedTrack] for someone waiting for it (a course, a journey with its ways). A trip that
+     * a prefetch is looking up already ([TrackCache.claim]) is not asked for a second time: its
+     * answer is waited for up to [TRACK_CLAIM_WAIT_MILLIS], else the course goes without it.
+     */
+    private suspend fun foregroundTrack(
+        tripId: String,
+        line: String?,
+        direction: String?,
+        boards: List<Pair<Pair<Double, Double>, OffsetDateTime>>,
+    ): List<Pair<Double, Double>>? {
+        TrackCache.get(tripId)?.let { return it.takeIf { track -> track.size >= 2 } }
+        if (!TrackCache.claim(tripId)) {
+            val known = withTimeoutOrNull(TRACK_CLAIM_WAIT_MILLIS) {
+                while (TrackCache.isClaimed(tripId)) delay(TRACK_CLAIM_POLL_MILLIS)
+                TrackCache.get(tripId)
+            }
+            return known?.takeIf { it.size >= 2 }
+        }
+        return try {
+            boundedTrack(tripId, line, direction, boards)
+        } finally {
+            TrackCache.release(tripId)
+        }
+    }
+
+    /**
+     * [trackOf] within [TRACK_LOOKUP_MILLIS]; null on failure or when it takes longer. A
+     * failure (timeout, HTTP, I/O) is kept for a short while (see [TrackCache.putFailure]) so a
+     * trip whose lookup fails is not asked for again on every load; a cancellation by the caller
+     * is not a failure and is passed on.
+     */
+    private suspend fun boundedTrack(
+        tripId: String,
+        line: String?,
+        direction: String?,
+        boards: List<Pair<Pair<Double, Double>, OffsetDateTime>>,
+    ): List<Pair<Double, Double>>? {
+        var answered = false
+        return try {
+            val track = withTimeoutOrNull(TRACK_LOOKUP_MILLIS) { trackOf(tripId, line, direction, boards).also { answered = true } }
+            // Timed out (withTimeoutOrNull only returns null by itself when trackOf did not end).
+            if (!answered) TrackCache.putFailure(tripId)
+            track
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            TrackCache.putFailure(tripId)
+            null
+        }
+    }
+
+    /**
+     * The way at Transitous of the run [tripId] of [line] towards [direction] that leaves the places of [boards] at
+     * their planned times (its first stations are tried, see TRACK_LOOKUP_STOPS); null where it
+     * is not found. Kept per trip, a miss too, so a trip is looked up once (see TrackCache).
+     */
+    private suspend fun trackOf(
+        tripId: String,
+        line: String?,
+        direction: String?,
+        boards: List<Pair<Pair<Double, Double>, OffsetDateTime>>,
+    ): List<Pair<Double, Double>>? {
+        TrackCache.get(tripId)?.let { return it.takeIf { track -> track.size >= 2 } }
+        if (line == null || boards.isEmpty()) return null
+        for ((position, planned) in boards.take(TRACK_LOOKUP_STOPS)) {
+            val found = transitous.departures(
+                positionStopId(position.first, position.second),
+                TRACK_LOOKUP_RESULTS,
+                TRACK_PRODUCTS,
+                planned.minusMinutes(TRACK_LOOKUP_LEAD_MINUTES),
+            )
+            // The best fitting run: by its name, else by kind, minute and direction (see runScore).
+            val runId = found.filter { !it.cancelled && it.tripId != null }
+                .map { it to runScore(it, line, planned, direction) }
+                .filter { it.second > 0 }
+                .maxByOrNull { it.second }?.first?.tripId ?: continue
+            val track = transitous.tripPath(runId).takeIf { it.size >= 2 } ?: continue
+            TrackCache.put(tripId, track)
+            return track
+        }
+        // Answered, but no such run: not asked again for a while.
+        TrackCache.put(tripId, emptyList())
+        return null
+    }
+
+    /** The positions of the stops of the ride [leg] in order (null where one has none): where it is boarded, the stops between, where it is left. */
+    private fun rideStops(leg: Leg): List<Pair<Double, Double>?> =
+        listOf(leg.fromPlace?.position ?: leg.path.firstOrNull()) + leg.stopovers.map { it.place?.position } +
+            listOf(leg.toPlace?.position ?: leg.path.lastOrNull())
+
+    /** True when [leg] is a train of [source] whose way has air lines that Transitous may fill (see withTrack). */
+    private fun needsTrack(source: DataSource, leg: Leg): Boolean =
+        !leg.walking && leg.tripId != null && wantsTrack(source, leg.product, leg.line) && airHops(leg.path, rideStops(leg)).isNotEmpty()
+
+    /** [leg] with the tracks Transitous lent its trip (see [trackOf]); as it is without them. */
+    private fun splicedLeg(leg: Leg, track: List<Pair<Double, Double>>?): Leg {
+        if (track == null || track.size < 2) return leg
+        val path = spliceTrack(leg.path, rideStops(leg), track)
+        return if (path === leg.path) leg else leg.copy(path = path)
+    }
+
+    private fun boardsOf(leg: Leg): List<Pair<Pair<Double, Double>, OffsetDateTime>> {
+        val position = leg.fromPlace?.position ?: leg.path.firstOrNull() ?: return emptyList()
+        return listOf(position to (leg.plannedDeparture ?: leg.departure))
+    }
+
+    /**
+     * [journey] with the tracks of its trains where its source sends air lines (see withTrack).
+     * With [wait] the trips not known yet are looked up now (all at once, bounded in time);
+     * otherwise only known tracks are used and the others are looked up in the background
+     * (see [prefetchTracks]), for the next time the journey is loaded. Legs that have their
+     * own way cost no request.
+     */
+    private suspend fun withTracks(source: DataSource, journey: Journey, wait: Boolean): Journey {
+        val wanting = journey.legs.filter { needsTrack(source, it) }
+        if (wanting.isEmpty()) return journey
+        val tracks = if (wait) {
+            coroutineScope {
+                wanting.distinctBy { it.tripId }.map { leg ->
+                    async { leg.tripId!! to foregroundTrack(leg.tripId!!, leg.line, leg.direction, boardsOf(leg)) }
+                }.map { it.await() }.toMap()
+            }
+        } else {
+            prefetchTracks(wanting)
+            return withKnownTracks(journey, wanting)
+        }
+        return journey.copy(legs = journey.legs.map { leg -> if (leg in wanting) splicedLeg(leg, tracks[leg.tripId]) else leg })
+    }
+
+    /** [journey] with the tracks already known for its legs of [wanting]; no request. */
+    private fun withKnownTracks(journey: Journey, wanting: List<Leg>): Journey =
+        journey.copy(legs = journey.legs.map { leg -> if (leg in wanting) splicedLeg(leg, TrackCache.get(leg.tripId!!)) else leg })
+
+    /**
+     * [page] with the tracks known for its trains. The trips still wanting one are gathered
+     * across all its journeys and the first few looked up in one background prefetch (replacing
+     * the prefetch of the page before, see [pagePrefetch]); the page itself uses cache hits only.
+     */
+    private fun withTracks(source: DataSource, page: JourneyPage): JourneyPage {
+        val wanting = page.journeys.associateWith { journey -> journey.legs.filter { needsTrack(source, it) } }
+        val all = wanting.values.flatten()
+        synchronized(pagePrefetchLock) {
+            // The lookups of the page before for trips this page no longer shows are dropped;
+            // those it still shows go on (a repeated search would otherwise lose them).
+            val wanted = all.mapNotNull { it.tripId }.toSet()
+            val (kept, stale) = pagePrefetch.entries.partition { it.key in wanted && it.value.isActive }
+            stale.forEach { it.value.cancel() }
+            pagePrefetch = kept.associate { it.key to it.value } + prefetchTracks(all)
+        }
+        if (all.isEmpty()) return page
+        return page.copy(
+            journeys = page.journeys.map { journey ->
+                val legs = wanting[journey].orEmpty()
+                if (legs.isEmpty()) journey else withKnownTracks(journey, legs)
+            },
+        )
+    }
+
+    // Lookups of tracks that nobody waits for, off the main thread. The scope lives as long as
+    // this source (the process); each lookup is a Job of its own in it.
+    private val trackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // The prefetch of the search page shown last (a new search, an earlier or a later page), by
+    // trip id. It lives until the next page replaces it: that page cancels the lookups of trips
+    // it does not show, so lookups still pending for results no longer on screen are dropped (a
+    // cancelled lookup is not cached as a failure and releases its claim). The prefetch of a
+    // single journey (refreshJourney) is not tracked here and runs to its end.
+    private var pagePrefetch: Map<String, Job> = emptyMap()
+    private val pagePrefetchLock = Any()
+
+    /**
+     * Looks up the tracks of the first few trips of [legs] not known yet, in the background;
+     * the Job of each lookup by its trip id.
+     */
+    private fun prefetchTracks(legs: List<Leg>): Map<String, Job> =
+        legs.distinctBy { it.tripId }
+            .filter { TrackCache.get(it.tripId!!) == null && !TrackCache.isClaimed(it.tripId!!) }
+            .take(TRACK_PREFETCH_TRIPS)
+            .filter { TrackCache.claim(it.tripId!!) }
+            .associate { leg ->
+                val tripId = leg.tripId!!
+                val job = trackScope.launch { boundedTrack(tripId, leg.line, leg.direction, boardsOf(leg)) }
+                // Released on completion, also when cancelled before it started.
+                job.invokeOnCompletion { TrackCache.release(tripId) }
+                tripId to job
+            }
 
     override suspend fun departures(
         stopId: String,
@@ -353,12 +634,12 @@ class RoutingSource(
                     placeFor(source, from), placeFor(source, to), plainVia(source, options), results, departure, arrival,
                 )
             }
-            return withVia(marked(source, page), via)
+            return withTracks(source, withVia(marked(source, page), via))
         }
         val start = placeFor(source, from)
         val end = placeFor(source, to)
         return try {
-            reached(source) { marked(source, client(source).journeys(start, end, options, results, departure, arrival)) }
+            withTracks(source, reached(source) { marked(source, client(source).journeys(start, end, options, results, departure, arrival)) })
         } catch (e: SourceUnreachableException) {
             // Another family in use that covers both places stands in for one whose backends all
             // failed (Transitous for Berlin, say); the places pass by their positions.
@@ -376,7 +657,10 @@ class RoutingSource(
 
     override suspend fun refreshJourney(refreshToken: String, stopovers: Boolean, polylines: Boolean): Journey? {
         val source = sourceOf(refreshToken)
-        return client(source).refreshJourney(plain(source, refreshToken), stopovers, polylines)?.let { marked(source, it) }
+        val fresh = client(source).refreshJourney(plain(source, refreshToken), stopovers, polylines)?.let { marked(source, it) }
+            ?: return null
+        // Loaded with its ways (the detail, a followed trip): the tracks of its trains are waited for.
+        return withTracks(source, fresh, wait = polylines)
     }
 
     // A further page goes to the provider of the page it follows.
@@ -391,7 +675,7 @@ class RoutingSource(
         val page = client(source).earlierJourneys(
             placeFor(source, from), placeFor(source, to), plainVia(source, options), plain(source, earlierRef), results,
         )
-        return withVia(marked(source, page), options.via)
+        return withTracks(source, withVia(marked(source, page), options.via))
     }
 
     override suspend fun laterJourneys(
@@ -405,7 +689,7 @@ class RoutingSource(
         val page = client(source).laterJourneys(
             placeFor(source, from), placeFor(source, to), plainVia(source, options), plain(source, laterRef), results,
         )
-        return withVia(marked(source, page), options.via)
+        return withTracks(source, withVia(marked(source, page), options.via))
     }
 
     /** [options] with the place on the way as [source] knows it. */
@@ -579,9 +863,14 @@ internal fun clippedRide(ride: Leg): Leg {
     return if (path == ride.path) ride else ride.copy(path = path)
 }
 
-// What came from a provider, with its mark on every id and handle in it.
+// What came from a provider, with its mark on every id and handle in it, and its stop names
+// in the app's language where a Europe-wide feed names them in English ("Göttingen central bus
+// station" as "Göttingen ZOB", see localStopTerms; with the position of a stop, only in Germany): here, where every provider's answer enters
+// the app, so every screen, notification, shared text, widget and the watch get the same names.
+// The raw names stay inside the providers' own handles (refresh tokens).
 
-private fun marked(source: DataSource, stop: Stop): Stop = stop.copy(id = source.prefix + stop.id)
+private fun marked(source: DataSource, stop: Stop): Stop =
+    stop.copy(id = source.prefix + stop.id, name = if (stop.kind == PlaceKind.Stop) localStopTerms(stop.name, latitude = stop.latitude, longitude = stop.longitude) else stop.name)
 
 // A stop of a list of stops (nearby, found by name) with its sign where its platforms are in
 // OpenStreetMap, not where the provider's point lies (see stopSignPoint): the map draws the
@@ -589,10 +878,11 @@ private fun marked(source: DataSource, stop: Stop): Stop = stop.copy(id = source
 private fun signed(source: DataSource, stop: Stop): Stop = OsmStations.signPlace(marked(source, stop))
 
 private fun marked(source: DataSource, stopover: Stopover): Stopover =
-    stopover.copy(place = stopover.place?.let { marked(source, it) })
+    stopover.copy(name = localStopTerms(stopover.name, latitude = stopover.place?.latitude, longitude = stopover.place?.longitude), place = stopover.place?.let { marked(source, it) })
 
 private fun marked(source: DataSource, departure: Departure): Departure = departure.copy(
     tripId = departure.tripId?.let { source.prefix + it },
+    direction = localStopTerms(departure.direction),
     destination = departure.destination?.let { marked(source, it) },
     // The stop a notice was found at can be shown on the map and asked for again.
     warnings = departure.warnings.map { warning -> if (warning.stop == null) warning else warning.copy(stop = marked(source, warning.stop)) },
@@ -604,6 +894,9 @@ private fun marked(source: DataSource, course: TripCourse): TripCourse = course.
 )
 
 private fun marked(source: DataSource, leg: Leg): Leg = clippedRide(leg).copy(
+    from = if (leg.fromPlace?.kind == PlaceKind.Address) leg.from else localStopTerms(leg.from, latitude = leg.fromPlace?.latitude, longitude = leg.fromPlace?.longitude),
+    to = if (leg.toPlace?.kind == PlaceKind.Address) leg.to else localStopTerms(leg.to, latitude = leg.toPlace?.latitude, longitude = leg.toPlace?.longitude),
+    direction = leg.direction?.let { localStopTerms(it) },
     fromPlace = leg.fromPlace?.let { marked(source, it) },
     toPlace = leg.toPlace?.let { marked(source, it) },
     stopovers = leg.stopovers.map { marked(source, it) },
@@ -750,3 +1043,17 @@ fun ownServerUrl(text: String): String {
     val web = url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true)
     return if (web && url.length > "https://".length) url else BvgRestSource.DEFAULT_URL
 }
+
+// Looking up the tracks of a train at Transitous (see RoutingSource.withTrack): at most this many
+// of its first stations, this many departures from a few minutes before it leaves, of these
+// products, and no longer than this in all, so the course is not kept waiting.
+private const val TRACK_LOOKUP_STOPS = 2
+// At most this many trips of one page of search results are looked up in the background.
+private const val TRACK_PREFETCH_TRIPS = 4
+private const val TRACK_LOOKUP_RESULTS = 20
+private const val TRACK_LOOKUP_LEAD_MINUTES = 5L
+private const val TRACK_LOOKUP_MILLIS = 6000L
+// A course waits this long for a lookup of its trip that a prefetch has already started, checking this often.
+private const val TRACK_CLAIM_WAIT_MILLIS = 2500L
+private const val TRACK_CLAIM_POLL_MILLIS = 100L
+private val TRACK_PRODUCTS = setOf("express", "regional", "suburban")

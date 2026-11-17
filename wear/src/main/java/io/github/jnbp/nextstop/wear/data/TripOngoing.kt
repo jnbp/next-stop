@@ -66,7 +66,9 @@ object TripOngoing {
         // The parts of Status count in the time base of SystemClock.elapsedRealtime().
         val zero = SystemClock.elapsedRealtime() + (trip.time - System.currentTimeMillis()).coerceAtLeast(0)
         val label = when (trip.kind) {
-            StepKind.Board, StepKind.GetOff -> trip.line ?: trip.place
+            // Before the walk to the first ride: "Leave · 5'", not the ride.
+            StepKind.Board -> if (trip.leave) context.getString(R.string.leave_short) else trip.line ?: trip.place
+            StepKind.GetOff -> trip.line ?: trip.place
             else -> trip.place
         }
         val status = Status.Builder()

@@ -41,6 +41,44 @@ class DelightTest {
     }
 
     @Test
+    fun theTrainSlowsDownWhileItIsInSight() {
+        assertEquals(0f, trainGlide(0f), 1e-5f)
+        assertEquals(0.5f, trainGlide(0.5f), 1e-5f)
+        assertEquals(1f, trainGlide(1f), 1e-5f)
+        assertEquals(1f, trainGlide(2f), 1e-5f)
+        // Always moving forward.
+        var last = -1f
+        for (i in 0..100) {
+            val now = trainGlide(i / 100f)
+            assertTrue(now > last)
+            last = now
+        }
+        // Slow in the middle, quick at the ends.
+        val middle = trainGlide(0.51f) - trainGlide(0.49f)
+        val start = trainGlide(0.02f) - trainGlide(0f)
+        assertTrue(start > 3 * middle)
+        // With a train half as long as its track it is wholly in sight (a third of the way to two
+        // thirds) for close to half of the run, and only a quarter of the run goes to coming in.
+        var whole = 0
+        var enteredAt = -1
+        for (i in 0..1000) {
+            val p = trainGlide(i / 1000f)
+            if (p >= 1f / 3 && p <= 2f / 3) whole++
+            if (enteredAt < 0 && p >= 1f / 3) enteredAt = i
+        }
+        assertTrue(whole > 450)
+        assertTrue(enteredAt in 200..260)
+    }
+
+    @Test
+    fun theTrainNeverTakesMoreThanHalfItsTrack() {
+        assertEquals(2f, trainUnit(2f, 1000f), 1e-5f)
+        val unit = trainUnit(2f, 100f)
+        assertTrue(unit < 2f)
+        assertTrue(unit * 96f <= 50f + 1e-3f)
+    }
+
+    @Test
     fun aPageGrowsFromItsRowToItsOwnPlace() {
         val origin = floatArrayOf(20f, 300f, 200f, 60f)
         val page = floatArrayOf(0f, 100f, 400f, 600f)

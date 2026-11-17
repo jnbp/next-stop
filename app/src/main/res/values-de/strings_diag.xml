@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Entwickleroptionen in Einstellungen > Erweitert (siehe ui/DeveloperOptions.kt) und der Fehlerbericht (DiagCapture). -->
+    <plurals name="developer_taps_left">
+        <item quantity="one">Noch %d×</item>
+        <item quantity="other">Noch %d×</item>
+    </plurals>
+    <string name="developer_already">Entwickleroptionen sind schon aktiv</string>
+    <string name="developer_verbose">Ausführliche Aufzeichnung</string>
+    <string name="developer_verbose_text">Zeichnet zusätzlich Routenanfragen mit Quelle, HTTP-Status und Dauer, Zurück-Gesten, die Rückkehr in die App und Fahrzeugzahlen auf. Schaltet sich nach 24 h selbst ab.</string>
+    <string name="developer_verbose_until">An bis %1$s. Zeichnet zusätzlich Routenanfragen, Zurück-Gesten, die Rückkehr in die App und Fahrzeugzahlen auf.</string>
+    <string name="developer_report">Fehlerbericht teilen</string>
+    <string name="developer_report_text">Die letzten Ereignisse der App (auch von vorher), App und Gerät, Einstellungen ohne Orte. Am besten gleich, nachdem etwas schiefging.</string>
+    <string name="developer_report_note">Was ist passiert?</string>
+    <string name="developer_report_summary">%1$d Protokolleinträge seit %2$s, App und Gerät, Einstellungen, %3$s. Positionen sind auf etwa 1 km gerundet; Schlüssel, deine Orte und Namen sind entfernt. Gesendet wird nichts, bis du eine App wählst.</string>
+    <string name="developer_report_with_crash">der letzte Absturz</string>
+    <string name="developer_report_no_crash">kein Absturz</string>
+    <string name="developer_report_share">Teilen</string>
+    <string name="developer_report_subject">Next-Stop-Fehlerbericht %1$s</string>
+    <string name="developer_report_preparing">Wird vorbereitet …</string>
+    <string name="developer_crash">Letzter Absturz: %1$s</string>
+    <string name="developer_crash_text">Der Stacktrace und die Protokollzeilen davor. Er ist auch Teil des Fehlerberichts.</string>
+    <string name="developer_crash_view">Ansehen</string>
+    <string name="developer_crash_share">Teilen</string>
+    <string name="developer_crash_delete">Löschen</string>
+    <string name="developer_crash_subject">Next-Stop-Absturz %1$s</string>
+    <string name="developer_close">Schließen</string>
+    <string name="developer_clear_logs">Logs löschen</string>
+    <string name="developer_clear_logs_text">%1$d Einträge gespeichert, auch aus früheren Sitzungen.</string>
+    <string name="developer_logs_cleared">Logs gelöscht</string>
+    <string name="developer_perf_lab">Performance-Labor öffnen</string>
+    <string name="developer_perf_lab_text">Bildzähler und Schalter für teure Teile, als Feld über der App.</string>
+    <string name="developer_hide">Entwickleroptionen ausblenden</string>
+    <string name="developer_hide_text">Mit 7 Tippern auf die Version unten kommen sie wieder.</string>
+</resources>

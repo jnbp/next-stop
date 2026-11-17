@@ -65,6 +65,18 @@ class LineColorsTest {
     }
 
     @Test
+    fun aLineOfNoKnownProductTakesTheColourOfItsName() {
+        // A Stadtbahn of Stuttgart whose feed names a mode the app has no key for.
+        val stuttgart = 48.79 to 9.18
+        LineColors.addOsm(listOf(OsmLineColor("u", "U2", "f58220", stuttgart.first, stuttgart.second)))
+        assertEquals(0xFFF58220.toInt(), LineColors.rideStyle("U2", "", stuttgart)?.color)
+        // The colour its feed sends with it is kept, and found for it without that.
+        LineColors.noteProvider("U14", "", "69be51", null, stuttgart)
+        assertEquals(0xFF69BE51.toInt(), LineColors.lookup("U14", "", stuttgart)?.color)
+        assertEquals("o", LineColors.kindOf(""))
+    }
+
+    @Test
     fun theProvidersColourComesFirst() {
         LineColors.addOsm(listOf(OsmLineColor("t", "5", "00975f", mannheim.first, mannheim.second)))
         LineColors.focus = mannheim
@@ -75,6 +87,69 @@ class LineColorsTest {
         // No colour from the provider: OpenStreetMap's stays.
         LineColors.noteProvider("6", "tram", "", null, mannheim)
         assertNull(LineColors.lookup("6", "tram"))
+    }
+
+    // Berlin's night bus N2 runs from Ruhleben along the U2; Brandenburg an der Havel, within
+    // MAX_FOCUS_METERS of Ruhleben, has an N2 of its own in light blue.
+    private val ruhleben = 52.5255 to 13.2418
+    private val pankow = 52.5672 to 13.4120
+    private val brandenburgHavel = 52.416 to 12.528
+
+    @Test
+    fun aNightBusInBerlinTakesNoColourOfATownAround() {
+        LineColors.addOsm(
+            listOf(
+                OsmLineColor("b", "N2", "00aeef", brandenburgHavel.first, brandenburgHavel.second),
+                OsmLineColor("b", "M41", "00aeef", brandenburgHavel.first, brandenburgHavel.second),
+                OsmLineColor("t", "M10", "00aeef", brandenburgHavel.first, brandenburgHavel.second),
+            ),
+        )
+        // In Berlin, wherever the ride is placed: no colour of its own, so the bus colour applies
+        // (the same for header, map, vehicle and list).
+        assertNull(LineColors.rideStyle("N2", "bus", ruhleben))
+        assertNull(LineColors.rideStyle("N2", "bus", pankow))
+        assertNull(LineColors.rideStyle("M41", "bus", ruhleben))
+        assertNull(LineColors.rideStyle("M10", "tram", ruhleben))
+        // Without a place of its own, with the app looking at Berlin: none either.
+        LineColors.focus = ruhleben
+        assertNull(LineColors.rideStyle("N2", "bus", null))
+        // In Brandenburg an der Havel its own N2 keeps its colour.
+        assertEquals(0xFF00AEEF.toInt(), LineColors.rideStyle("N2", "bus", brandenburgHavel)?.color)
+    }
+
+    @Test
+    fun nightLinesNeverTakeTheColourOfAnSOrUBahn() {
+        for (line in listOf("N1", "N2", "N5", "N7", "N8", "N9", "N10", "N42", "N91")) {
+            assertNull(line, LineColors.berlinRapid(line, "bus", ruhleben))
+            assertNull(line, LineColors.rideStyle(line, "bus", ruhleben))
+            // Even where a feed calls it a U-Bahn: its name is no U-Bahn line.
+            assertNull(line, LineColors.berlinRapid(line, "subway", ruhleben))
+        }
+        assertNull(LineColors.rideStyle("M48", "bus", ruhleben))
+        assertNull(LineColors.rideStyle("M10", "tram", ruhleben))
+    }
+
+    @Test
+    fun berlinsSAndUBahnKeepTheirColours() {
+        LineColors.addOsm(listOf(OsmLineColor("u", "U2", "00aeef", brandenburgHavel.first, brandenburgHavel.second)))
+        assertEquals(0xFFDA421E.toInt(), LineColors.rideStyle("U2", "subway", ruhleben)?.color)
+        assertEquals(0xFF7DAD4C.toInt(), LineColors.rideStyle("U1", "subway", pankow)?.color)
+        assertEquals(0xFFDA6BA2.toInt(), LineColors.rideStyle("1", "suburban", pankow)?.color)
+        assertEquals(0xFFAD5937.toInt(), LineColors.rideStyle("S41", "suburban", ruhleben)?.color)
+    }
+
+    @Test
+    fun aProvidersColourInBerlinStaysInBerlin() {
+        // BVG's own colour of the N2, sent at Ruhleben: the same for the ride at Pankow.
+        LineColors.noteProvider("N2", "bus", "95276e", "ffffff", ruhleben)
+        assertEquals(0xFF95276E.toInt(), LineColors.rideStyle("N2", "bus", pankow)?.color)
+        LineColors.clear()
+        // A provider's colour of the N2 of Brandenburg an der Havel is none of Berlin's N2.
+        LineColors.noteProvider("N2", "bus", "00aeef", null, brandenburgHavel)
+        assertNull(LineColors.rideStyle("N2", "bus", ruhleben))
+        assertEquals(0xFF00AEEF.toInt(), LineColors.rideStyle("N2", "bus", brandenburgHavel)?.color)
+        // A colour the ride itself carries comes first, everywhere.
+        assertEquals(0xFF123456.toInt(), LineColors.rideStyle("N2", "bus", ruhleben, provided = 0xFF123456.toInt())?.color)
     }
 
     @Test

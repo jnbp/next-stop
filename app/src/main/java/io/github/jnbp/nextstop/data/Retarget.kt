@@ -151,10 +151,12 @@ fun retargeted(journey: Journey, choice: RetargetChoice): Journey {
     // The ride goes on beyond where the followed journey left it: the head cannot be loaded
     // again as it was, so only the new part keeps its handle for fresh live data.
     val keep = point.kept.size
-    return Journey(
-        legs = point.kept + choice.option.legs,
-        split = JourneySplit(headLegs = keep, headToken = null, tailToken = choice.option.refreshToken, headCut = point.kept.last().to),
-        via = splicedVia(journey, keep, choice.option),
+    return mergeThroughRuns(
+        Journey(
+            legs = point.kept + choice.option.legs,
+            split = JourneySplit(headLegs = keep, headToken = null, tailToken = choice.option.refreshToken, headCut = point.kept.last().to),
+            via = splicedVia(journey, keep, choice.option),
+        ),
     )
 }
 

@@ -8,6 +8,18 @@ import org.junit.Test
 
 class StopTownsTest {
     @Test
+    fun theHomeTownAfterACommaIsLeftOut() {
+        assertEquals("Rathaus", stopNameParts("Rathaus, Potsdam", "Potsdam", language = "de").title)
+        assertEquals("S Golm", stopNameParts("S Golm, Potsdam", "Potsdam", language = "de").title)
+        // Another town after the comma stays, so do other words after one.
+        assertEquals("Rathaus, Potsdam", stopNameParts("Rathaus, Potsdam", "Berlin", language = "de").title)
+        assertEquals("Hauptstr., Ecke Lindenweg", stopNameParts("Hauptstr., Ecke Lindenweg", "Potsdam", language = "de").title)
+        // The same stop with its town in brackets or after a comma, or without it, reads the same.
+        val names = listOf("Rathaus (Potsdam)", "Rathaus, Potsdam", "Rathaus").map { stopNameParts(it, "Potsdam", language = "de").title }
+        assertEquals(listOf("Rathaus", "Rathaus", "Rathaus"), names)
+    }
+
+    @Test
     fun townInFrontWithComma() {
         assertEquals(StopTown("Kirchstraße", "Zagelsdorf"), splitStopTown("Zagelsdorf, Kirchstraße"))
         assertEquals(StopTown("Bahnhof", "Frankfurt (Oder)"), splitStopTown("Frankfurt (Oder), Bahnhof"))
@@ -43,9 +55,20 @@ class StopTownsTest {
         assertEquals("Kirchstraße · Zagelsdorf", townedStopName("Zagelsdorf, Kirchstraße", "Dahme (Mark)"))
         assertEquals("Kirchstraße", townedStopName("Zagelsdorf, Kirchstraße", "Zagelsdorf"))
         assertEquals("Markt", townedStopName("Markt", "Zagelsdorf"))
-        assertEquals("S Ostkreuz Bhf", townedStopName("S Ostkreuz Bhf (Berlin)", "Berlin"))
+        assertEquals("S Ostkreuz", townedStopName("S Ostkreuz Bhf (Berlin)", "Berlin"))
         // Without the town of the board, a town the name says is shown.
         assertEquals("Kirchstraße · Zagelsdorf", townedStopName("Zagelsdorf, Kirchstraße", null))
+        // Long-distance stations of other towns as the regional providers name them read as the railway does.
+        assertEquals("Leipzig Hbf", townedStopName("Leipzig, Hauptbahnhof", "Berlin"))
+        assertEquals("Lutherstadt Wittenberg Hbf", townedStopName("Lutherstadt Wittenberg, Hauptbahnhof", "Berlin"))
+        assertEquals("Bitterfeld", townedStopName("Bitterfeld, Bahnhof", "Berlin"))
+        assertEquals("Frankfurt (Oder)", townedStopName("Frankfurt (Oder), Bahnhof", "Berlin"))
+        assertEquals("Leipzig Hbf", townedStopName("Leipzig, Hauptbahnhof", "Leipzig"))
+        assertEquals("Leipzig Hbf", townedStopName("Leipzig, Hbf", null))
+        // In its own town a plain station stays what the local board says.
+        assertEquals("Bahnhof", townedStopName("Bitterfeld, Bahnhof", "Bitterfeld"))
+        // Names the railway already writes as it does stay.
+        assertEquals("Leipzig Hbf", townedStopName("Leipzig Hbf", "Berlin"))
     }
 
     @Test
@@ -54,7 +77,7 @@ class StopTownsTest {
         val alex = stopNameParts("S+U Alexanderplatz (Bln) [Bus K.-Liebknecht-Str]", "Berlin")
         assertEquals("S+U Alexanderplatz", alex.title)
         assertEquals("Bus K.-Liebknecht-Str.", alex.part)
-        assertEquals("S Ostkreuz Bhf", stopNameParts("S Ostkreuz Bhf (Berlin)", "Berlin").title)
+        assertEquals("S Ostkreuz", stopNameParts("S Ostkreuz Bhf (Berlin)", "Berlin").title)
         assertNull(stopNameParts("S Ostkreuz Bhf (Berlin)", "Berlin").part)
         assertEquals(StopNameParts("S+U Berlin Hauptbahnhof", "Gleis 1-8"), stopNameParts("S+U Berlin Hauptbahnhof [Gleis 1-8]", "Berlin"))
         // Another town keeps its name; so do brackets that belong to a town's name or say a level.

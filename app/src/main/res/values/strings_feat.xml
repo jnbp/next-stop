@@ -127,6 +127,7 @@
     <!-- The map at the top of "My routes". -->
     <string name="ways_map_description">Map of your places; opens the map</string>
     <string name="ways_map_minutes">%1$d′</string>
+    <string name="ways_map_hours">%1$d h %2$d′</string>
     <string name="ways_map_hint">Save places to see them here</string>
     <!-- Disruptions on the main maps. -->
     <string name="map_notices_title">Disruptions on the map</string>

@@ -22,13 +22,15 @@
     <string name="location_off">Location is switched off on this device, showing Alexanderplatz.</string>
     <string name="platform">Platform %1$s</string>
     <string name="direction">towards %1$s</string>
+    <!-- A destination after an arrow where room is short; read out as "direction" (towards …). -->
+    <string name="direction_arrow">→ %1$s</string>
     <string name="delay_minutes">%1$+d min</string>
     <string name="cancelled">cancelled</string>
     <string name="now">now</string>
     <string name="in_minutes">%1$d min</string>
     <string name="time_range">%1$s to %2$s</string>
     <string name="time_span">%1$s – %2$s</string>
-    <string name="duration_and_transfers">%1$d min, transfers: %2$d</string>
+    <string name="duration_and_transfers">%1$s, transfers:\u00A0%2$d</string>
     <string name="walk_to">Walk %1$d min to %2$s</string>
     <string name="walk_rerouted">New way: %1$d min more to %2$s</string>
     <string name="walk_rerouted_late">Too late for the next ride on the new way – tap “Missed the train” for other connections</string>
@@ -71,8 +73,10 @@
     <string name="zoom_in">Zoom in</string>
     <string name="zoom_out">Zoom out</string>
     <string name="my_location">My location</string>
-    <string name="fit_line_title">Show the whole line</string>
-    <string name="fit_line_text">Tapping a vehicle moves the map so its whole line is in view.</string>
+    <string name="course_whole_line">Whole line</string>
+    <string name="course_next_stops">Next stops</string>
+    <string name="fit_line_title">Show the vehicle\'s way</string>
+    <string name="fit_line_text">Tapping a vehicle moves the map to it and its next stops. “Whole line” in its course shows all of it.</string>
     <string name="trip_start">Start</string>
     <string name="arrived">Arrived</string>
     <string name="warning_mark">Disruption</string>
@@ -86,12 +90,12 @@
     <string name="nav_link_place">Chosen place</string>
     <!-- The button at the end of the search field that puts the copied text into it. -->
     <string name="paste_from_clipboard">Paste from clipboard</string>
+    <string name="clear_field">Clear input</string>
     <string name="comfort_relaxed">Relaxed</string>
     <string name="comfort_normal">Normal</string>
     <string name="comfort_risky">Tight</string>
     <string name="comfort_very_risky">Sprint</string>
     <string name="comfort_title">Time to change</string>
-    <string name="comfort_text">Every change counts with the live times: from the arrival of one ride to the departure of the next. Every journey gets the stricter of two ratings. First the station: a change needs 1 minute on the same platform, 3 minutes to another platform, 5 at large stations with regional or long-distance trains, and for a walk its length plus 1 minute. With 5 minutes beyond that it is relaxed, from 2 normal, from 0 tight; with less than it needs it is a sprint. Second the provider: journeys it finds only without any minimum change time are tight at least, but only if the change leaves 4 minutes or less. Walking times inside stations count only up to their real length; between a train and a bus or tram from the platform to the stop, at least 3 minutes.</string>
     <string name="comfort_choice_title">Choose transfer times</string>
     <string name="comfort_choice_text">Shows a choice of how tight changes may be; otherwise Normal applies.</string>
     <string name="comfort_more">Learn more</string>
@@ -149,6 +153,7 @@
     <string name="time_apply">Apply</string>
     <string name="cancel">Cancel</string>
     <string name="span_hours">%1$d h %2$d min</string>
+    <string name="span_whole_hours">%1$d h</string>
     <string name="walk_rest_minutes">%1$d min</string>
     <string name="span_days">%1$d d %2$d h</string>
     <string name="span_ago">%1$s ago</string>
@@ -162,6 +167,7 @@
     <string name="late_by">%1$d min late</string>
     <string name="line_and_time">%1$s %2$s</string>
     <string name="minutes_unit">min</string>
+    <string name="hours_unit">h</string>
     <string name="trip_band_minutes">%1$d min</string>
     <string name="missed_train">Missed the train</string>
     <string name="next_up">Next</string>
@@ -174,6 +180,7 @@
     <string name="departures_more_none">Nothing more within the next hour.</string>
     <string name="notice_one">1 notice</string>
     <string name="notices_many">%1$d notices</string>
+    <string name="notices_accessibility">Notes on lifts and step-free access</string>
     <string name="on_time">on time</string>
     <string name="places_from_here">Places, travel time from here</string>
     <string name="replan_here">Re-plan from here</string>
@@ -181,8 +188,10 @@
     <string name="settings_display">Map and times</string>
     <string name="settings_search">Connections</string>
     <string name="step_board">Take %1$s from %2$s</string>
+    <string name="step_leave">Leave at %1$s</string>
     <string name="step_get_off">Get off at %1$s</string>
     <string name="step_walk">Walk to %1$s</string>
+    <string name="step_cycle">Cycle to %1$s</string>
     <string name="stop_menu">Options for this stop</string>
     <string name="stops_away_many">%1$d stops away</string>
     <string name="stops_away_one">1 stop away</string>
@@ -196,6 +205,8 @@
     <string name="tile_none">No connection found</string>
     <string name="tile_times">dep. %1$s, arr. %2$s</string>
     <string name="transfer_at">Change at %1$s</string>
+    <string name="alt_change_offer">Change also possible at %1$s · %2$d min walk · %3$s</string>
+    <string name="alt_change_offer_no_walk">Change also possible at %1$s · %2$s</string>
     <string name="transfer_choice">Which connection do you want to take?</string>
     <string name="trip_active">Trip companion active</string>
     <string name="trip_caption">Trip to %1$s</string>
@@ -207,6 +218,7 @@
     <string name="trip_share">Share trip</string>
     <string name="trip_share_heading">I am on my way to %1$s.</string>
     <string name="trip_share_now">Now: %1$s (%2$s)</string>
+    <string name="trip_share_now_plain">Now: %1$s</string>
     <string name="trip_share_arrival">I expect to arrive at %1$s</string>
     <string name="trip_share_late"> (%1$d min later than planned)</string>
     <string name="own_server_title">Own server</string>
@@ -256,6 +268,7 @@
     <string name="cancelled_tag">Cancelled</string>
     <string name="adapted_note">You changed a connection of this journey.</string>
     <string name="undo">Undo</string>
+    <string name="level_changed">Transfer times: %1$s</string>
     <string name="course_loading">Loading the line course…</string>
     <string name="course_failed">The line course could not be loaded.</string>
     <string name="start_map_title">Map on the start page</string>
@@ -326,11 +339,15 @@
     <string name="trip_board_in">Board in %1$d min</string>
     <string name="trip_board_now">Board now</string>
     <string name="trip_board_at">Board at %1$s</string>
+    <string name="trip_leave_now">Leave now</string>
+    <string name="trip_leave_in">Leave in %1$d min</string>
+    <string name="trip_leave_at">Leave at %1$s</string>
     <string name="trip_walk_in">At the destination in %1$d min</string>
     <string name="trip_walk_in_about">At the destination in ca. %1$d min</string>
     <string name="trip_walk_now">Almost at the destination</string>
     <string name="trip_walk_at">At the destination at %1$s</string>
-    <string name="trip_then_walk">then %1$d min walk</string>
+    <string name="trip_then_walk">then %1$s walk</string>
+    <string name="trip_then_cycle">then %1$s by bike</string>
     <string name="trip_then_ride">then %1$s at %2$s</string>
     <string name="trip_then_ride_to">then to %1$s</string>
     <string name="trip_arrive_at">arr. %1$s</string>
@@ -404,6 +421,7 @@
     <string name="source_not_included">not included in this build</string>
     <string name="network_failed">No connection to the timetable service right now</string>
     <string name="request_failed">The timetable service could not answer right now</string>
+    <string name="try_again">Try again</string>
     <string name="level_tighter">+%1$d</string>
     <plurals name="level_tighter_more">
         <item quantity="one">%1$d more connection</item>
@@ -438,7 +456,8 @@
     <string name="settings_live_link">Live link</string>
     <string name="live_base_url_title">Address of the web pages</string>
     <string name="live_base_url_text">Where the web pages of the app are hosted (the web folder of the repository, e.g. on Cloudflare Pages or GitHub Pages). Shared live links lead to …/live/, shared connections to …/route/, and show them with live data in the browser. Empty: the project website (nextstop.bapo.me).</string>
-    <string name="share_walk">Walk %1$d min</string>
+    <string name="share_walk">Walk %1$s</string>
+    <string name="share_cycle">By bike %1$s</string>
     <string name="share_ride">%1$s: %2$s %3$s → %4$s %5$s</string>
     <string name="share_platform">%1$s (%2$s)</string>
     <string name="calendar_title">%1$s → %2$s</string>
@@ -495,6 +514,7 @@
     <string name="widget_take_line">Take %1$s</string>
     <string name="widget_get_off">Get off</string>
     <string name="widget_walk">Walk</string>
+    <string name="widget_cycle">By bike</string>
     <string name="widget_appointment_at">Next appointment · %1$s</string>
     <string name="widget_leave_at">Leave %1$s</string>
     <string name="in_minutes_text">in %1$d min</string>
@@ -549,6 +569,9 @@
     <string name="faster_change">Change to the %2$s at %1$s</string>
     <string name="faster_take">Take the %2$s from %1$s</string>
     <string name="faster_other_way">Another way from %1$s</string>
+    <string name="faster_change_at">Get off at %1$s and change to the %2$s at %3$s</string>
+    <string name="faster_take_at">Take the %2$s from %1$s at %3$s</string>
+    <string name="faster_other_way_at">Another way from %1$s at %2$s</string>
     <string name="faster_arrival">Arrival %1$s instead of %2$s</string>
     <string name="faster_take_action">Take it</string>
     <string name="faster_ignore_action">Ignore</string>
@@ -663,7 +686,7 @@
     <string name="retarget_others">Other options</string>
     <string name="retarget_then_walk">then on foot</string>
     <string name="retarget_then_line">then %1$s</string>
-    <string name="retarget_then_line_towards">then %1$s towards %2$s</string>
+    <string name="retarget_then_line_towards">then %1$s → %2$s</string>
     <string name="retarget_get_off">Get off at %1$s, %2$s</string>
     <string name="retarget_from">From %1$s, %2$s</string>
     <string name="alight_channel">Getting off</string>
@@ -708,6 +731,9 @@
     <string name="walk_sum_minutes">%1$s (%2$d min)</string>
     <string name="walk_sum_escalator_up">Escalator up</string>
     <string name="walk_sum_escalator_down">Escalator down</string>
+    <string name="walk_sum_stairs_up">Stairs up</string>
+    <string name="walk_sum_stairs_down">Stairs down</string>
+    <string name="walk_sum_stairs">Stairs</string>
     <string name="walk_sum_lift_up">Lift up</string>
     <string name="walk_sum_lift_down">Lift down</string>
     <string name="walk_sum_times">%1$d× %2$s</string>
@@ -722,6 +748,7 @@
     <string name="walk_target_building_plain">access through a building</string>
     <string name="walk_exit">via exit %1$s</string>
     <string name="walk_exit_building">out through %1$s</string>
+    <string name="walk_exit_lift">by the lift</string>
     <string name="map_level">level %1$s</string>
     <string name="watch_group">Watch</string>
     <string name="watch_checking">Looking for a watch…</string>
@@ -739,6 +766,17 @@
     <string name="cancelled_ride_tag">Cancelled</string>
     <string name="chart_change_stops_title">Show change stops in the chart</string>
     <string name="chart_change_stops_text">Names the stop of every change between the rides of a connection. Off, the chart shows only the minutes; the stops are in the details.</string>
+    <string name="chart_total_time_title">Total travel time in the chart</string>
+    <string name="chart_total_time_text">Shows how long each connection takes door to door, walks at the start and end included: above or below its column, or pinned on one line to the top or bottom edge of the chart to compare them.</string>
+    <string name="chart_total_time_off">Off</string>
+    <string name="chart_total_time_above">Above</string>
+    <string name="chart_total_time_below">Below</string>
+    <string name="chart_total_time_pinned_top">Pinned top</string>
+    <string name="chart_total_time_pinned_bottom">Pinned bottom</string>
+    <string name="chart_short_legs_title">Short legs in the chart</string>
+    <string name="chart_short_legs_text">Every leg stands where its times say. Separate: short legs get smaller blocks, without the change minutes, their name or at last as a thin bar. Combine: a run of short legs is one block with the colours and names of their lines.</string>
+    <string name="chart_short_legs_separate">Separate (default)</string>
+    <string name="chart_short_legs_combine">Combine</string>
     <string name="via_chip">Via …</string>
     <string name="walk_focus_title">On foot to %1$s</string>
     <string name="walk_focus_position">Pos. %1$s</string>
@@ -747,9 +785,11 @@
     <string name="walk_focus_no_position">Your position is not known: only the way is shown.</string>
     <string name="walk_focus_follow">Follow my position again</string>
     <string name="change_minutes">%1$d min to change</string>
+    <string name="change_span">%1$s to change</string>
     <string name="change_made">Change made</string>
     <string name="search_running">Searching…</string>
     <string name="search_failed">Search failed. Check the connection and type on.</string>
+    <string name="search_long_distance">Long distance</string>
     <string name="stay_seated_continues_as">Stay seated – continues as %1$s from %2$s</string>
     <string name="channel_sound_vibration">Change sound &amp; vibration</string>
     <string name="setup_delay_title">Delays</string>
@@ -772,8 +812,13 @@
     <string name="vehicle_hint_setting_title">Hint on vehicle positions</string>
     <string name="vehicle_hint_setting_text">A small note at the bottom of the map: vehicles are placed from realtime data, not GPS.</string>
     <string name="setup_vehicles_title">Vehicles on the map</string>
-    <string name="setup_vehicles_live">Live</string>
-    <string name="setup_vehicles_timetable">Timetable</string>
+    <string name="map_vehicles_title">Vehicles on the map</string>
+    <string name="map_vehicles_all">All</string>
+    <string name="map_vehicles_dynamic">Dynamic</string>
+    <string name="map_vehicles_off">Off</string>
+    <string name="map_vehicles_all_text">Everywhere, also far zoomed out.</string>
+    <string name="map_vehicles_dynamic_text">Only when zoomed in close – saves data and battery.</string>
+    <string name="map_vehicles_off_text">Recommended for less powerful phones.</string>
     <string name="entrance_mode_title">Show entrances and exits</string>
     <string name="entrance_mode_text">Automatic: entrances close up, lifts closer, escalators closest or at the marked station. Always: all of them from close up. Selected only: only those of the station you picked.</string>
     <string name="entrance_mode_auto">Automatic</string>
@@ -786,8 +831,34 @@
     <string name="position_no_lines">OpenStreetMap names neither a number nor lines for this stop position.</string>
     <string name="position_back">Back to the stop</string>
     <string name="position_no_location">Your position is not known yet.</string>
+    <string name="start_locating">Finding your location …</string>
+    <string name="start_not_found">Your location could not be found.</string>
+    <string name="choose_start">Choose start</string>
     <!-- The expander of a schematic preview under a setting. -->
     <string name="preview_label">Preview</string>
     <string name="preview_show">Show preview</string>
     <string name="preview_hide">Hide preview</string>
+    <string name="rating_info_title">How transfers are rated</string>
+    <string name="rating_info_open">How transfers are rated</string>
+    <string name="rating_need_title">What a change needs</string>
+    <string name="rating_need_known">Where the way is known from map data: the real walk at your pace plus %1$s for getting off and finding the way, at least %2$d min.</string>
+    <string name="rating_need_street">Between a platform and a stop in the street: the walk plus %1$s for getting off and the stairs.</string>
+    <string name="rating_need_unknown">Where no way is known, rules of thumb: %1$d min on the same platform, %2$d min to another platform, %3$d min at large stations with regional or long-distance trains, a walk of the provider plus %4$d min.</string>
+    <string name="rating_levels_title">The levels: time to spare beyond that</string>
+    <string name="rating_level_relaxed">at least %1$d min to spare</string>
+    <string name="rating_level_normal">at least %1$d min to spare</string>
+    <string name="rating_level_risky">less, but it works at a brisk pace (the walk in %1$d %% of the time, no buffer) and the change is at least %2$d min</string>
+    <string name="rating_level_sprint">otherwise: only by running or with luck</string>
+    <string name="rating_extra_title">Extra rules</string>
+    <string name="rating_extra_live">Where the live arrival is only estimated (the provider\'s forecast does not fit), a change is normal at best, and tight with less than %1$d min to spare.</string>
+    <string name="rating_extra_same">Only the change itself counts, not which search found the journey: the same change has the same live times and the same level in every journey.</string>
+    <string name="rating_tuning_title">Adjust</string>
+    <string name="rating_tuning_show">Adjust buffers</string>
+    <string name="rating_tuning_normal">Buffer for Normal</string>
+    <string name="rating_tuning_relaxed">Buffer for Relaxed</string>
+    <string name="rating_tuning_buffer">Change buffer (getting off, stairs)</string>
+    <string name="rating_tuning_reset">Back to the defaults</string>
+    <string name="duration_seconds">%1$d s</string>
+    <string name="duration_minutes">%1$d min</string>
+    <string name="duration_minutes_seconds">%1$d min %2$d s</string>
 </resources>

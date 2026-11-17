@@ -35,6 +35,21 @@ class StartGlanceTest {
     }
 
     @Test
+    fun aFailedLoadIsNeverShownAsNoDepartures() {
+        val gone = listOf(departure("M29", -40.0), departure("M29", -20.0))
+        val soon = listOf(departure("M29", 4.0))
+        // Fresh from the network and empty: nothing in the next hour, as the provider says.
+        assertEquals(LiveBoard.NoneSoon, liveBoard(emptyList(), fresh = true, now = now, count = 4))
+        assertEquals(LiveBoard.NoneSoon, liveBoard(gone, fresh = true, now = now, count = 4))
+        // The request failed and only old kept departures came back: an error, not "none".
+        assertEquals(LiveBoard.NotLoaded, liveBoard(gone, fresh = false, now = now, count = 4))
+        assertEquals(LiveBoard.NotLoaded, liveBoard(emptyList(), fresh = false, now = now, count = 4))
+        // Kept departures that can still be caught are shown either way.
+        assertEquals(LiveBoard.Departures, liveBoard(soon, fresh = false, now = now, count = 4))
+        assertEquals(LiveBoard.Departures, liveBoard(soon, fresh = true, now = now, count = 4))
+    }
+
+    @Test
     fun aFavouriteStopShowsItsNextRun() {
         assertEquals("U5", nextCatchable(listOf(departure("U2", 4.0), departure("U5", 1.0)), now)?.line)
         assertNull(nextCatchable(listOf(departure("U2", 4.0, cancelled = true)), now))

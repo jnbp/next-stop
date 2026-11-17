@@ -1,18 +1,18 @@
 package io.github.jnbp.nextstop.ui
 
 import androidx.compose.runtime.mutableIntStateOf
-import android.widget.Toast
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleOut
@@ -35,6 +35,22 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.clipScrollableContainer
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.snap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -79,7 +95,10 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.graphics.SolidColor
+import io.github.jnbp.nextstop.data.ChartTotalTime
 import io.github.jnbp.nextstop.data.DelayDisplay
+import io.github.jnbp.nextstop.data.SearchBlocks
+import io.github.jnbp.nextstop.data.longDistanceBlocks
 import io.github.jnbp.nextstop.data.townOf
 import io.github.jnbp.nextstop.data.BvgRestSource
 import androidx.compose.material3.Text
@@ -189,6 +208,7 @@ import io.github.jnbp.nextstop.data.walkableFrom
 import io.github.jnbp.nextstop.data.anyWalkableFrom
 import io.github.jnbp.nextstop.data.boardDisruptions
 import io.github.jnbp.nextstop.data.stopsByDistance
+import io.github.jnbp.nextstop.data.alertingWarnings
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.expandVertically
@@ -239,6 +259,8 @@ fun SearchPanel(
     var pastedQuery by remember { mutableStateOf<String?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
     var results by remember { mutableStateOf<List<Stop>>(emptyList()) }
+    // The stations of a far town the text names ("Hamburg" in Berlin), below the local hits (see longDistanceStations).
+    var farResults by remember { mutableStateOf<List<Stop>>(emptyList()) }
     // True while the providers are asked for what is typed; true after a search that failed.
     var searching by remember { mutableStateOf(false) }
     var searchFailed by remember { mutableStateOf(false) }
@@ -329,11 +351,13 @@ fun SearchPanel(
         val text = query.trim()
         if (contactsOpen || calendarOpen || text.length < SEARCH_MIN_CHARS) {
             results = emptyList()
+            farResults = emptyList()
             searching = false
             searchFailed = false
             return@LaunchedEffect
         }
         results = keptWhileTyping(results, text)
+        farResults = keptWhileTyping(farResults, text)
         if (text != pastedQuery) delay(SEARCH_DEBOUNCE_MS)
         searching = true
         try {
@@ -352,6 +376,16 @@ fun SearchPanel(
                         null
                     }
                 }
+                // The stations of a far town, asked at the same time without the bias for the region.
+                val far = async {
+                    try {
+                        source.searchLongDistance(text)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                }
                 val found = try {
                     source.searchStops(text)
                 } catch (e: CancellationException) {
@@ -367,6 +401,8 @@ fun SearchPanel(
                         .filter { !stopsOnly || it.kind == PlaceKind.Stop }
                         .distinctBy { it.id }
                 }
+                // Kept whole: a station among the local hits too moves into the block (see longDistanceBlocks).
+                farResults = far.await()
             }
         } finally {
             searching = false
@@ -421,6 +457,19 @@ fun SearchPanel(
                                     )
                                 }
                                 innerTextField()
+                            }
+                        },
+                    )
+                    // Typed text goes with one tap; the field keeps the focus, so typing goes on.
+                    FieldClearButton(
+                        visible = query.isNotEmpty(),
+                        onClear = {
+                            query = ""
+                            pastedQuery = null
+                            try {
+                                focusRequester.requestFocus()
+                            } catch (e: IllegalStateException) {
+                                // Not attached: the field is just empty.
                             }
                         },
                     )
@@ -539,7 +588,21 @@ fun SearchPanel(
                 .filter { it.id !in historyIds }
                 .take(HISTORY_TYPED)
         }
-        val shown = searchListing(lead, historyShown, pinned, base.filter { it.id != CURRENT_LOCATION_ID })
+        val listed = searchListing(lead, historyShown, pinned, base.filter { it.id != CURRENT_LOCATION_ID })
+        // Below the local hits the stations of a far town, also those that came among the local hits.
+        val blocks = if (text.length < SEARCH_MIN_CHARS) {
+            SearchBlocks(listed, emptyList())
+        } else {
+            longDistanceBlocks(
+                text,
+                listed,
+                farResults,
+                source.searchCenter,
+                fixed = (lead + historyShown + pinned).mapTo(HashSet()) { it.id },
+            )
+        }
+        val shown = blocks.local
+        val farShown = blocks.far
         if (calendarOpen) {
             GlassSurface(modifier = listModifier.weight(1f, fill = false), shape = RoundedCornerShape(28.dp)) {
                 val list = calendarList
@@ -652,7 +715,7 @@ fun SearchPanel(
                     modifier = listModifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
             }
-        } else if (shown.isNotEmpty()) {
+        } else if (shown.isNotEmpty() || farShown.isNotEmpty()) {
             val resultScroll = rememberScrollState()
             GlassSurface(modifier = listModifier.weight(1f, fill = false), shape = RoundedCornerShape(28.dp)) {
                 Column(
@@ -675,6 +738,30 @@ fun SearchPanel(
                                 },
                                 onForget = { onForget(place) },
                             )
+                        }
+                    }
+                    if (farShown.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.search_long_distance),
+                            color = AppColors.Muted,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = if (shown.isEmpty()) 4.dp else 10.dp, bottom = 2.dp),
+                        )
+                        farShown.forEachIndexed { index, place ->
+                            key("far:" + place.id) {
+                                ResultRow(
+                                    place = place,
+                                    fromHistory = false,
+                                    modifier = appearModifier(shown.size + index),
+                                    shape = groupShape(index, farShown.lastIndex),
+                                    onClick = {
+                                        onRemember(place)
+                                        onPick(place)
+                                    },
+                                    onForget = { onForget(place) },
+                                )
+                            }
                         }
                     }
                     // Places from OpenStreetMap (Photon) are credited below the list.
@@ -1168,16 +1255,6 @@ fun DeparturesScreen(
                         },
                     )
                 }
-                // Journeys from or to the stop, and the stop on the home screen (see StopMenu);
-                // the map and the departures have their own places here.
-                if (selected != null && onStopAction != null) {
-                    StopMenu(
-                        open = stopMenuOpen && !nearby,
-                        onDismiss = { stopMenuOpen = false },
-                        onAction = { action -> onStopAction(selected, action) },
-                        omit = setOf(StopAction.Departures, StopAction.Map),
-                    )
-                }
             }
             if (selectedStopId != null && !nearby && onShowStation != null) {
                 RoundButton(
@@ -1205,13 +1282,23 @@ fun DeparturesScreen(
             }
             // The menu of the stop in plain sight, beside its favourite: "Add to home screen" and
             // journeys from or to it.
+            // Journeys from or to the stop, and the stop on the home screen (see StopMenu); the
+            // map and the departures have their own places here. The menu opens at the button.
             if (selected != null && !nearby && onStopAction != null) {
-                RoundButton(
-                    glyph = Glyph.More,
-                    description = stringResource(R.string.stop_menu),
-                    onClick = { stopMenuOpen = true },
-                    size = 44.dp,
-                )
+                Box {
+                    RoundButton(
+                        glyph = Glyph.More,
+                        description = stringResource(R.string.stop_menu),
+                        onClick = { stopMenuOpen = true },
+                        size = 44.dp,
+                    )
+                    StopMenu(
+                        open = stopMenuOpen,
+                        onDismiss = { stopMenuOpen = false },
+                        onAction = { action -> onStopAction(selected, action) },
+                        omit = setOf(StopAction.Departures, StopAction.Map),
+                    )
+                }
             }
         }
         QuickReturnSection(state = quickReturn, modifier = Modifier.fillMaxWidth()) {
@@ -1246,7 +1333,7 @@ fun DeparturesScreen(
                     strong = true,
                 )
                 lines.forEach { name ->
-                    ChoiceChip(text = shortLine(name) ?: name, active = picked == name, onClick = { setFilter(product, name) }, strong = true)
+                    ChoiceChip(text = badgeLine(name) ?: name, active = picked == name, onClick = { setFilter(product, name) }, strong = true)
                 }
             }
         }
@@ -1337,6 +1424,8 @@ fun DeparturesScreen(
         // Each row keeps its key from one refresh to the next (never its index): it stays the
         // same row, its new times roll in, and it moves to its new place (see departureKeys).
         val rowKeys = remember(shown) { departureKeys(shown) }
+        // In a list of several stops each stop has its dot, the same in every row of it.
+        val stopMarkerMap = remember(shown) { stopMarkers(shown.mapNotNull { it.stop?.id }) }
         val leaveKeys = remember(leaves) { departureKeys(leaves.map { it.departure }) }
         // Pulled down, the list loads anew: the standard indicator, in the blue of the app.
         val pullState = rememberPullToRefreshState()
@@ -1397,21 +1486,45 @@ fun DeparturesScreen(
                                 modifier = rowMotion(animationsOn)
                                     .clip(groupShape(index, leaves.lastIndex, outer = 24.dp))
                                     .background(AppColors.Card),
+                                boardTown = boardTown,
+                                markers = stopMarkerMap,
                             )
                         }
 
                         else -> itemsIndexed(shown, key = { index, _ -> rowKeys[index] }) { index, departure ->
-                            DepartureItem(
-                                departure = departure,
-                                now = now,
-                                stopFavorite = stopFavorite,
-                                onAction = { action -> onDepartureAction(departure, action) },
-                                modifier = rowMotion(animationsOn)
-                                    .clip(groupShape(index, shown.lastIndex, outer = 24.dp))
-                                    .background(AppColors.Card),
-                                contentPadding = PaddingValues(start = 12.dp, end = 8.dp),
-                                boardTown = boardTown,
-                            )
+                            val rowModifier = rowMotion(animationsOn)
+                                .clip(groupShape(index, shown.lastIndex, outer = 24.dp))
+                                .background(AppColors.Card)
+                            if (departure.stop == null) {
+                                DepartureItem(
+                                    departure = departure,
+                                    now = now,
+                                    stopFavorite = stopFavorite,
+                                    onAction = { action -> onDepartureAction(departure, action) },
+                                    modifier = rowModifier,
+                                    contentPadding = PaddingValues(start = 12.dp, end = 8.dp),
+                                    boardTown = boardTown,
+                                )
+                            } else {
+                                // A list of several stops: the stop with its dot heads the row, as in "Wann los?".
+                                Column(modifier = rowModifier) {
+                                    StopDepartureHeader(
+                                        departure = departure,
+                                        boardTown = boardTown,
+                                        markers = stopMarkerMap,
+                                        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                                    )
+                                    DepartureItem(
+                                        departure = departure,
+                                        now = now,
+                                        stopFavorite = stopFavorite,
+                                        onAction = { action -> onDepartureAction(departure, action) },
+                                        contentPadding = PaddingValues(start = 12.dp, end = 8.dp),
+                                        boardTown = boardTown,
+                                        stopInHeader = true,
+                                    )
+                                }
+                            }
                         }
                     }
                     // Later departures: they load near the end by themselves, or with the button.
@@ -1531,6 +1644,10 @@ fun MapStopSheet(
     onPositionClose: () -> Unit = {},
     onPositionLine: (OsmLine) -> Unit = {},
     onWalkHere: () -> Unit = {},
+    // A back gesture that lets go of the stop (the card shrinks over the map) or of the stop
+    // position (its content dissolves into the stop's as the finger goes).
+    cardBack: BackPreview? = null,
+    positionBack: BackPreview? = null,
 ) {
     val markedId = stop?.id
     Column(
@@ -1551,6 +1668,7 @@ fun MapStopSheet(
             exit = slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { it / 3 } +
                 scaleOut(spring(stiffness = Spring.StiffnessMedium), targetScale = 0.9f) +
                 fadeOut(tween(140)),
+            modifier = Modifier.backFront(cardBack?.takeIf { it.active }),
         ) {
             val shownStop = stop ?: lastStop[0]
             if (shownStop != null) {
@@ -1565,17 +1683,22 @@ fun MapStopSheet(
                 ) {
                     // A new stop or position replaces what the card showed: the old content fades
                     // and slides out while the new one comes in, the card resizing between them.
-                    AnimatedContent(
-                        targetState = stop.id to position,
+                    // A back gesture from a stop position seeks the change to the stop as it goes.
+                    rememberBackSeek(stop.id to position, positionBack, backTarget = stop.id to null, label = "mapCardContent").AnimatedContent(
                         transitionSpec = {
-                            (fadeIn(tween(180, delayMillis = 60)) + slideInVertically(tween(220)) { it / 6 })
-                                .togetherWith(fadeOut(tween(120)))
-                                .using(SizeTransform(clip = false))
+                            if (positionBack?.active == true) {
+                                (fadeIn(tween(BACK_PAGE_MILLIS)) togetherWith fadeOut(tween(BACK_PAGE_MILLIS)))
+                                    .using(SizeTransform(clip = false))
+                            } else {
+                                (fadeIn(tween(180, delayMillis = 60)) + slideInVertically(tween(220)) { it / 6 })
+                                    .togetherWith(fadeOut(tween(120)))
+                                    .using(SizeTransform(clip = false))
+                            }
                         },
-                        label = "mapCardContent",
                     ) { (_, shownPosition) ->
                     if (shownPosition != null) {
                         PositionCardContent(
+                            modifier = Modifier.backShrink(positionBack?.takeIf { it.active }),
                             position = shownPosition,
                             stopName = stop.name.shortStopName(),
                             departures = positionDepartures,
@@ -1878,6 +2001,9 @@ fun FavoritesScreen(
     onRemovePattern: (SavedPattern) -> Unit = {},
     disruptions: DisruptionAccess? = null,
     page: FavoritesPage? = null,
+    // The page under [page], where back leads (null: the first page), and the back gesture to it.
+    pageBefore: FavoritesPage? = null,
+    back: BackPreview? = null,
     onPage: (FavoritesPage) -> Unit = {},
     onPageBack: () -> Unit = {},
     onShowStopOnMap: ((Stop) -> Unit)? = null,
@@ -1931,20 +2057,34 @@ fun FavoritesScreen(
         }
     }
     if (rememberAnimationsOn()) {
-        AnimatedContent(
-            targetState = shown,
+        // A back gesture seeks the change to the page before as it goes: the page shrinks over it.
+        val shownBefore = if (disruptions != null) pageBefore else null
+        rememberBackSeek(shown, back, backTarget = shownBefore, label = "favoritesPage").AnimatedContent(
             transitionSpec = {
-                val rise = slideInVertically(
-                    spring(
-                        dampingRatio = 0.72f,
-                        stiffness = Spring.StiffnessMediumLow,
-                        visibilityThreshold = IntOffset.VisibilityThreshold,
-                    ),
-                ) { height -> height / 18 }
-                (fadeIn(tween(220)) + rise) togetherWith fadeOut(tween(160))
+                if (back?.active == true) {
+                    backContentTransform(back)
+                } else {
+                    val rise = slideInVertically(
+                        spring(
+                            dampingRatio = 0.72f,
+                            stiffness = Spring.StiffnessMediumLow,
+                            visibilityThreshold = IntOffset.VisibilityThreshold,
+                        ),
+                    ) { height -> height / 18 }
+                    (fadeIn(tween(220)) + rise) togetherWith fadeOut(tween(160))
+                }
             },
-            label = "favoritesPage",
-        ) { target -> pageContent(target) }
+        ) { target ->
+            // The page a back gesture leaves shrinks over the one before, on a ground of its own.
+            val leaving = back?.takeIf { it.active && target != shownBefore }
+            Box(
+                modifier = if (leaving != null) {
+                    Modifier.backShrink(leaving).background(AppColors.PlainGround)
+                } else {
+                    Modifier
+                },
+            ) { pageContent(target) }
+        }
     } else {
         pageContent(shown)
     }
@@ -2420,7 +2560,7 @@ private fun placeCardKey(at: Int): String = WAYS_PLACE_KEY + at
 private fun savedPlaceCardKey(saved: SavedPlace): String = WAYS_SAVED_KEY + saved.id
 
 // The last row of the connections group of the settings.
-private const val SEARCH_LAST = 6
+private const val SEARCH_LAST = 8
 
 // Where OpenStreetMap explains its copyright and licence.
 private const val OSM_COPYRIGHT_URL = "https://www.openstreetmap.org/copyright"
@@ -2460,6 +2600,8 @@ fun SettingsScreen(
     onConnectionsFull: (Boolean) -> Unit,
     chartChangeStops: Boolean,
     onChartChangeStops: (Boolean) -> Unit,
+    chartTotalTime: ChartTotalTime,
+    onChartTotalTime: (ChartTotalTime) -> Unit,
     connectionChoice: Boolean,
     onConnectionChoice: (Boolean) -> Unit,
     sourceChoice: SourceChoice,
@@ -2477,7 +2619,16 @@ fun SettingsScreen(
     var openCategories by rememberSaveable { mutableStateOf("") }
     // The group of the disruption watch in the scrolled column, to scroll to it.
     val watchTarget = remember { ScrollTarget() }
-    BackHandler(enabled = advanced) { advanced = false }
+    // Back from "Advanced" is predictive: the settings lie underneath while the page shrinks.
+    val advancedBack = PredictiveNestedBackHandler(enabled = advanced, label = "advanced") { advanced = false }
+    // "Advanced" slides in from the right over the settings and, closed by its button, out again;
+    // the settings stay underneath while it moves (see AdvancedSlide).
+    val advancedSlide = remember { AdvancedSlide(if (advanced) 1f else 0f) }
+    val slideScope = rememberCoroutineScope()
+    LaunchedEffect(advanced) {
+        if (advanced) advancedSlide.open() else advancedSlide.shut()
+    }
+    val closeAdvanced: () -> Unit = { slideScope.launch { advancedSlide.close { advanced = false } } }
     // The unfolded previews of the rows stay so while the settings are open.
     ProvidePreviewStates {
     Column(
@@ -2494,7 +2645,7 @@ fun SettingsScreen(
             RoundButton(
                 glyph = Glyph.Back,
                 description = stringResource(R.string.back),
-                onClick = { if (advanced) advanced = false else onBack() },
+                onClick = { if (advanced) closeAdvanced() else onBack() },
             )
             Text(
                 text = stringResource(if (advanced) R.string.settings_advanced else R.string.settings),
@@ -2515,18 +2666,16 @@ fun SettingsScreen(
             scrollWhenSettled(watchTarget, scroll) { sticky.headerHeightOf(SettingsCategoryId.ON_THE_WAY) }
             onFocusWatchDone()
         }
-        if (advanced) {
-            AdvancedSettingsPage(
-                sourceChoice = sourceChoice,
-                onSourceChoice = onSourceChoice,
-                ownServer = ownServer,
-                onOwnServer = onOwnServer,
-                modifier = Modifier.weight(1f),
-            )
-        } else Box(
+        // While a back gesture runs on "Advanced" (and while it settles) the settings are there
+        // underneath it; the page above shrinks with the gesture and fades once let go.
+        Box(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth()
+                .fillMaxWidth(),
+        ) {
+        if (!advanced || advancedBack.active || advancedSlide.moving) Box(
+            modifier = Modifier
+                .fillMaxSize()
                 // The pinned header is pushed up out of the page here, not over the title above;
                 // clipped only at the top and bottom, like the scrolled column, so the shadows of
                 // the cards still reach into the margins at the sides.
@@ -2651,7 +2800,27 @@ fun SettingsScreen(
                             checked = chartChangeStops,
                             onChange = onChartChangeStops,
                         )
-                        ClearHistoryRow(shape = groupShape(6, SEARCH_LAST), onClear = onClearHistory)
+                        SettingsRow(
+                            shape = groupShape(6, SEARCH_LAST),
+                            title = stringResource(R.string.chart_total_time_title),
+                            text = stringResource(R.string.chart_total_time_text),
+                            // The choice fills the width of the row: it needs the bounded width, not a sideways scroll.
+                            scroll = false,
+                            preview = { ChartTotalTimePreview(chartTotalTime) },
+                        ) {
+                            ChartTotalTimeToggle(selected = chartTotalTime, onSelect = onChartTotalTime)
+                        }
+                        SettingsRow(
+                            shape = groupShape(7, SEARCH_LAST),
+                            title = stringResource(R.string.chart_short_legs_title),
+                            text = stringResource(R.string.chart_short_legs_text),
+                            // The choice fills the width of the row: it needs the bounded width, not a sideways scroll.
+                            scroll = false,
+                            preview = { ChartShortLegsPreview(ChartShortLegsSetting.load(LocalContext.current)) },
+                        ) {
+                            ChartShortLegsToggle()
+                        }
+                        ClearHistoryRow(shape = groupShape(8, SEARCH_LAST), onClear = onClearHistory)
                     }
                     TicketGroup(options = options, onOptions = onOptions)
                 }
@@ -2757,6 +2926,32 @@ fun SettingsScreen(
             }
             // Over the page, at its top edge: the header of the open category passing by.
             PinnedCategoryHeader(sticky = sticky, onOpen = { openCategories = it })
+        }
+        if (advanced || advancedBack.active || advancedSlide.moving) {
+            AdvancedSettingsPage(
+                sourceChoice = sourceChoice,
+                onSourceChoice = onSourceChoice,
+                ownServer = ownServer,
+                onOwnServer = onOwnServer,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (advancedBack.active) {
+                            // A page of its own while it shrinks: the settings underneath do not show through.
+                            Modifier.backFront(advancedBack).background(AppColors.PlainGround)
+                        } else {
+                            // Read in the layer only: the slide redraws, it does not recompose.
+                            Modifier
+                                .graphicsLayer {
+                                    val shown = advancedSlide.shown.value
+                                    translationX = size.width * ADVANCED_SLIDE_SHIFT * (1f - shown)
+                                    alpha = shown
+                                }
+                                .background(AppColors.PlainGround)
+                        },
+                    ),
+            )
+        }
         }
     }
     }
@@ -3160,57 +3355,6 @@ private fun ChannelRow(shape: Shape, title: String, onClick: () -> Unit) {
     }
 }
 
-// Taps on the version that unlock the developer options.
-private const val DEVELOPER_TAPS = 7
-
-/**
- * The version of the app, and below it the hidden developer options once the version was
- * tapped [DEVELOPER_TAPS] times: aids for testing that make no sense in daily use.
- */
-@Composable
-internal fun DeveloperSection() {
-    val context = LocalContext.current
-    val prefs = remember { AppPrefs(context) }
-    var unlocked by remember { mutableStateOf(prefs.developerOptions) }
-    var taps by remember { mutableIntStateOf(0) }
-    var simulate by remember { mutableStateOf(prefs.simulateFaster) }
-    val version = remember {
-        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"
-    }
-    SettingReveal(visible = unlocked) {
-        SettingsGroup(label = stringResource(R.string.developer_options)) {
-            SwitchRow(
-                shape = groupShape(0, 0),
-                title = stringResource(R.string.developer_simulate_faster),
-                text = stringResource(R.string.developer_simulate_faster_text),
-                checked = simulate,
-                onChange = { value ->
-                    simulate = value
-                    prefs.simulateFaster = value
-                },
-            )
-        }
-    }
-    Text(
-        text = stringResource(R.string.app_version, version),
-        color = AppColors.Muted,
-        fontSize = 12.sp,
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable {
-                if (!unlocked) {
-                    taps++
-                    if (taps >= DEVELOPER_TAPS) {
-                        unlocked = true
-                        prefs.developerOptions = true
-                        Toast.makeText(context, R.string.developer_unlocked, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            .padding(horizontal = 18.dp, vertical = 6.dp),
-    )
-}
-
 /** A line of small print about the data, which opens [url] on a tap; [link] shows it as a link. */
 @Composable
 private fun AttributionLine(text: String, url: String, link: Boolean = false) {
@@ -3237,8 +3381,8 @@ private fun AttributionLine(text: String, url: String, link: Boolean = false) {
 
 /**
  * Where the data comes from: the backends in the order they are asked, each with a switch and
- * buttons to move it up or down, then the access keys and the own server. The first backend in
- * use answers; when it fails, the next one does (see SourceChain).
+ * dragged to another place to change the order, then the access keys and the own server. The
+ * first backend in use answers; when it fails, the next one does (see SourceChain).
  */
 @Composable
 internal fun DataSourceGroup(
@@ -3250,6 +3394,39 @@ internal fun DataSourceGroup(
     val backends = choice.ordered
     // The key of public-transport-enabler only in builds that include it.
     val lastRow = backends.size + if (PteSource.INCLUDED) 2 else 1
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val gap = with(LocalDensity.current) { GroupRowGap.toPx() }
+    val drag = remember { BackendDrag() }
+    // The gestures outlive a composition: they read the order and the callback from here.
+    val latestChoice by rememberUpdatedState(choice)
+    val latestOnChoice by rememberUpdatedState(onChoice)
+    val latestGap by rememberUpdatedState(gap)
+    // [gesture] tells the row's long press from the handle's drag: a long press on the handle
+    // picks the row up, then the handle's drag takes it over (it sees the moves first).
+    fun pickUp(backend: Backend, gesture: Int): Boolean {
+        if (drag.key == backend && drag.from >= 0) {
+            drag.owner = gesture
+            return true
+        }
+        val order = latestChoice.ordered
+        if (!drag.start(backend, order.indexOf(backend), order, latestGap)) return false
+        drag.owner = gesture
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        return true
+    }
+    fun dragBy(backend: Backend, dy: Float) {
+        // A tick for each new slot the row would drop into.
+        if (drag.key == backend && drag.moveBy(dy, latestGap)) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+    }
+    fun drop(backend: Backend, commit: Boolean, gesture: Int) {
+        // Only the gesture holding the row drops it (not the long press the handle took over from).
+        if (drag.key != backend || drag.owner != gesture) return
+        drag.drop(scope, latestGap, commit) { from, to ->
+            val now = latestChoice
+            latestOnChoice(now.copy(order = now.ordered.movedTo(from, to)))
+        }
+    }
     SettingsGroup(label = stringResource(R.string.settings_sources)) {
         Text(
             text = stringResource(R.string.sources_order_text),
@@ -3259,34 +3436,86 @@ internal fun DataSourceGroup(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
         )
         backends.forEachIndexed { index, backend ->
-            val on = backend in choice.enabled
-            val status = when {
-                backend == Backend.Pte && !PteSource.INCLUDED -> stringResource(R.string.source_not_included)
-                !choice.configured(backend) -> stringResource(R.string.source_not_configured)
-                else -> ""
+            // Keyed by the backend, a row keeps its animations when the order changes.
+            key(backend) {
+                val on = backend in choice.enabled
+                val status = when {
+                    backend == Backend.Pte && !PteSource.INCLUDED -> stringResource(R.string.source_not_included)
+                    !choice.configured(backend) -> stringResource(R.string.source_not_configured)
+                    else -> ""
+                }
+                fun moved(by: Int): SourceChoice =
+                    choice.copy(order = backends.movedTo(index, (index + by).coerceIn(0, backends.lastIndex)))
+                val title = backendTitle(LocalContext.current, backend)
+                // While another row is held this one steps aside for it, smoothly; on the drop the
+                // new order takes its place in the same frame, so it snaps.
+                val aside = animateFloatAsState(
+                    targetValue = stepAside(index, drag.from, drag.target, drag.heights, gap),
+                    animationSpec = if (drag.from >= 0) spring(stiffness = Spring.StiffnessMediumLow) else snap(),
+                    label = "aside",
+                )
+                // The held row lifts a little: slightly larger, with a shadow.
+                val lift = animateFloatAsState(
+                    targetValue = if (drag.from >= 0 && drag.key == backend) 1f else 0f,
+                    label = "lift",
+                )
+                val rowShape = groupShape(index, lastRow)
+                BackendRow(
+                    shape = rowShape,
+                    title = title,
+                    text = listOf(backendText(backend), status).filter { it.isNotEmpty() }.joinToString(" · "),
+                    checked = on,
+                    links = backendLinks(backend),
+                    moveActions = listOfNotNull(
+                        if (index > 0) {
+                            CustomAccessibilityAction(stringResource(R.string.source_move_up, title)) { onChoice(moved(-1)); true }
+                        } else null,
+                        if (index < backends.lastIndex) {
+                            CustomAccessibilityAction(stringResource(R.string.source_move_down, title)) { onChoice(moved(1)); true }
+                        } else null,
+                    ),
+                    // The offsets are read in the layer alone: a drag redraws, it does not compose.
+                    modifier = Modifier
+                        .onSizeChanged { drag.measured[backend] = it.height }
+                        .zIndex(if (drag.key == backend) 1f else 0f)
+                        .graphicsLayer {
+                            translationY = when {
+                                drag.key == backend -> drag.offset
+                                drag.from >= 0 -> aside.value
+                                else -> 0f
+                            }
+                            val raised = lift.value
+                            scaleX = 1f + 0.03f * raised
+                            scaleY = scaleX
+                            shadowElevation = 8.dp.toPx() * raised
+                            shape = rowShape
+                            clip = false
+                        }
+                        // Held a moment, the whole row can be dragged.
+                        .pointerInput(backend) {
+                            detectRowDrag(
+                                afterLongPress = true,
+                                pickUp = { pickUp(backend, ROW_GESTURE) },
+                                dragBy = { dy -> dragBy(backend, dy) },
+                                drop = { commit -> drop(backend, commit, ROW_GESTURE) },
+                            )
+                        },
+                    // The handle drags at once.
+                    handleModifier = Modifier.pointerInput(backend) {
+                        detectRowDrag(
+                            afterLongPress = false,
+                            pickUp = { pickUp(backend, HANDLE_GESTURE) },
+                            dragBy = { dy -> dragBy(backend, dy) },
+                            drop = { commit -> drop(backend, commit, HANDLE_GESTURE) },
+                        )
+                    },
+                    onChange = { value ->
+                        val changed = if (value) choice.enabled + backend else choice.enabled - backend
+                        // Without any backend in use nothing could be found: the last one stays on.
+                        if (choice.copy(enabled = changed).inUse.isNotEmpty() || value) onChoice(choice.copy(enabled = changed))
+                    },
+                )
             }
-            fun moved(by: Int): SourceChoice {
-                val list = backends.toMutableList()
-                val target = (index + by).coerceIn(0, list.lastIndex)
-                list.add(target, list.removeAt(index))
-                return choice.copy(order = list)
-            }
-            BackendRow(
-                shape = groupShape(index, lastRow),
-                title = backendTitle(LocalContext.current, backend),
-                text = listOf(backendText(backend), status).filter { it.isNotEmpty() }.joinToString(" · "),
-                checked = on,
-                links = backendLinks(backend),
-                canUp = index > 0,
-                canDown = index < backends.lastIndex,
-                onUp = { onChoice(moved(-1)) },
-                onDown = { onChoice(moved(1)) },
-                onChange = { value ->
-                    val changed = if (value) choice.enabled + backend else choice.enabled - backend
-                    // Without any backend in use nothing could be found: the last one stays on.
-                    if (choice.copy(enabled = changed).inUse.isNotEmpty() || value) onChoice(choice.copy(enabled = changed))
-                },
-            )
         }
         // The official VBB API needs a key of one's own; it stays on this device.
         SettingsRow(
@@ -3400,7 +3629,10 @@ private const val PTE_GITHUB_URL = "https://github.com/schildbach/public-transpo
 private const val TRANSITOUS_URL = "https://transitous.org"
 private const val HAFAS_REST_API_URL = "https://github.com/public-transport/hafas-rest-api"
 
-/** One backend: its name and what it covers, a switch, and buttons to move it in the order. */
+/**
+ * One backend: a handle to drag it to another place in the order, its name and what it covers,
+ * and a switch. Without dragging, [moveActions] move it up or down (for TalkBack and the like).
+ */
 @Composable
 private fun BackendRow(
     shape: Shape,
@@ -3408,15 +3640,15 @@ private fun BackendRow(
     text: String,
     checked: Boolean,
     links: List<Pair<String, String>>,
-    canUp: Boolean,
-    canDown: Boolean,
-    onUp: () -> Unit,
-    onDown: () -> Unit,
+    moveActions: List<CustomAccessibilityAction>,
+    handleModifier: Modifier,
     onChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
+            .semantics(mergeDescendants = true) { customActions = moveActions }
             .clip(shape)
             .background(AppColors.Card)
             .defaultMinSize(minHeight = 56.dp)
@@ -3424,9 +3656,14 @@ private fun BackendRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            MoveButton(symbol = "↑", label = stringResource(R.string.source_move_up, title), enabled = canUp, onClick = onUp)
-            MoveButton(symbol = "↓", label = stringResource(R.string.source_move_down, title), enabled = canDown, onClick = onDown)
+        // As large as a finger; only a mark for the eye, the row's actions speak for it.
+        Box(
+            modifier = handleModifier
+                .size(width = 36.dp, height = 60.dp)
+                .clearAndSetSemantics { },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text = "⠿", color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             SettingText(title, text)
@@ -3436,25 +3673,127 @@ private fun BackendRow(
     }
 }
 
-@Composable
-private fun MoveButton(symbol: String, label: String, enabled: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(width = 36.dp, height = 28.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (enabled) AppColors.Chip else AppColors.Card)
-            .clickable(enabled = enabled, onClick = onClick)
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = symbol,
-            color = if (enabled) AppColors.Blue else AppColors.Muted,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 15.sp,
-        )
+/**
+ * Drags a row, after a long press or at once, through [pickUp] (true when this gesture got the
+ * row), [dragBy] with the vertical movement and [drop] (false when the gesture was cancelled).
+ */
+private suspend fun PointerInputScope.detectRowDrag(
+    afterLongPress: Boolean,
+    pickUp: () -> Boolean,
+    dragBy: (Float) -> Unit,
+    drop: (commit: Boolean) -> Unit,
+) {
+    // Only the gesture that picked the row up moves it: the handle lies inside the row, so a
+    // long press on it starts both.
+    var mine = false
+    val onStart: (Offset) -> Unit = { mine = pickUp() }
+    val onEnd: () -> Unit = {
+        if (mine) drop(true)
+        mine = false
+    }
+    val onCancel: () -> Unit = {
+        if (mine) drop(false)
+        mine = false
+    }
+    val onDrag: (PointerInputChange, Offset) -> Unit = { change, amount ->
+        if (mine) {
+            change.consume()
+            dragBy(amount.y)
+        }
+    }
+    if (afterLongPress) {
+        detectDragGesturesAfterLongPress(onDragStart = onStart, onDragEnd = onEnd, onDragCancel = onCancel, onDrag = onDrag)
+    } else {
+        detectDragGestures(onDragStart = onStart, onDragEnd = onEnd, onDragCancel = onCancel, onDrag = onDrag)
     }
 }
+
+/**
+ * The backend row being dragged to another place in the order. Only [key], [from] and [target]
+ * change what is composed (on the pick-up, on each new slot and on the drop); [offset] follows
+ * the finger and is read in the rows' graphics layers alone.
+ */
+@Stable
+private class BackendDrag {
+    /** The row held, or still gliding into its new place; null while none is. */
+    var key by mutableStateOf<Backend?>(null)
+        private set
+
+    /** Its place in the order when picked up; -1 once dropped. */
+    var from by mutableIntStateOf(-1)
+        private set
+
+    /** The slot it would drop into now. */
+    var target by mutableIntStateOf(-1)
+        private set
+
+    /** How far it is moved from its place in the layout, in pixels. */
+    var offset by mutableFloatStateOf(0f)
+        private set
+
+    /** The heights of the rows as last measured, by backend. */
+    val measured = HashMap<Backend, Int>()
+
+    /** The heights of the rows in their order at the pick-up. */
+    var heights = IntArray(0)
+        private set
+
+    /** The gesture that holds the row (ROW_GESTURE or HANDLE_GESTURE). */
+    var owner = 0
+
+    private var minOffset = 0f
+    private var maxOffset = 0f
+    private var settle: Job? = null
+
+    /** Picks up [backend] at [index] of [order]; false while another row is held. */
+    fun start(backend: Backend, index: Int, order: List<Backend>, gap: Float): Boolean {
+        if (from >= 0 || index < 0) return false
+        // A row still gliding into its place lands at once.
+        settle?.cancel()
+        heights = IntArray(order.size) { measured[order[it]] ?: 0 }
+        // Not past the first slot nor the last.
+        minOffset = slotDelta(index, 0, heights, gap)
+        maxOffset = slotDelta(index, order.lastIndex, heights, gap)
+        offset = 0f
+        target = index
+        key = backend
+        from = index
+        return true
+    }
+
+    /** Moves the held row by [dy]; true when that brings it over a new slot. */
+    fun moveBy(dy: Float, gap: Float): Boolean {
+        if (from < 0) return false
+        offset = (offset + dy).coerceIn(minOffset, maxOffset)
+        val slot = dropSlot(from, offset, heights, gap)
+        if (slot == target) return false
+        target = slot
+        return true
+    }
+
+    /**
+     * Drops the held row: with [commit] into its slot through [reorder], otherwise back to its
+     * place. Either way it glides there from where the finger left it.
+     */
+    fun drop(scope: CoroutineScope, gap: Float, commit: Boolean, reorder: (from: Int, to: Int) -> Unit) {
+        val start = from
+        if (start < 0) return
+        val to = if (commit) target else start
+        // The new order and the offset from the new place change in the same frame: no jump.
+        if (to != start) reorder(start, to)
+        offset -= slotDelta(start, to, heights, gap)
+        from = -1
+        target = -1
+        settle = scope.launch {
+            animate(offset, 0f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) { value, _ -> offset = value }
+            key = null
+        }
+    }
+}
+
+// The two gestures that can hold a backend row (see BackendDrag.owner).
+private const val ROW_GESTURE = 1
+private const val HANDLE_GESTURE = 2
 
 @Composable
 private fun SmallChipButton(text: String, onClick: () -> Unit) {
@@ -3584,6 +3923,9 @@ private fun CheckRow(
     }
 }
 
+// The space between the rows of a SettingsGroup.
+private val GroupRowGap = 3.dp
+
 /** Settings that belong together: a label, and their rows on one glass card. */
 @Composable
 internal fun SettingsGroup(label: String?, content: @Composable ColumnScope.() -> Unit) {
@@ -3594,7 +3936,7 @@ internal fun SettingsGroup(label: String?, content: @Composable ColumnScope.() -
         GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
             Column(
                 modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
+                verticalArrangement = Arrangement.spacedBy(GroupRowGap),
                 content = content,
             )
         }
@@ -3656,8 +3998,11 @@ internal fun TransferChoiceRow(
                 )
             }
         }
+        // How changes are rated, in a sheet built from the numbers the rating uses.
+        TransferRatingInfoLink()
+        // The buffers of the rating, to tune; folded away as most never need them.
         Text(
-            text = stringResource(if (more) R.string.comfort_less else R.string.comfort_more),
+            text = stringResource(if (more) R.string.comfort_less else R.string.rating_tuning_show),
             color = AppColors.Blue,
             fontWeight = FontWeight.SemiBold,
             fontSize = 13.sp,
@@ -3667,7 +4012,7 @@ internal fun TransferChoiceRow(
                 .padding(vertical = 4.dp),
         )
         SettingReveal(visible = more) {
-            Text(text = stringResource(R.string.comfort_text), color = AppColors.Muted, fontSize = 12.sp, lineHeight = 16.sp)
+            TransferTuningControls()
         }
     }
 }
@@ -4113,16 +4458,21 @@ fun PlanScreen(
             // so the pills read over the map.
             if (levelChoice) {
                 GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp)) {
-                    LevelSelector(
-                        level = comfort,
-                        onLevel = onComfort,
-                        tighterCount = if (count > 0) tighterCount else 0,
-                        tighterLevel = tighterLevel,
-                        onTighter = onShowFiltered,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                    )
+                    Row(
+                        modifier = Modifier.padding(start = 8.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        LevelSelector(
+                            level = comfort,
+                            onLevel = onComfort,
+                            tighterCount = if (count > 0) tighterCount else 0,
+                            tighterLevel = tighterLevel,
+                            onTighter = onShowFiltered,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // How the levels are rated, and their buffers.
+                        TransferRatingInfoButton()
+                    }
                 }
             }
             // Kinds of transport switched off, said aloud.
@@ -4252,7 +4602,7 @@ private fun PlanOption(journey: Journey, picked: Boolean, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (journey.warnings.isNotEmpty()) WarningMark()
+            if (alertingWarnings(journey.warnings, rememberStepFree()).isNotEmpty()) WarningMark()
             if (rememberNeedsZoneC(journey)) FareZoneChip()
         }
         // The walks at either end stand before and after the lines, each with its minutes.
@@ -4281,7 +4631,7 @@ private fun PlanOption(journey: Journey, picked: Boolean, onClick: () -> Unit) {
         Text(
             text = stringResource(
                 R.string.duration_and_transfers,
-                journey.durationMinutes,
+                durationLabel(journey.durationMinutes),
                 journey.transfers,
             ),
             color = AppColors.Muted,
@@ -4295,3 +4645,55 @@ private fun PlanOption(journey: Journey, picked: Boolean, onClick: () -> Unit) {
 // A route card of the plan is at most this wide and shows at most this many line badges.
 private val PLAN_OPTION_MAX = 280.dp
 private const val PLAN_OPTION_BADGES = 5
+
+/**
+ * How far the page "Advanced" has slid in over the settings, 0 to 1: [open] slides it in,
+ * [close] out before the page goes; [moving] while either runs, so the settings stay underneath.
+ */
+@Stable
+internal class AdvancedSlide(start: Float) {
+    val shown = Animatable(start)
+    var moving by mutableStateOf(false)
+        private set
+
+    /** A close runs: it alone ends the move. */
+    var closing = false
+        private set
+
+    suspend fun open() {
+        if (shown.value >= 1f) return
+        moving = true
+        try {
+            shown.animateTo(1f, tween(ADVANCED_SLIDE_MILLIS, easing = AdvancedSlideEasing))
+        } finally {
+            // Taken over by a close: that one ends the move. Cut short otherwise (a back while
+            // it slid in), the page is gone: shut() takes it away.
+            if (!closing) moving = false
+        }
+    }
+
+    suspend fun close(done: () -> Unit) {
+        if (closing) return
+        closing = true
+        moving = true
+        try {
+            shown.animateTo(0f, tween(ADVANCED_SLIDE_MILLIS * 2 / 3, easing = FastOutLinearInEasing))
+        } finally {
+            closing = false
+            done()
+            moving = false
+        }
+    }
+
+    /** Gone without a slide (the back gesture already took it away). */
+    suspend fun shut() {
+        if (closing) return
+        moving = false
+        shown.snapTo(0f)
+    }
+}
+
+// The page "Advanced" slides in over this long, from this share of its width to the right.
+private const val ADVANCED_SLIDE_MILLIS = 320
+private const val ADVANCED_SLIDE_SHIFT = 0.25f
+private val AdvancedSlideEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)

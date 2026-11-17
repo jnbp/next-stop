@@ -84,6 +84,8 @@ function parseRoute(hash) {
     const provider = leg.p === 'tr' ? 'tr' : leg.p === 'bvg' ? 'bvg' : null;
     return {
       walk,
+      // The bike combo: a way on the street ridden by bike.
+      bike: walk && leg.bike === true,
       provider: walk ? null : provider,
       trip: walk ? null : str(leg.trip, LIMITS.id),
       line: walk ? null : canonicalLine(str(leg.line, 30), str(leg.prod, 20)),
@@ -135,6 +137,7 @@ function encodeRoute(route) {
     out.from = place(l.from, 'dep', 'dd');
     out.to = place(l.to, 'arr', 'ad');
     if (l.walk) out.walk = true;
+    if (l.walk && l.bike) out.bike = true;
     if (l.m) out.m = l.m;
     if (l.n != null) out.n = l.n;
     if (l.b) out.b = l.b;
@@ -218,6 +221,7 @@ function computeSteps(route, live) {
     out.push({
       index,
       walk: leg.walk,
+      bike: !!leg.bike,
       line,
       product,
       color: leg.walk ? null : lineColor(line, product, data && data.color, leg.from.pos),
@@ -334,12 +338,13 @@ function latLon(pos) {
 
 /**
  * The walk from [from] to [to] (positions [lat, lon]) in Google Maps: only the two points and
- * the travel mode, nothing about the reader or the rest of the route. Null without positions.
+ * the travel mode (by bike with [bike]), nothing about the reader or the rest of the route.
+ * Null without positions.
  */
-function googleWalkUrl(from, to) {
+function googleWalkUrl(from, to, bike) {
   if (!from || !to) return null;
   return 'https://www.google.com/maps/dir/?api=1&origin=' + encodeURIComponent(latLon(from)) +
-    '&destination=' + encodeURIComponent(latLon(to)) + '&travelmode=walking';
+    '&destination=' + encodeURIComponent(latLon(to)) + '&travelmode=' + (bike ? 'bicycling' : 'walking');
 }
 
 /** A search from [from] to [to] (places with name and pos) on the Transitous website, leaving now. */
@@ -480,6 +485,7 @@ const TEXTS = {
     showStops: 'Stationen anzeigen',
     hideStops: 'Stationen ausblenden',
     walk: 'Zu Fuß',
+    bike: 'Mit dem Rad',
     walkTo: (s) => 'zu ' + s,
     takeExit: (e) => e + ' nehmen',
     toSpot: (s) => 'bis ' + s,
@@ -558,6 +564,7 @@ const TEXTS = {
     showStops: 'Show stops',
     hideStops: 'Hide stops',
     walk: 'Walk',
+    bike: 'By bike',
     walkTo: (s) => 'to ' + s,
     takeExit: (e) => 'Take ' + e,
     toSpot: (s) => 'to ' + s,
@@ -937,7 +944,7 @@ if (typeof document !== 'undefined') {
               body.append(mini);
               observer.observe(mini);
             }
-            const url = googleWalkUrl(s.path[0] || s.from.pos, s.path[s.path.length - 1] || s.to.pos);
+            const url = googleWalkUrl(s.path[0] || s.from.pos, s.path[s.path.length - 1] || s.to.pos, s.bike);
             if (url) {
               const a = el('a', 'button', T.walkMaps);
               a.href = url;
@@ -1002,7 +1009,7 @@ if (typeof document !== 'undefined') {
           rollTo(r.time, clock(s.dep));
           r.time.classList.toggle('late', s.delayDep > 0 && !s.walk);
           if (s.walk) {
-            r.title.textContent = [T.walk, durationText(T, s.arr - s.dep), metersText(T, s.meters)].filter(Boolean).join(' · ');
+            r.title.textContent = [s.bike ? T.bike : T.walk, durationText(T, s.arr - s.dep), metersText(T, s.meters)].filter(Boolean).join(' · ');
             r.delay.hidden = true;
             return;
           }

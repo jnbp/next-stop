@@ -201,7 +201,8 @@ internal fun boardingHint(context: Context, step: TripStep, journey: Journey): S
 /** The delay of the next step in minutes: of the departure before boarding, of the arrival on board. */
 internal fun stepDelay(step: TripStep): Long {
     val leg = step.leg ?: return 0
-    if (!leg.realtime) return 0
+    // The time to leave is the walk's start: a delay of the ride does not belong to it.
+    if (!leg.realtime || step.leave) return 0
     return when (step.kind) {
         StepKind.Board -> leg.departureDelayMinutes
         StepKind.GetOff -> leg.arrivalDelayMinutes
@@ -235,7 +236,11 @@ private fun headline(context: Context, step: TripStep, minutes: Long): String {
             if (about) R.string.trip_get_off_in_about else R.string.trip_get_off_in,
             R.string.trip_get_off_at,
         )
-        StepKind.Board -> intArrayOf(R.string.trip_board_now, R.string.trip_board_in, R.string.trip_board_at)
+        StepKind.Board -> if (step.leave) {
+            intArrayOf(R.string.trip_leave_now, R.string.trip_leave_in, R.string.trip_leave_at)
+        } else {
+            intArrayOf(R.string.trip_board_now, R.string.trip_board_in, R.string.trip_board_at)
+        }
         StepKind.WalkToEnd -> intArrayOf(
             R.string.trip_walk_now,
             if (about) R.string.trip_walk_in_about else R.string.trip_walk_in,
@@ -283,14 +288,17 @@ private fun thenLine(context: Context, step: TripStep, journey: Journey): String
     val index = step.leg?.let { current -> legs.indexOfFirst { it === current } } ?: -1
     val then = when {
         index < 0 -> null
+        // Before leaving: the ride the walk leads to, at its own time.
+        step.kind == StepKind.Board && step.leave ->
+            context.getString(R.string.trip_then_ride, shortLine(legs[index].line) ?: "", journey.plausible().legs[index].departure.clock())
         step.kind == StepKind.Board -> context.getString(R.string.trip_then_ride_to, legs[index].to.plainStopName())
         step.kind == StepKind.GetOff -> {
             val next = legs.getOrNull(index + 1)
             when {
                 next == null -> null
                 next.walking -> context.getString(
-                    R.string.trip_then_walk,
-                    minutesBetween(next.departure, next.arrival).coerceAtLeast(1),
+                    if (next.cycling) R.string.trip_then_cycle else R.string.trip_then_walk,
+                    durationText(context, minutesBetween(next.departure, next.arrival).coerceAtLeast(1)),
                 )
                 else -> context.getString(R.string.trip_then_ride, shortLine(next.line) ?: "", next.departure.clock())
             }
@@ -315,7 +323,7 @@ private fun lineBadge(context: Context, leg: Leg, heightDp: Float = 24f, outline
     // that line's colour with stripes, as the badge in the app (RailReplacementBadge).
     val replacement = leg.railReplacement
     val replaced = replacement?.replaced
-    val name = if (replacement != null) listOfNotNull(SEV_MARK, replaced).joinToString(" ") else shortLine(leg.line) ?: ""
+    val name = if (replacement != null) listOfNotNull(SEV_MARK, replaced).joinToString(" ") else badgeLine(leg.line) ?: ""
     val tone = if (replaced != null) lineColor(replaced, replacement?.replacedProductOrGuess ?: replacedProduct(replaced), leg.ridePlace) else lineColor(leg)
     val background = if (replacement != null) androidx.compose.ui.graphics.Color.White else tone
     val height = (heightDp * density).roundToInt()

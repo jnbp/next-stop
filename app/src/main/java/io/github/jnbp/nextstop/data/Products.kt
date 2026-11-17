@@ -127,3 +127,87 @@ fun SearchOptions.withLocalOnly(on: Boolean): SearchOptions {
     val changed = if (on) products - LONG_DISTANCE_PRODUCTS else products + LONG_DISTANCE_PRODUCTS
     return copy(products = changed.ifEmpty { PRODUCT_KEYS.toSet() - LONG_DISTANCE_PRODUCTS })
 }
+
+// Words for the kind of a train in long names, categories and operators: "Railjet", "EuroCity".
+private val TRAIN_KIND_WORDS = mapOf(
+    "railjet" to "RJ", "railjet xpress" to "RJX", "railjetxpress" to "RJX",
+    "eurocity" to "EC", "eurocity-express" to "ECE", "eurocity express" to "ECE", "eurocityexpress" to "ECE",
+    "intercity" to "IC", "intercity-express" to "ICE", "intercity express" to "ICE", "intercityexpress" to "ICE",
+    "euronight" to "EN", "nightjet" to "NJ", "flixtrain" to "FLX",
+    "regional-express" to "RE", "regionalexpress" to "RE", "regionalbahn" to "RB",
+)
+
+// Kinds of trains that are named by their number (or line) behind them.
+private val NUMBERED_TRAIN_KINDS = LONG_DISTANCE_TRAIN_KINDS + setOf("IRE", "RE", "RB", "IR", "MEX", "FEX")
+
+// The products of trains, and rides of no named product, whose names may be a bare number.
+private val TRAIN_NAME_PRODUCTS = setOf("express", "regional", "")
+
+/**
+ * The kind of a train that [hint] names, in capitals: "RJ" of "RJ", "RJ 174", "rj174" or
+ * "Railjet", "EC" of "EuroCity", "FLX" of "FlixTrain"; null where it names none of the known
+ * kinds (see NUMBERED_TRAIN_KINDS, TRAIN_KIND_WORDS): "Zug", "Bus", "České dráhy".
+ */
+fun trainKindOf(hint: String?): String? {
+    val text = hint?.trim()?.replace(Regex("\\s+"), " ")?.takeIf { it.isNotEmpty() } ?: return null
+    TRAIN_KIND_WORDS[text.lowercase()]?.let { return it }
+    TRAIN_KIND_WORDS[text.substringBefore(' ').lowercase()]?.let { return it }
+    val letters = text.takeWhile { it.isLetter() }
+    if (letters.length !in 1..4) return null
+    val rest = text.substring(letters.length)
+    if (rest.isNotEmpty() && rest.first() != ' ' && !rest.first().isDigit()) return null
+    return letters.uppercase().takeIf { it in NUMBERED_TRAIN_KINDS }
+}
+
+/**
+ * The name of a train whose provider gave only its number: "174" (or no name and trip number
+ * 174) is "RJ 174" where one of [hints] (the provider's product name, category, long name or
+ * operator) names the kind of the train (see [trainKindOf]). Only for trains and rides of no
+ * named [product]: a bus "174" stays "174". Without a kind the bare number stays, never a
+ * guessed one: the badge shows that it is a train (see modeHint). A name that is only the kind
+ * ("RJ", "Railjet") with trip number 174 is "RJ 174" too. A name that is more than a
+ * number ("RE1", "ICE 29", "S1") stays as it is.
+ */
+fun withTrainKind(name: String?, product: String, number: String?, vararg hints: String?): String? {
+    if (product !in TRAIN_NAME_PRODUCTS) return name
+    val plain = name?.trim()?.takeIf { it.isNotEmpty() }
+    val trip = number?.trim()?.takeIf { it.isNotEmpty() && it.all { char -> char.isDigit() } }
+    // A name that is only the kind ("RJ", "Railjet") takes the trip number behind it: "RJ 174".
+    if (plain != null && trip != null && plain.none { it.isDigit() }) {
+        trainKindOf(plain)?.let { return "$it $trip" }
+    }
+    if (plain != null && !plain.all { it.isDigit() }) return name
+    val digits = plain ?: trip?.takeIf { product != "" } ?: return name
+    val kind = hints.firstNotNullOfOrNull { trainKindOf(it) } ?: return digits
+    return "$kind $digits"
+}
+
+/** True when [line] of [product] is a train named by a bare number, no kind in front ("174"). */
+fun isBareTrainNumber(line: String?, product: String): Boolean {
+    val name = line?.trim() ?: return false
+    return product in TRAIN_NAME_PRODUCTS && product != "" && name.isNotEmpty() && name.all { it.isDigit() }
+}
+
+// A name of FlixBus or FlixTrain, with the code of its line or the number of its train behind it
+// or none: "FLX 040", "FLX30", "Flix 260", "FlixBus N1334", "Flixbus", "FlixTrain 1234".
+private val FLIX_NAME = Regex("^(FLX|Flix|FlixBus|FlixTrain)(?: ?([A-Za-z]?[0-9]+[A-Za-z]?))?$", RegexOption.IGNORE_CASE)
+
+/**
+ * [name] of a FlixBus or FlixTrain ride in the one form the app uses everywhere: a FlixBus
+ * ([product] coach or bus) is "FlixBus 260" with the code of its line, "FlixBus" without one
+ * (some providers name it "FLX 260" or "Flix 260"); a FlixTrain ([product] of a train, or none
+ * named, where the name says FLX or FlixTrain) is "FLX 30" with its number, "FlixTrain" without.
+ * Badges shorten the bus to "Flix 260" (see badgeLine). Other names stay as they are.
+ */
+fun flixLineName(name: String, product: String): String {
+    val match = FLIX_NAME.matchEntire(name.trim()) ?: return name
+    val word = match.groupValues[1].lowercase()
+    val code = match.groupValues[2].uppercase().ifEmpty { null }
+    val bus = product == "coach" || product == "bus"
+    return when {
+        bus -> if (code != null) "FlixBus $code" else "FlixBus"
+        product in TRAIN_NAME_PRODUCTS && (word == "flx" || word == "flixtrain") ->
+            if (code != null && code.all { it.isDigit() }) "FLX $code" else if (code == null) "FlixTrain" else name
+        else -> name
+    }
+}

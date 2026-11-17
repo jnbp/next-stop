@@ -56,6 +56,7 @@ suspend fun loadContactAddresses(context: Context): List<ContactAddress> = withC
                 val name: String? = cursor.getString(0)
                 // Addresses are stored with line breaks; the app shows and searches them in one line.
                 val address: String? = cursor.getString(1)?.replace(Regex("\\s*\\n\\s*"), ", ")?.trim()
+                    ?.let { germanStreetOrder(it, address = true) }
                 val type = if (cursor.isNull(2)) StructuredPostal.TYPE_OTHER else cursor.getInt(2)
                 val label: String? = cursor.getString(3)
                 val kind = StructuredPostal.getTypeLabel(context.resources, type, label)?.toString()
@@ -63,7 +64,8 @@ suspend fun loadContactAddresses(context: Context): List<ContactAddress> = withC
                 // The single fields, where the contact has them, let the place search check its hit.
                 fun field(column: Int): String? =
                     cursor.getString(column)?.replace(Regex("\\s*\\n\\s*"), ", ")?.trim()?.takeIf { it.isNotEmpty() }
-                val street = field(4)
+                // A street kept in an English format ("32 Musterstraße") as Germans write it.
+                val street = field(4)?.let { germanStreetOrder(it, address = true) }
                 val postcode = field(5)
                 val city = field(6)
                 val country = field(7)

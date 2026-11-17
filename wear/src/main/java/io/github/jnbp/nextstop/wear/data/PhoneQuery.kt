@@ -130,6 +130,7 @@ private fun parseLegJson(item: JSONObject): Leg? {
         arrivalPlatform = item.textOrNull("arrPlatform"),
         fromPosition = item.position("fromLat", "fromLon"),
         toPosition = item.position("toLat", "toLon"),
+        inStation = item.optBoolean("inStation", false),
     )
 }
 

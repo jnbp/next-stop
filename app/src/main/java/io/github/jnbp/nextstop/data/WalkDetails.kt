@@ -30,7 +30,8 @@ data class WalkPassage(
     val position: Pair<Double, Double> get() = latitude to longitude
 }
 
-enum class PassageKind { Entrance, Lift, Escalator }
+/** What a walk passes; [Stairs] only as the way up (or down) to the exit it leaves by (see WalkTarget.climbBy). */
+enum class PassageKind { Entrance, Lift, Escalator, Stairs }
 
 /**
  * The details of a walk: [positions] all stop positions of the stop areas at its ends, [target]
@@ -109,10 +110,18 @@ fun walkDetails(
             }
         }
     }
-    // The entrance aimed for and the exit left by count whatever the way does.
-    for ((spot, along) in listOf(exit to 0.0, entrance to 1.0)) {
+    // The entrance aimed for and the exit left by count whatever the way does: an exit where
+    // the way passes it (a way of the provider through it), else at its start.
+    if (exit != null && exit.kind == WalkTargetKind.Elevator) {
+        if (passages.none { it.kind == PassageKind.Lift && metersBetween(it.position, exit.position) <= 10.0 }) {
+            val along = way.nearest(exit.position).let { (meters, along) -> if (meters <= ENTRANCE_ON_WAY_METERS) along else 0.0 }
+            passages.add(WalkPassage(PassageKind.Lift, null, exit.latitude, exit.longitude, along))
+        }
+    }
+    for ((spot, end) in listOf(exit to 0.0, entrance to 1.0)) {
         if (spot == null || spot.kind != WalkTargetKind.Entrance) continue
         if (passages.none { it.kind == PassageKind.Entrance && metersBetween(it.position, spot.position) <= 10.0 }) {
+            val along = way.nearest(spot.position).let { (meters, along) -> if (meters <= ENTRANCE_ON_WAY_METERS) along else end }
             passages.add(WalkPassage(PassageKind.Entrance, spot.label, spot.latitude, spot.longitude, along, spot.throughBuilding))
         }
     }
@@ -139,7 +148,10 @@ fun walkDetails(
         !inside && endsInside -> entrance?.let { spot -> doors.firstOrNull { metersBetween(it.position, spot.position) <= 12.0 } } ?: doors.first()
         else -> null
     }
-    val passed = if (oneDoor != null) directed.filter { it.kind != PassageKind.Entrance || it === oneDoor } else directed
+    val passed = leavingBy(
+        if (oneDoor != null) directed.filter { it.kind != PassageKind.Entrance || it === oneDoor } else directed,
+        exit?.takeIf { inside && !endsInside },
+    )
     val entrances = passed.filter { it.kind == PassageKind.Entrance }.let { list ->
         // The labelled ones first, then the order on the way.
         list.sortedBy { if (it.label != null) 0 else 1 }.take(MAX_ENTRANCES).toSet()
@@ -177,7 +189,51 @@ fun walkDetails(
     }
     val climbOf = climbs(startLevel, steps, endLevel)
     val climbed = kept.mapIndexed { index, p -> if (p.kind == PassageKind.Entrance) p else p.copy(climb = climbOf[index]) }
-    return WalkDetails(positions, target, start, climbed, inside, endsInside)
+    return WalkDetails(positions, target, start, withClimbToExit(climbed, exit?.takeIf { inside && !endsInside }), inside, endsInside)
+}
+
+/**
+ * The [passages] of a walk that only leaves its station, by the access point [exit] (null: as
+ * they are): that access is the one way out, named and drawn, and no other door; what lies on
+ * the way after it is in the street, not used (an elevator beside the stairs the walk came up).
+ * Lifts and escalators before it (inside) stay.
+ */
+internal fun leavingBy(passages: List<WalkPassage>, exit: WalkTarget?): List<WalkPassage> {
+    if (exit == null) return passages
+    val kind = if (exit.kind == WalkTargetKind.Elevator) PassageKind.Lift else PassageKind.Entrance
+    val used = passages.filter { it.kind == kind }.minByOrNull { metersBetween(it.position, exit.position) }
+        ?.takeIf { metersBetween(it.position, exit.position) <= 12.0 }
+        ?: return passages.filter { it.kind != PassageKind.Entrance || metersBetween(it.position, exit.position) <= 12.0 }
+    return passages.filter { p ->
+        when {
+            p === used -> true
+            p.kind == PassageKind.Entrance -> false
+            else -> p.along < used.along
+        }
+    }
+}
+
+/**
+ * [passages] with the way up (or down) to the exit [exit] it leaves by, as chosen with it
+ * ([WalkTarget.climbBy]): the stairs or the escalator right before the exit door, where nothing
+ * on the way before it says how the walk gets there; the elevator it leaves by goes the way
+ * the exit says. Unchanged without an exit or where its way up is not known.
+ */
+internal fun withClimbToExit(passages: List<WalkPassage>, exit: WalkTarget?): List<WalkPassage> {
+    val by = exit?.climbBy ?: return passages
+    if (exit.kind == WalkTargetKind.Elevator) {
+        if (exit.climb == 0) return passages
+        return passages.map { p ->
+            if (p.kind == PassageKind.Lift && metersBetween(p.position, exit.position) <= 12.0) p.copy(climb = exit.climb) else p
+        }
+    }
+    val door = passages.indexOfFirst { it.kind == PassageKind.Entrance && metersBetween(it.position, exit.position) <= 12.0 }
+    if (door < 0) return passages
+    // An escalator or lift on the way before the door is the way up already.
+    if (passages.subList(0, door).any { it.kind != PassageKind.Entrance }) return passages
+    val at = passages[door]
+    val climb = WalkPassage(by, null, at.latitude, at.longitude, at.along, climb = exit.climb)
+    return passages.subList(0, door) + climb + passages.subList(door, passages.size)
 }
 
 /**

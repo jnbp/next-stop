@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Developer options in Settings > Advanced (see ui/DeveloperOptions.kt) and the bug report (DiagCapture). -->
+    <plurals name="developer_taps_left">
+        <item quantity="one">%d more tap to the developer options</item>
+        <item quantity="other">%d more taps to the developer options</item>
+    </plurals>
+    <string name="developer_already">Developer options are already on</string>
+    <string name="developer_verbose">Detailed recording</string>
+    <string name="developer_verbose_text">Also records routing requests with source, HTTP status and duration, back gestures, the return to the app and vehicle counts. Switches itself off after 24 h.</string>
+    <string name="developer_verbose_until">On until %1$s. Also records routing requests, back gestures, the return to the app and vehicle counts.</string>
+    <string name="developer_report">Share bug report</string>
+    <string name="developer_report_text">The last events of the app (also from before), app and device, settings without places. Best right after something went wrong.</string>
+    <string name="developer_report_note">What happened?</string>
+    <string name="developer_report_summary">%1$d log events since %2$s, app and device, settings, %3$s. Positions are rounded to about 1 km; keys, your places and names are removed. Nothing is sent until you pick an app.</string>
+    <string name="developer_report_with_crash">the last crash</string>
+    <string name="developer_report_no_crash">no crash</string>
+    <string name="developer_report_share">Share</string>
+    <string name="developer_report_subject">Next Stop bug report %1$s</string>
+    <string name="developer_report_preparing">Preparing…</string>
+    <string name="developer_crash">Last crash: %1$s</string>
+    <string name="developer_crash_text">The stack trace and the log lines before it. It is also part of the bug report.</string>
+    <string name="developer_crash_view">View</string>
+    <string name="developer_crash_share">Share</string>
+    <string name="developer_crash_delete">Delete</string>
+    <string name="developer_crash_subject">Next Stop crash %1$s</string>
+    <string name="developer_close">Close</string>
+    <string name="developer_clear_logs">Clear logs</string>
+    <string name="developer_clear_logs_text">%1$d events kept, also from earlier sessions.</string>
+    <string name="developer_logs_cleared">Logs cleared</string>
+    <string name="developer_perf_lab">Open performance lab</string>
+    <string name="developer_perf_lab_text">Frame counter and switches for costly parts, as a panel over the app.</string>
+    <string name="developer_hide">Hide developer options</string>
+    <string name="developer_hide_text">Tap the version below 7 times to show them again.</string>
+</resources>

@@ -12,12 +12,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.em
 import kotlinx.coroutines.delay
+import io.github.jnbp.nextstop.wear.data.hoursAndMinutes
 import io.github.jnbp.nextstop.wear.data.millisToNextMinuteChange
 import io.github.jnbp.nextstop.wear.data.stopNameParts
 import androidx.compose.foundation.layout.Box
@@ -55,38 +57,111 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import io.github.jnbp.nextstop.wear.R
 import io.github.jnbp.nextstop.wear.data.Departure
+import io.github.jnbp.nextstop.wear.data.badgeLine
+import io.github.jnbp.nextstop.wear.data.TravelMode
+import io.github.jnbp.nextstop.wear.data.modeHint
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.Dp
 import io.github.jnbp.nextstop.wear.data.lineArgb
 import io.github.jnbp.nextstop.wear.data.minutesUntil
+import io.github.jnbp.nextstop.wear.data.DelayTone
+import io.github.jnbp.nextstop.wear.data.MinutesTone
+import io.github.jnbp.nextstop.wear.data.delayTone
+import io.github.jnbp.nextstop.wear.data.minutesTone
 import io.github.jnbp.nextstop.wear.data.onLineArgb
 
 /** The badge of a line in its colour, as on the phone; [color] the colour the phone sent for the ride. */
 @Composable
 fun LineBadge(line: String?, product: String, modifier: Modifier = Modifier, color: Long? = null) {
     val argb = lineArgb(line, product, color)
+    val mode = modeHint(line, product)
+    val spoken = mode?.let { listOfNotNull(modeWord(it), line).joinToString(" ") }
     Box(
         modifier = modifier
-            .widthIn(min = 30.dp)
+            .then(if (spoken != null) Modifier.clearAndSetSemantics { contentDescription = spoken } else Modifier)
+            // Never wider than a short name: a long one is shortened (see badgeLine), not cut off.
+            .widthIn(min = 30.dp, max = if (mode != null) 104.dp else 92.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(Color(argb))
             .padding(horizontal = 5.dp, vertical = 1.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = line ?: "?",
-            color = Color(onLineArgb(argb)),
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
+        val ink = Color(onLineArgb(argb))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            // The kind of vehicle where the name does not tell it (see modeHint).
+            if (mode != null) ModeMark(mode, ink, 10.dp)
+            Text(
+                text = badgeLine(line) ?: "?",
+                color = ink,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
-/** "now" or "5 min" until [time]. */
+/** The word for [mode], read out before the name of a line whose badge shows its icon. */
+@Composable
+fun modeWord(mode: TravelMode): String =
+    stringResource(if (mode == TravelMode.Bus) R.string.mode_bus else R.string.mode_train)
+
+/** A small icon of a bus or a train in [color], as on the phone's badges (twin of its ModeMark). */
+@Composable
+fun ModeMark(mode: TravelMode, color: Color, size: Dp, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val line = w * 0.11f
+        val stroke = Stroke(width = line, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        when (mode) {
+            TravelMode.Bus -> {
+                drawRoundRect(color, Offset(w * 0.16f, w * 0.08f), Size(w * 0.68f, w * 0.7f), CornerRadius(w * 0.12f), style = stroke)
+                drawLine(color, Offset(w * 0.16f, w * 0.44f), Offset(w * 0.84f, w * 0.44f), strokeWidth = line)
+                drawCircle(color, radius = w * 0.09f, center = Offset(w * 0.33f, w * 0.86f))
+                drawCircle(color, radius = w * 0.09f, center = Offset(w * 0.67f, w * 0.86f))
+            }
+            TravelMode.Train -> {
+                drawRoundRect(color, Offset(w * 0.2f, w * 0.06f), Size(w * 0.6f, w * 0.7f), CornerRadius(w * 0.22f), style = stroke)
+                drawLine(color, Offset(w * 0.2f, w * 0.38f), Offset(w * 0.8f, w * 0.38f), strokeWidth = line)
+                drawCircle(color, radius = w * 0.06f, center = Offset(w * 0.36f, w * 0.57f))
+                drawCircle(color, radius = w * 0.06f, center = Offset(w * 0.64f, w * 0.57f))
+                drawLine(color, Offset(w * 0.34f, w * 0.8f), Offset(w * 0.22f, w * 0.96f), strokeWidth = line, cap = StrokeCap.Round)
+                drawLine(color, Offset(w * 0.66f, w * 0.8f), Offset(w * 0.78f, w * 0.96f), strokeWidth = line, cap = StrokeCap.Round)
+            }
+        }
+    }
+}
+
+/** "now", "5 min", or from an hour on "2 h 23 min" until [time] (see [hoursAndMinutes]). */
 @Composable
 fun minutesLabel(time: Long?): String {
     if (time == null) return "–"
     val minutes = minutesUntil(time)
-    return if (minutes <= 0) stringResource(R.string.now) else stringResource(R.string.in_min, minutes.toInt())
+    if (minutes <= 0) return stringResource(R.string.now)
+    val (hours, rest) = hoursAndMinutes(minutes)
+    return when {
+        hours == null -> stringResource(R.string.in_min, minutes.toInt())
+        rest == null -> stringResource(R.string.in_whole_hours, hours.toInt())
+        else -> stringResource(R.string.in_hours, hours.toInt(), rest.toInt())
+    }
+}
+
+/** "5 min", or from an hour on "2 h 23 min", for [minutes], outside of the interface (a tile). */
+fun spanText(context: Context, minutes: Long): String {
+    val (hours, rest) = hoursAndMinutes(minutes)
+    return when {
+        hours == null -> context.getString(R.string.in_min, (rest ?: 0L).toInt())
+        rest == null -> context.getString(R.string.in_whole_hours, hours.toInt())
+        else -> context.getString(R.string.in_hours, hours.toInt(), rest.toInt())
+    }
 }
 
 /** "now" or "5'" until [time] at [now]: the big minutes of the start page and the board (see [DepartureRow]). */
@@ -118,12 +193,6 @@ fun lastLoadedText(time: Long): String {
     return stringResource(R.string.last_loaded, ageText(context, time))
 }
 
-// From this delay on (minutes) the minutes of a run are amber, as on the phone.
-private const val DELAY_TINT_MINUTES = 3
-
-// The amber of delayed minutes.
-private val DELAY_AMBER = Color(0xFFFFB74D)
-
 // Extra room at both sides of a departure row, as a share of the screen width, on top of the
 // list's own padding (ScreenScaffoldDefaults.contentPadding): rows that scroll towards the top or
 // bottom of a round screen keep their minutes and badge inside the circle (4 dp at 192 dp).
@@ -135,7 +204,8 @@ private val MINUTES_MIN_WIDTH = 30.dp
 /**
  * One departure, with its minutes as a big bold number with an apostrophe ("5'", "now" at 0)
  * counted at [now] (the page's clock, see [rememberCountdownClock]), rolling as they count
- * down, amber from DELAY_TINT_MINUTES of delay. Compact (the start page): badge, direction in
+ * down, marked as on the phone (see DepartureTones: lime within three minutes, the delay
+ * beside them red or green). Compact (the start page): badge, direction in
  * one line, minutes. With [details] (the departure board) two lines: the badge with the
  * platform, the delay and "cancelled" beside it, the direction below in up to two lines, and
  * the minutes at the side over both, so long destinations wrap instead of being cut and the
@@ -148,10 +218,22 @@ fun DepartureRow(departure: Departure, now: Long, details: Boolean = false, modi
     val edge = (LocalConfiguration.current.screenWidthDp * ROW_EDGE_FRACTION).dp
     val delay = departure.delayMinutes ?: 0
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val minutesColor = when {
-        departure.cancelled -> if (details) muted else MaterialTheme.colorScheme.error
-        delay >= DELAY_TINT_MINUTES -> DELAY_AMBER
-        else -> MaterialTheme.colorScheme.onSurface
+    // Marked as on the phone (see DepartureTones): the minutes in lime from three minutes on,
+    // "now" included, late or not; the delay beside them red when late, green when early.
+    val minutes = departure.time?.let { minutesUntil(it, now) }
+    val minutesColor = when (minutesTone(minutes, departure.cancelled)) {
+        MinutesTone.Cancelled -> if (details) muted else MaterialTheme.colorScheme.error
+        MinutesTone.Gone -> muted
+        MinutesTone.Soon -> Brand.Lime
+        MinutesTone.Plain -> MaterialTheme.colorScheme.onSurface
+    }
+    // The delay ("+4", "-1") is never what gets cut off: the platform or the direction give way first.
+    val delayTone = if (departure.cancelled) null else delayTone(departure.delayMinutes != null, delay.toLong())
+    val delayText = delayTone?.let { stringResource(R.string.delay_plus, delay) }
+    val delayColor = when (delayTone) {
+        DelayTone.Late -> Brand.Late
+        DelayTone.Early -> Brand.Early
+        null -> muted
     }
     val struck = if (departure.cancelled) TextDecoration.LineThrough else null
     Row(
@@ -165,19 +247,27 @@ fun DepartureRow(departure: Departure, now: Long, details: Boolean = false, modi
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LineBadge(departure.line, departure.product)
-                    val notes = listOfNotNull(
-                        platformText(departure.platform),
-                        if (delay > 0 && !departure.cancelled) stringResource(R.string.delay_plus, delay) else null,
-                    )
-                    if (notes.isNotEmpty()) {
+                    val platform = platformText(departure.platform, departure.line)
+                    if (platform != null) {
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = notes.joinToString(" · "),
+                            text = platform,
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (delay >= DELAY_TINT_MINUTES && !departure.cancelled) DELAY_AMBER else muted,
+                            color = muted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                    if (delayText != null) {
+                        Spacer(Modifier.width(if (platform != null) 4.dp else 6.dp))
+                        Text(
+                            text = delayText,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = delayColor,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                     }
                     if (departure.cancelled) {
@@ -212,6 +302,18 @@ fun DepartureRow(departure: Departure, now: Long, details: Boolean = false, modi
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // A late or early run says by how much, as on the phone.
+            if (delayText != null) {
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = delayText,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = delayColor,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
         }
         Spacer(Modifier.width(6.dp))
         // The minutes roll as they count down (see WatchSwap).
@@ -251,7 +353,8 @@ private val HEADER_MIN_HEIGHT = 48.dp
  * The header of a stop's departures (the start page and the board): the stop's name as the
  * watch shows it (see stopNameParts: without the town it is used in) in up to two centred lines
  * that shrink a little before anything is cut, and below it in small type the part of the
- * station, then [detail] ("120 m · 5 min ago"). Kept clear of the round edge at the top. With
+ * station, then [detail] ("120 m · 5 min ago"); above it in small type [kicker], what the page
+ * shows of the stop ("Departures"). Kept clear of the round edge at the top. With
  * [onClick] the whole header is a touch target; [description] is read out instead of the text.
  */
 @Composable
@@ -261,9 +364,13 @@ fun StopHeader(
     detail: String? = null,
     description: String? = null,
     onClick: (() -> Unit)? = null,
+    framed: Boolean = false,
+    kicker: String? = null,
 ) {
     val parts = stopNameParts(name)
-    val small = listOfNotNull(parts.part, detail?.takeIf { it.isNotBlank() }).joinToString(" · ").ifEmpty { null }
+    val plain = listOfNotNull(parts.part, detail?.takeIf { it.isNotBlank() }).joinToString(" · ").ifEmpty { null }
+    // A framed header shows that it can be pressed: a tinted ground and a chevron after its small line.
+    val small = if (framed && onClick != null) listOfNotNull(plain, "\u203A").joinToString(" ") else plain
     val edge = (LocalConfiguration.current.screenWidthDp * HEADER_EDGE_FRACTION).dp
     val titleStyle = MaterialTheme.typography.titleMedium
     val onSurface = MaterialTheme.colorScheme.onSurface
@@ -271,7 +378,9 @@ fun StopHeader(
         modifier = modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = HEADER_MIN_HEIGHT)
-            .then(if (onClick != null) Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.clip(RoundedCornerShape(50)) else Modifier)
+            .then(if (framed && onClick != null) Modifier.background(MaterialTheme.colorScheme.surfaceContainer) else Modifier)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = edge, vertical = 6.dp)
             .semantics(mergeDescendants = true) {
                 heading()
@@ -280,6 +389,17 @@ fun StopHeader(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        // What the page shows of the stop ("Departures"), small above its name.
+        if (kicker != null) {
+            Text(
+                text = kicker,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         BasicText(
             text = parts.title,
             style = titleStyle.merge(TextStyle(color = onSurface, textAlign = TextAlign.Center, lineHeight = 1.15.em)),

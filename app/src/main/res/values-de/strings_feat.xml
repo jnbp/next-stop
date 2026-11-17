@@ -126,6 +126,7 @@
     <!-- The map at the top of "My routes". -->
     <string name="ways_map_description">Karte deiner Orte; öffnet die Karte</string>
     <string name="ways_map_minutes">%1$d′</string>
+    <string name="ways_map_hours">%1$d Std %2$d′</string>
     <string name="ways_map_hint">Merke dir Orte, um sie hier zu sehen</string>
     <!-- Störungen auf den Hauptkarten. -->
     <string name="map_notices_title">Störungen auf der Karte</string>

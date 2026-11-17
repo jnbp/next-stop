@@ -98,7 +98,9 @@ data class ShortcutRules(
  * (with live times; its prognosis counts, see [Journey.plausible]), or null. Besides the
  * rules of [fasterOption] the way must be news since the choice ([known], see
  * [KnownWays.isNews]) unless the chosen journey can no longer be made as planned ahead of
- * [point] ([brokenAhead]), and follow [rules]. [startedAt] is when the trip was started.
+ * [point] ([brokenAhead]), and follow [rules]: it leaves [point] no earlier than [current] does
+ * ([leavesNoEarlier]) and every change from [point] on fits the level ([reachableAt]).
+ * [startedAt] is when the trip was started.
  */
 fun shortcutOffer(
     current: Journey,
@@ -115,7 +117,10 @@ fun shortcutOffer(
     val broken = brokenAhead(shown, point)
     val ahead = boardingsAhead(shown.legs.drop(point.kept.size))
     val allowed = options.filter { option ->
-        (rules.everyMinute || withinLevel(option, level)) &&
+        // Never a way that leaves before the chosen one, by the live or by the planned time;
+        // every change from where the traveller is on as the level allows (the change at the
+        // point itself included), and never one that cannot be made at all.
+        leavesNoEarlier(current, point, option) && reachableAt(point, option, level) &&
             (rules.everyMinute || !rules.sameComfort || optionBoardings(point, option) <= ahead)
     }
     val quiet = !rules.everyMinute && rules.quietStart &&

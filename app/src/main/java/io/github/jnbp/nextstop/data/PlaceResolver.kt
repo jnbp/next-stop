@@ -19,7 +19,9 @@ private val POSTCODE = Regex("^\\d{5}\\b")
  * in turn: the text without the country, the part before the first comma (the venue), and
  * "street, postcode town". The first result whose position is plausible is taken: it has a
  * position, a provider in use covers it, and where the text names a street it lies near
- * that street address. Without such a result the street address itself is taken. Null when
+ * that street address. For a house address (a street with a house number) a stop is never
+ * taken for it, only an address at that number or, failing that, the best address in that
+ * street. Without such a result the street address itself is taken. Null when
  * nothing was found; a failed request counts as nothing found for that form.
  */
 suspend fun TransitSource.resolvePlace(text: String): Stop? {
@@ -45,16 +47,36 @@ suspend fun TransitSource.resolvePlace(text: String): Stop? {
         }
     }
 
+    // A street with a house number before the postcode makes the text a house address: then
+    // only an address (or a point) at that street and number stands for it, never a stop
+    // named after the street (see pickAddress); the venue the text names first may be a
+    // point of interest near that address, but never a stop.
+    val streetPart = if (postcodeAt >= 1) withoutCountry[postcodeAt - 1] else null
+    val houseAddress = streetPart?.let { houseNumberOf(it) } != null
+    val code = if (postcodeAt >= 0) POSTCODE.find(withoutCountry[postcodeAt])?.value else null
+    val town = if (postcodeAt >= 0) withoutCountry[postcodeAt].replace(POSTCODE, "").trim().ifEmpty { null } else null
+
     // The street address anchors the others, when the text names one apart from a venue.
-    val anchor = street?.takeIf { it != full || venue != null }?.let { form ->
+    val anchor = street?.takeIf { houseAddress || it != full || venue != null }?.let { form ->
         val found = search(form)
-        found.firstOrNull { it.kind == PlaceKind.Address } ?: found.firstOrNull()
+        if (houseAddress) {
+            pickAddress(found, streetPart, code, town, exact = false)
+        } else {
+            found.firstOrNull { it.kind == PlaceKind.Address } ?: found.firstOrNull()
+        }
     }
     val forms = listOfNotNull(full, venue, street).distinct()
     for (form in forms) {
         val found = search(form)
+        if (houseAddress && form != venue) {
+            val exact = pickAddress(found, streetPart, code, town, exact = true)
+            if (exact != null) return exact
+            continue
+        }
         val pick = found.firstOrNull { place ->
             val position = place.position ?: return@firstOrNull false
+            // A stop named like the venue does not stand for a house address either.
+            if (houseAddress && place.kind == PlaceKind.Stop) return@firstOrNull false
             val near = anchor?.position ?: return@firstOrNull true
             groundMeters(position, near) <= ADDRESS_MATCH_METERS
         }

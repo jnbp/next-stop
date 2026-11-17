@@ -77,4 +77,15 @@ class LiveDotTest {
         assertFalse(vehicleHintWanted(hintOn = true, vehiclesShown = false, vehicleCount = 3))
         assertFalse(vehicleHintWanted(hintOn = true, vehiclesShown = true, vehicleCount = 0))
     }
+
+    @Test
+    fun theHintChangesSteadily() {
+        // Shows after a short moment, goes only after a longer one (a reload of the vehicles is quicker).
+        assertEquals(HINT_SHOW_AFTER_MILLIS, hintSwitchDelayMillis(wanted = true, sinceChangeMillis = 60_000L))
+        assertEquals(HINT_HIDE_AFTER_MILLIS, hintSwitchDelayMillis(wanted = false, sinceChangeMillis = 60_000L))
+        assertTrue(HINT_HIDE_AFTER_MILLIS > HINT_SHOW_AFTER_MILLIS)
+        // Never changes again within two seconds of the last change.
+        assertEquals(1_500L, hintSwitchDelayMillis(wanted = true, sinceChangeMillis = 500L))
+        assertTrue(hintSwitchDelayMillis(wanted = false, sinceChangeMillis = 0L) >= HINT_STEADY_MILLIS)
+    }
 }

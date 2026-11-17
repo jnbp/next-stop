@@ -1,7 +1,6 @@
 package io.github.jnbp.nextstop.data
 
 import android.os.SystemClock
-import android.util.Log
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -266,13 +265,13 @@ object FootPaths {
             val answer = try {
                 request(way)
             } catch (e: IOException) {
-                Log.w(LOG_TAG, "foot way: ${e.javaClass.simpleName}")
+                DiagLog.w(LOG_TAG) { "foot way: ${e.javaClass.simpleName}" }
                 FootAnswer.Failed
             } catch (e: org.json.JSONException) {
                 FootAnswer.NoWay
             } catch (e: RuntimeException) {
                 // Never let one odd answer stop the worker (and with it every later way).
-                Log.w(LOG_TAG, "foot way", e)
+                DiagLog.w(LOG_TAG, e) { "foot way" }
                 FootAnswer.NoWay
             }
             when (answer) {
@@ -304,7 +303,7 @@ object FootPaths {
             val code = connection.responseCode
             // Busy or broken for a moment: worth another try. Any other refusal stays one.
             if (code == 429 || code >= 500) {
-                Log.w(LOG_TAG, "foot way: HTTP $code")
+                DiagLog.w(LOG_TAG) { "foot way: HTTP $code" }
                 return FootAnswer.Failed
             }
             if (code != HttpURLConnection.HTTP_OK) return FootAnswer.NoWay

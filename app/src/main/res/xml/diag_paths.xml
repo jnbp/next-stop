@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The bug report of the developer options, shared through DiagCapture (see ui/DiagCapture.kt). -->
+<paths>
+    <cache-path name="report" path="diag/report/" />
+</paths>

@@ -9,7 +9,9 @@ import io.github.jnbp.nextstop.ui.theme.ColorChoice
 import io.github.jnbp.nextstop.ui.theme.DarkChoice
 import io.github.jnbp.nextstop.ui.theme.MapStyleChoice
 import io.github.jnbp.nextstop.ui.theme.NotificationLook
+import io.github.jnbp.nextstop.ui.theme.MapVehiclesChoice
 import io.github.jnbp.nextstop.ui.theme.VehicleDirectionChoice
+import io.github.jnbp.nextstop.ui.theme.mapVehiclesChoice
 import io.github.jnbp.nextstop.widget.WidgetColorChoice
 
 /**
@@ -19,6 +21,32 @@ import io.github.jnbp.nextstop.widget.WidgetColorChoice
  * - [RealtimeOnly]: the expected time alone, red when late and green when on time.
  */
 enum class DelayDisplay { RealtimeAndDelay, PlannedAndDelay, RealtimeOnly }
+
+/**
+ * Where the connections chart shows the total time of each journey, door to door: nowhere,
+ * right above or below its column (moving with it), or on one line pinned to the top or the
+ * bottom edge of the chart, where all of them can be compared (moving sideways with their columns).
+ */
+enum class ChartTotalTime {
+    Off, Above, Below, PinnedTop, PinnedBottom;
+
+    companion object {
+        /** The setting stored as [name]: "Top" and "Bottom" of before are [Above] and [Below]; [Below] unless one is stored. */
+        fun fromStored(name: String?): ChartTotalTime = when (name) {
+            "Top" -> Above
+            "Bottom" -> Below
+            else -> entries.firstOrNull { it.name == name } ?: Below
+        }
+    }
+}
+
+/**
+ * How the connections chart draws rides too short for a block of their own, always where their
+ * times say: [Separate], each as its own block, smaller step by step (without the minutes of the
+ * change, without its name, at last a thin bar); [Combine], a run of them as one block with the
+ * colours and names of their lines.
+ */
+enum class ChartShortLegs { Separate, Combine }
 
 /** Small settings and saved places, kept on the device only. */
 class AppPrefs(context: Context) {
@@ -61,6 +89,18 @@ class AppPrefs(context: Context) {
     var fitLine: Boolean
         get() = prefs.getBoolean(KEY_FIT_LINE, true)
         set(value) = prefs.edit().putBoolean(KEY_FIT_LINE, value).apply()
+
+    /**
+     * Which live vehicles the map shows: all, only zoomed in close (the default), or none (no
+     * vehicles asked for or drawn, which spares less powerful phones). Taken over from the
+     * old switch (on: all, off: none) where it was stored, until a level is chosen.
+     */
+    var mapVehicles: MapVehiclesChoice
+        get() = mapVehiclesChoice(
+            prefs.getString(KEY_MAP_VEHICLES_LEVEL, null),
+            if (prefs.contains(KEY_MAP_VEHICLES)) prefs.getBoolean(KEY_MAP_VEHICLES, true) else null,
+        )
+        set(value) = prefs.edit().putString(KEY_MAP_VEHICLES_LEVEL, value.name).remove(KEY_MAP_VEHICLES).apply()
 
     /** True: the start page shows the vehicles on the road around the user. */
     var startVehicles: Boolean
@@ -110,10 +150,14 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_START_DEPARTURES, false)
         set(value) = prefs.edit().putBoolean(KEY_START_DEPARTURES, value).apply()
 
-    /** How far the departures of "all stops nearby" reach, in metres: 300, 500 or 800. */
+    /**
+     * How far the departures of "all stops nearby" reach, in metres: [NEARBY_RADIUS_MIN] to
+     * [NEARBY_RADIUS_MAX] in steps of [NEARBY_RADIUS_STEP] (see [nearbyRadiusOf]). A choice of
+     * the former 300, 500 or 800 m stays as it was.
+     */
     var nearbyRadius: Int
-        get() = prefs.getInt(KEY_NEARBY_RADIUS, 500).takeIf { it in NEARBY_RADII } ?: 500
-        set(value) = prefs.edit().putInt(KEY_NEARBY_RADIUS, value).apply()
+        get() = nearbyRadiusOf(prefs.getInt(KEY_NEARBY_RADIUS, NEARBY_RADIUS_DEFAULT))
+        set(value) = prefs.edit().putInt(KEY_NEARBY_RADIUS, nearbyRadiusOf(value)).apply()
 
     /** True: the departures tab lists the departures of all stops nearby instead of one stop. */
     var nearbyDepartures: Boolean
@@ -195,16 +239,27 @@ class AppPrefs(context: Context) {
 
     /**
      * True: the connections show the chart or the list at full height and a picked journey opens
-     * on a page of its own; false: overview and detail share the screen.
+     * on a page of its own; false: overview and detail share the screen. Full screen is the
+     * default; a choice made in the setup or the settings is stored and kept.
      */
     var connectionsFull: Boolean
-        get() = prefs.getBoolean(KEY_CONNECTIONS_FULL, false)
+        get() = prefs.getBoolean(KEY_CONNECTIONS_FULL, true)
         set(value) = prefs.edit().putBoolean(KEY_CONNECTIONS_FULL, value).apply()
 
     /** True: the chart names the stop of every change between two rides; false: only the minutes. */
     var chartChangeStops: Boolean
         get() = prefs.getBoolean(KEY_CHART_CHANGE_STOPS, false)
         set(value) = prefs.edit().putBoolean(KEY_CHART_CHANGE_STOPS, value).apply()
+
+    /** Where the chart shows the total time of each journey (see ChartTotalTime); below the arrival time unless changed. */
+    var chartTotalTime: ChartTotalTime
+        get() = ChartTotalTime.fromStored(prefs.getString(KEY_CHART_TOTAL_TIME, null))
+        set(value) = prefs.edit().putString(KEY_CHART_TOTAL_TIME, value.name).apply()
+
+    /** How the chart draws short rides (see ChartShortLegs); each by itself unless changed. */
+    var chartShortLegs: ChartShortLegs
+        get() = ChartShortLegs.entries.firstOrNull { it.name == prefs.getString(KEY_CHART_SHORT_LEGS, null) } ?: ChartShortLegs.Separate
+        set(value) = prefs.edit().putString(KEY_CHART_SHORT_LEGS, value.name).apply()
 
     /** True: the connections are shown as a list; false: as the chart. */
     var connectionsList: Boolean
@@ -461,17 +516,61 @@ class AppPrefs(context: Context) {
                 bikeCombo = prefs.getBoolean(KEY_BIKE_COMBO, false),
             )
         }
-        set(value) = prefs.edit()
-            .putString(KEY_COMFORT, value.comfort.name)
-            .putString(KEY_PRODUCTS, value.products.joinToString(","))
-            .putBoolean(KEY_PRODUCTS_SPLIT, true)
-            .putBoolean(KEY_SLOWER, value.slower)
-            .remove(KEY_WALKING)
-            .putString(KEY_ACCESSIBILITY, value.accessibility.name)
-            // The bicycle options as the defaults of the next searches ([bikeDefault], [bikeComboDefault]).
-            .putBoolean(KEY_BIKE, value.bike)
-            .putBoolean(KEY_BIKE_COMBO, value.bikeCombo)
-            .apply()
+        set(value) {
+            prefs.edit()
+                .putString(KEY_COMFORT, value.comfort.name)
+                .putString(KEY_PRODUCTS, value.products.joinToString(","))
+                .putBoolean(KEY_PRODUCTS_SPLIT, true)
+                .putBoolean(KEY_SLOWER, value.slower)
+                .remove(KEY_WALKING)
+                .putString(KEY_ACCESSIBILITY, value.accessibility.name)
+                // The bicycle options as the defaults of the next searches ([bikeDefault], [bikeComboDefault]).
+                .putBoolean(KEY_BIKE, value.bike)
+                .putBoolean(KEY_BIKE_COMBO, value.bikeCombo)
+                .apply()
+            applyWalkSettings(value)
+        }
+
+    /**
+     * The tuning of the transfer rating (buffers for Normal and Relaxed, the change buffer);
+     * the defaults of [TransferTuning] until set. Setting it also makes it the
+     * one every rating uses (see [applyTransferTuning]).
+     */
+    var transferTuning: TransferTuning
+        get() = TransferTuning(
+            normalSpare = prefs.getLong(KEY_NORMAL_SPARE, NORMAL_SPARE),
+            relaxedSpare = prefs.getLong(KEY_RELAXED_SPARE, RELAXED_SPARE),
+            changeBufferSeconds = prefs.getLong(KEY_CHANGE_BUFFER, EXACT_WALK_EXTRA_SECONDS),
+        ).bounded()
+        set(value) {
+            val bounded = value.bounded()
+            prefs.edit()
+                .putLong(KEY_NORMAL_SPARE, bounded.normalSpare)
+                .putLong(KEY_RELAXED_SPARE, bounded.relaxedSpare)
+                .putLong(KEY_CHANGE_BUFFER, bounded.changeBufferSeconds)
+                .apply()
+            setTransferTuning(bounded)
+        }
+
+    /** Makes the stored [transferTuning] the one every rating uses; once when the app starts. */
+    fun applyTransferTuning() = setTransferTuning(transferTuning)
+
+    /**
+     * Makes everything stored that the rating of changes and the walks depend on the one in use:
+     * the [transferTuning], "Langsamer unterwegs" ([walkSpeedFactor]) and step-free walks
+     * ([stepFreeWalks]). Called once when the process starts (NextStopApp), so a widget, the
+     * trip service or the bridge to the watch rate a change like the app does even when the
+     * app itself was never opened; the setters keep them in step afterwards.
+     */
+    fun applyRatingSettings() {
+        applyTransferTuning()
+        applyWalkSettings(searchOptions)
+    }
+
+    private fun applyWalkSettings(options: SearchOptions) {
+        walkSpeedFactor = walkFactor(options.slower)
+        stepFreeWalks = options.accessibility != Accessibility.None
+    }
 
     fun loadPlaces(key: String): List<Stop> {
         val text = prefs.getString(key, null) ?: return emptyList()
@@ -742,10 +841,14 @@ class AppPrefs(context: Context) {
         private const val KEY_WALK_MAPS_OPEN = "walkMapsOpen"
         private const val KEY_CONNECTIONS_FULL = "connectionsFull"
         private const val KEY_CHART_CHANGE_STOPS = "chartChangeStops"
+        private const val KEY_CHART_TOTAL_TIME = "chartTotalTime"
+        private const val KEY_CHART_SHORT_LEGS = "chartShortLegs"
         private const val KEY_DELAY_SEPARATE = "delaySeparate"
         private const val KEY_DELAY_DISPLAY = "delayDisplay"
         private const val KEY_FIT_LINE = "fitLine"
         private const val KEY_START_VEHICLES = "startVehicles"
+        private const val KEY_MAP_VEHICLES = "mapVehicles"
+        private const val KEY_MAP_VEHICLES_LEVEL = "mapVehiclesLevel"
         private const val KEY_START_MAP = "startMap"
         private const val KEY_STATION_DETAILS = "stationDetails"
         private const val KEY_ENTRANCE_MODE = "entranceMode"
@@ -766,7 +869,6 @@ class AppPrefs(context: Context) {
         private const val KEY_LEAVE_ORDER = "leaveOrder"
 
         /** The reaches of "all stops nearby" the settings offer, in metres. */
-        val NEARBY_RADII = listOf(300, 500, 800)
         private const val KEY_START_SHEET_STAGE = "startSheetStage"
         private const val KEY_COMFORT = "transferComfort"
         private const val KEY_VERY_RISKY_HINT = "veryRiskyHintSeen"
@@ -782,6 +884,9 @@ class AppPrefs(context: Context) {
         private const val KEY_PRODUCTS = "products"
         private const val KEY_WALKING = "walkingSpeed"
         private const val KEY_SLOWER = "slowerWalking"
+        private const val KEY_NORMAL_SPARE = "transferNormalSpare"
+        private const val KEY_RELAXED_SPARE = "transferRelaxedSpare"
+        private const val KEY_CHANGE_BUFFER = "transferChangeBufferSeconds"
         private const val KEY_ACCESSIBILITY = "accessibility"
         private const val KEY_LOCAL_ONLY = "local_only"
         private const val KEY_BIKE = "bike"

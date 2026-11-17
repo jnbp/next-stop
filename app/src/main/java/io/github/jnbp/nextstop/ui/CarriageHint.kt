@@ -1,7 +1,6 @@
 package io.github.jnbp.nextstop.ui
 
 import android.content.Context
-import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.jnbp.nextstop.data.DiagLog
 import kotlin.math.abs
 import kotlin.math.hypot
 import io.github.jnbp.nextstop.R
@@ -169,17 +169,16 @@ fun boardingPositionOf(
     val query = changeQuery(arriving, next, arrivingStops, nextStops, arrivingBeyond, nextBefore)
     if (query != null) {
         ChangePositions.find(query)?.let { record ->
-            Log.d(LOG_TAG, "boarding ${arriving.line} -> ${next.line}: dataset record")
+            DiagLog.d(LOG_TAG) { "boarding ${arriving.line} -> ${next.line}: dataset record" }
             return record.checkedFor(arriving, next)
         }
     }
     val estimate = geometryPosition(arriving, next, arrivingStops, nextStops)
-    Log.d(
-        LOG_TAG,
+    DiagLog.d(LOG_TAG) {
         "boarding ${arriving.line} -> ${next.line}: " +
             (if (query == null) "no dataset query" else "no dataset record") +
-            ", geometry ${if (estimate == null) "none" else "part ${estimate.part}"}",
-    )
+            ", geometry ${if (estimate == null) "none" else "part ${estimate.part}"}"
+    }
     return estimate
 }
 
@@ -200,7 +199,7 @@ fun geometryPosition(
     val byPlatform = try {
         platformPosition(arriving, next, arrivingStops)
     } catch (e: RuntimeException) {
-        Log.w(LOG_TAG, "platform geometry", e)
+        DiagLog.w(LOG_TAG, e) { "platform geometry" }
         null
     }
     if (byPlatform != null) return estimatedPosition(byPlatform.part)
@@ -208,7 +207,7 @@ fun geometryPosition(
     val change = arriving.toPlace?.position ?: arrivingStops.lastOrNull()?.place?.position ?: arriving.path.lastOrNull()
     val departure = next.fromPlace?.position ?: nextStops.firstOrNull()?.place?.position ?: next.path.firstOrNull()
     if (change == null || departure == null) {
-        Log.d(LOG_TAG, "geometry: no position (change ${change != null}, departure ${departure != null})")
+        DiagLog.d(LOG_TAG) { "geometry: no position (change ${change != null}, departure ${departure != null})" }
         return null
     }
     // The direction of travel: along the way of the ride, else from the stop before, else from boarding.
@@ -218,7 +217,7 @@ fun geometryPosition(
     }
     val previous = fromPath ?: fromStop ?: arriving.fromPlace?.position
     if (previous == null) {
-        Log.d(LOG_TAG, "geometry: no direction of travel")
+        DiagLog.d(LOG_TAG) { "geometry: no direction of travel" }
         return null
     }
     val source = when (previous) {
@@ -227,7 +226,7 @@ fun geometryPosition(
         else -> "boarding stop"
     }
     val decision = BoardingGeometry.estimate(previous, change, departure, arriving.product)
-    Log.d(LOG_TAG, "geometry by $source: ${decision.reason}")
+    DiagLog.d(LOG_TAG) { "geometry by $source: ${decision.reason}" }
     val estimate = decision.estimate ?: return null
     return estimatedPosition(estimate.part)
 }
@@ -283,7 +282,7 @@ private fun platformEstimateOf(
         else -> "boarding stop"
     }
     val decision = BoardingGeometry.platformEstimate(platform.a, platform.b, previous, exit, arriving.product)
-    Log.d(LOG_TAG, "platform geometry by $source: ${decision.reason}")
+    DiagLog.d(LOG_TAG) { "platform geometry by $source: ${decision.reason}" }
     return decision.estimate
 }
 

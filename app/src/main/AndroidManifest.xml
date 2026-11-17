@@ -14,6 +14,7 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
 
     <application
+        android:name=".NextStopApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
@@ -224,6 +225,16 @@
         <receiver
             android:name=".widget.WidgetTickReceiver"
             android:exported="false" />
+        <!-- Hands the bug report of the developer options to the app it is shared with (see ui/DiagCapture.kt). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.diag"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/diag_paths" />
+        </provider>
     </application>
 
 </manifest>

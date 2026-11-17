@@ -23,12 +23,14 @@ class JourneySelectionTest {
     private val b = stop("3")
 
     private val relaxed = Journey(listOf(ride(a, hub, 0, 10), ride(hub, b, 20, 30)), foundLevel = TransferComfort.Normal)
-    private val normal = Journey(listOf(ride(a, hub, 1, 11), ride(hub, b, 17, 30)), foundLevel = TransferComfort.Normal)
-    private val risky = Journey(listOf(ride(a, hub, 2, 12), ride(hub, b, 18, 30)), foundLevel = TransferComfort.Risky)
+    private val normal = Journey(listOf(ride(a, hub, 1, 11), ride(hub, b, 17, 31)), foundLevel = TransferComfort.Normal)
+    // 3 minutes where the change needs 3: knapp by the change itself (not by the search that found it).
+    private val risky = Journey(listOf(ride(a, hub, 2, 12), ride(hub, b, 15, 32, trip = "t15r")), foundLevel = TransferComfort.Risky)
     // 2 minutes by the live times where the change needs 3: a sprint.
-    private val veryRisky = Journey(listOf(ride(a, hub, 3, 13), ride(hub, b, 15, 30, plannedLeaves = 12)), foundLevel = TransferComfort.Normal)
-    private val direct = Journey(listOf(ride(a, b, 4, 30)))
-    private val stayOnBoard = Journey(listOf(ride(a, hub, 5, 15, trip = "x"), ride(hub, b, 15, 30, trip = "x")))
+    private val veryRisky = Journey(listOf(ride(a, hub, 3, 13), ride(hub, b, 15, 33, plannedLeaves = 12)), foundLevel = TransferComfort.Normal)
+    private val direct = Journey(listOf(ride(a, b, 4, 34)))
+    private val stayOnBoard = Journey(listOf(ride(a, hub, 5, 15, trip = "x"), ride(hub, b, 15, 35, trip = "x")))
+    // Every journey arrives at another time: none makes another pointless (see withoutDominated).
     private val all = listOf(relaxed, normal, risky, veryRisky, direct, stayOnBoard)
 
     @Test
@@ -53,6 +55,17 @@ class JourneySelectionTest {
     fun everyThresholdIsAdditive() {
         assertEquals(listOf(relaxed, direct, stayOnBoard), journeySelection(all, TransferComfort.Relaxed).shown)
         assertEquals(listOf(relaxed, normal, risky, direct, stayOnBoard), journeySelection(all, TransferComfort.Risky).shown)
+        assertEquals(all, journeySelection(all, TransferComfort.VeryRisky).shown)
+    }
+
+    @Test
+    fun aTighterTwinIsNoColumnOfItsOwn() {
+        // The same U1 and change stop, the second ride a minute later on another trip: more room, same arrival.
+        // (The fixture's own journeys arrive at different times, so none of them goes.)
+        val roomy = Journey(listOf(ride(a, hub, 1, 11), ride(hub, b, 18, 31, trip = "t18b")), foundLevel = TransferComfort.Normal)
+        val selection = journeySelection(listOf(normal, roomy), TransferComfort.VeryRisky)
+        assertEquals(listOf(roomy), selection.shown)
+        // Journeys of other times stay.
         assertEquals(all, journeySelection(all, TransferComfort.VeryRisky).shown)
     }
 }

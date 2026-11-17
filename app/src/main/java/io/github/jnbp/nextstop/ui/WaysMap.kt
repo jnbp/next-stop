@@ -191,9 +191,13 @@ fun WaysMapHeader(
             .border(1.dp, AppColors.GlassBorder, RoundedCornerShape(28.dp)),
     ) {
         val widthDp = maxWidth.value.toInt().coerceAtLeast(1)
-        // The circles of the radius are held whole as well.
-        val fitPoints = places.map { it.position } + notices.map { it.position } + listOfNotNull(here) +
-            areas.flatMap { areaBounds(it) }
+        // The home region only (see homeRegionAnchor): a place in another city stays out of the
+        // frame, its pin off the picture. The circles of the radius are held whole as well.
+        val anchor = homeRegionAnchor(places.map { it.position }, places.firstOrNull { it.glyph == Glyph.Home }?.position, here)
+        val fitPoints = places.map { it.position }.filter { inHomeRegion(it, anchor) } +
+            notices.map { it.position }.filter { inHomeRegion(it, anchor) } +
+            listOfNotNull(here).filter { inHomeRegion(it, anchor) } +
+            areas.filter { inHomeRegion(it.position, anchor) }.flatMap { areaBounds(it) }
         val shownPoints = fitPoints.ifEmpty { listOf(BERLIN_MIDDLE) }
         val camera = remember(shownPoints, widthDp) {
             waysCamera(shownPoints, widthDp.toDouble(), WAYS_MAP_HEIGHT.toDouble(), MAP_PAD)
@@ -357,7 +361,13 @@ fun WaysMapHeader(
                         contentAlignment = Alignment.TopCenter,
                     ) {
                         Text(
-                            text = stringResource(R.string.ways_map_minutes, minutes),
+                            text = durationSpan(minutes.toLong()).let { (hours, rest) ->
+                                when {
+                                    hours == null -> stringResource(R.string.ways_map_minutes, rest ?: 0L)
+                                    rest == null -> stringResource(R.string.span_whole_hours, hours)
+                                    else -> stringResource(R.string.ways_map_hours, hours, rest)
+                                }
+                            },
                             color = AppColors.Ink,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,

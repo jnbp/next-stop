@@ -1,7 +1,7 @@
 package io.github.jnbp.nextstop.data
 
 import android.content.Context
-import android.util.Log
+import io.github.jnbp.nextstop.ui.AllocProbe
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -124,6 +124,13 @@ object ChangePositions {
     @Volatile
     private var regions: List<ChangeDataset> = emptyList()
 
+    /**
+     * The records as they are now, as objects that are other ones whenever a dataset was read
+     * (for kept ratings, see ChangeRatings): the main records, and those of the other states.
+     */
+    internal val ratingRecords: Any? get() = records
+    internal val ratingRegions: Any get() = regions
+
     // The states read or tried (under [regionLock]).
     private val triedRegions = HashSet<String>()
 
@@ -141,11 +148,13 @@ object ChangePositions {
         withContext(Dispatchers.Default) {
             lock.withLock {
                 if (records == null) {
-                    val vbb = read(context.applicationContext, ASSET, fromOsm = false)
-                    val osm = read(context.applicationContext, OSM_ASSET, fromOsm = true)
-                    complexes = complexesOf(vbb + osm)
-                    osmRecords = osm
-                    records = vbb
+                    AllocProbe.measureAny(AllocProbe.CHANGE_POSITIONS) {
+                        val vbb = read(context.applicationContext, ASSET, fromOsm = false)
+                        val osm = read(context.applicationContext, OSM_ASSET, fromOsm = true)
+                        complexes = complexesOf(vbb + osm)
+                        osmRecords = osm
+                        records = vbb
+                    }
                     answers.clear()
                 }
             }
@@ -165,12 +174,12 @@ object ChangePositions {
             regionLock.withLock {
                 for (name in names) {
                     if (!triedRegions.add(name)) continue
-                    val read = readRegion(app, name)
+                    val read = AllocProbe.measureAny(AllocProbe.CHANGE_POSITIONS) { readRegion(app, name) }
                     if (read.isEmpty()) continue
                     regions = regions + ChangeDataset(read, complexesOf(read))
                     // A query without a record may have one now.
                     answers.clear()
-                    Log.d(LOG_TAG, "loaded the change positions of $name: ${read.size}")
+                    DiagLog.i(LOG_TAG) { "loaded the change positions of $name: ${read.size}" }
                 }
             }
         }
@@ -204,7 +213,7 @@ object ChangePositions {
                 if (result != null) break
             }
         }
-        Log.d(LOG_TAG, "find $query -> $result ($steps)")
+        DiagLog.d(LOG_TAG) { "find $query -> $result ($steps)" }
         return result
     }
 

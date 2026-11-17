@@ -33,12 +33,12 @@ private fun sharePlatform(context: Context, platform: String?): String? = when {
 
 /**
  * The legs of [journey] as plain lines: each ride with its line, where it starts with
- * time and platform, and where it ends; each walk with its minutes.
+ * time and platform, and where it ends; each walk (or ride by bike) with its minutes.
  */
 fun journeyLegsText(context: Context, journey: Journey): String = journey.legs.mapNotNull { leg ->
     if (leg.walking) {
         val minutes = minutesBetween(leg.departure, leg.arrival)
-        if (minutes > 0) context.getString(R.string.share_walk, minutes) else null
+        if (minutes > 0) context.getString(if (leg.cycling) R.string.share_cycle else R.string.share_walk, durationText(context, minutes)) else null
     } else {
         val start = sharePlatform(context, leg.departurePlatform)
             ?.let { context.getString(R.string.share_platform, leg.departure.clock(), it) }
@@ -63,7 +63,7 @@ fun journeyText(context: Context, journey: Journey, fromName: String, toName: St
         day,
         context.getString(R.string.calendar_title, fromName, toName),
         context.getString(R.string.time_range, journey.departure.clock(), journey.arrival.clock()),
-        context.getString(R.string.duration_and_transfers, journey.durationMinutes, journey.transfers),
+        context.getString(R.string.duration_and_transfers, durationText(context, journey.durationMinutes), journey.transfers),
         "",
         journeyLegsText(context, journey),
     ).joinToString("\n")
@@ -125,7 +125,12 @@ fun tripShareText(context: Context, journey: Journey, now: OffsetDateTime): Stri
     val ahead = journey.legs.filter { it.arrival.isAfter(now) }
     return listOfNotNull(
         context.getString(R.string.trip_share_heading, destination),
-        if (step.kind == StepKind.Arrived) null else context.getString(R.string.trip_share_now, stepLabel(context, step), step.time.clock()),
+        when {
+            step.kind == StepKind.Arrived -> null
+            // "Leave at 05:07" already says its time.
+            step.leave -> context.getString(R.string.trip_share_now_plain, stepLabel(context, step))
+            else -> context.getString(R.string.trip_share_now, stepLabel(context, step), step.time.clock())
+        },
         arrival,
         "",
         if (ahead.isEmpty()) null else journeyLegsText(context, Journey(ahead)),
@@ -251,10 +256,6 @@ internal fun liveBase(base: String): String? {
 
 /* ---------- Route link ---------- */
 
-// How closely the shared ways follow those of the app, in metres: fewer points, a shorter link.
-private const val WALK_SHAPE_TOLERANCE_M = 4.0
-private const val RIDE_SHAPE_TOLERANCE_M = 25.0
-
 /**
  * The route link of [journey] to [destination] on the route page at [base] (the address from
  * the settings): the connection step by step for someone else to travel, with platforms, stop
@@ -305,6 +306,7 @@ private fun routeLeg(leg: Leg, board: Pair<String, Boolean>?): RouteLeg {
         product = if (walk) null else leg.product,
         direction = if (walk) null else leg.direction,
         walk = walk,
+        bike = walk && leg.cycling,
         from = RoutePlace(
             name = leg.from.plainStopName(),
             id = leg.fromPlace?.id?.removePrefix(TRANSITOUS_PREFIX),
@@ -457,6 +459,8 @@ internal data class RouteLeg(
     val from: RoutePlace,
     val to: RoutePlace,
     val meters: Int? = null,
+    /** For a walk: it is ridden by bike (the bike combo). */
+    val bike: Boolean = false,
     val stopCount: Int? = null,
     val board: String? = null,
     val boardEstimated: Boolean = false,
@@ -468,7 +472,7 @@ internal data class RouteLeg(
  * The connection as compact JSON for the fragment of the route link (format v1, read by
  * web/route/app.js, the same key order as its encodeRoute):
  * {legs:[{p, trip, line, prod, dir, from:{name,id,lat,lon,dep,dd,pl,pos,exit,entr}, to:{…,arr,ad,…},
- * walk, m, n, b, be, x, poly}], dest:{name,lat,lon}, t}. No name of the person who shares it.
+ * walk, bike, m, n, b, be, x, poly}], dest:{name,lat,lon}, t}. No name of the person who shares it.
  */
 internal fun routeLinkJson(
     legs: List<RouteLeg>,
@@ -500,6 +504,7 @@ internal fun routeLinkJson(
             "from" to place(leg.from, "dep", "dd"),
             "to" to place(leg.to, "arr", "ad"),
             "walk" to if (leg.walk) "true" else null,
+            "bike" to if (leg.walk && leg.bike) "true" else null,
             "m" to leg.meters?.takeIf { it > 0 }?.toString(),
             "n" to leg.stopCount?.takeIf { it >= 0 }?.toString(),
             "b" to leg.board?.takeIf { it == "f" || it == "m" || it == "r" }?.let { jsonString(it) },
@@ -586,18 +591,27 @@ internal fun simplifyPath(points: List<Pair<Double, Double>>, toleranceMeters: D
     return points.filterIndexed { i, _ -> keep[i] }
 }
 
+// How closely the shared ways follow those of the app, in metres: fewer points, a shorter link.
+// A ride keeps its curves round (a curve of 300 m radius bends by about 23 degrees per point at
+// most); 25 m made the lines angular next to other apps.
+internal const val WALK_SHAPE_TOLERANCE_M = 4.0
+internal const val RIDE_SHAPE_TOLERANCE_M = 6.0
+
+// Points of one way at most; beyond it the tolerance grows in small steps. Some 2 kB for a long ride.
+internal const val ROUTE_SHAPE_MAX_POINTS = 300
+
 /**
  * The way of a leg for the route link: simplified to [toleranceMeters] (more if it still has more
  * than [maxPoints] points) and encoded; null for a straight line or no way, which the page draws
  * between the two ends itself.
  */
-internal fun routeShape(points: List<Pair<Double, Double>>, toleranceMeters: Double, maxPoints: Int = 120): String? {
+internal fun routeShape(points: List<Pair<Double, Double>>, toleranceMeters: Double, maxPoints: Int = ROUTE_SHAPE_MAX_POINTS): String? {
     val clean = points.filter { it.first.isFinite() && it.second.isFinite() && Math.abs(it.first) <= 90 && Math.abs(it.second) <= 180 }
     if (clean.size < 3) return null
     var tolerance = toleranceMeters
     var simple = simplifyPath(clean, tolerance)
     while (simple.size > maxPoints && tolerance < 5000) {
-        tolerance *= 2
+        tolerance *= 1.5
         simple = simplifyPath(clean, tolerance)
     }
     return if (simple.size < 3) null else encodePolyline(simple)

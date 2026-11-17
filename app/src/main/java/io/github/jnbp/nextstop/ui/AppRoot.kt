@@ -7,20 +7,23 @@ import android.graphics.PointF
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.LocationRequest
 import android.os.Build
 import android.os.CancellationSignal
-import android.os.Looper
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.BackEventCompat
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.ExperimentalTransitionApi
 import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -30,6 +33,7 @@ import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -47,6 +51,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -61,6 +66,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -77,7 +83,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -90,19 +98,25 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.PaintingStyle
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -111,8 +125,11 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -141,6 +158,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -148,6 +166,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import io.github.jnbp.nextstop.data.DiagLog
 import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -164,6 +183,7 @@ import kotlin.math.hypot
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import java.util.concurrent.Executor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -183,6 +203,9 @@ import io.github.jnbp.nextstop.data.LineColors
 import io.github.jnbp.nextstop.data.placedAt
 import io.github.jnbp.nextstop.data.StopDepartures
 import io.github.jnbp.nextstop.data.mergeStopBoards
+import io.github.jnbp.nextstop.data.shareLiveTimes
+import io.github.jnbp.nextstop.data.leaveDeparturesFrom
+import io.github.jnbp.nextstop.data.leaveStopWalkSeconds
 import io.github.jnbp.nextstop.data.withStopGroup
 import io.github.jnbp.nextstop.data.stopGroupOf
 import io.github.jnbp.nextstop.data.restoreStopGroup
@@ -206,6 +229,8 @@ import io.github.jnbp.nextstop.data.routeMeters
 import io.github.jnbp.nextstop.data.walkMinutesFor
 import io.github.jnbp.nextstop.data.walkMissesRide
 import io.github.jnbp.nextstop.data.Journey
+import io.github.jnbp.nextstop.data.ALT_CHANGE_SWITCH
+import io.github.jnbp.nextstop.data.KeptPage
 import io.github.jnbp.nextstop.data.tripIdAt
 import io.github.jnbp.nextstop.data.JourneyPage
 import io.github.jnbp.nextstop.data.Leg
@@ -245,6 +270,7 @@ import io.github.jnbp.nextstop.data.TransferComfort
 import io.github.jnbp.nextstop.data.TransitSource
 import io.github.jnbp.nextstop.data.TransitousSource
 import io.github.jnbp.nextstop.data.TripCourse
+import io.github.jnbp.nextstop.data.movesWithoutWay
 import io.github.jnbp.nextstop.data.Vehicle
 import io.github.jnbp.nextstop.data.bearingDegrees
 import io.github.jnbp.nextstop.data.chipPlaceName
@@ -252,6 +278,8 @@ import io.github.jnbp.nextstop.data.hasCalendarPermission
 import io.github.jnbp.nextstop.data.journeyComfort
 import io.github.jnbp.nextstop.data.ridePlatforms
 import io.github.jnbp.nextstop.data.stepFreeWalks
+import io.github.jnbp.nextstop.data.nearbyStopsAsked
+import io.github.jnbp.nextstop.data.nearbyStopsKept
 import io.github.jnbp.nextstop.data.walkFactor
 import io.github.jnbp.nextstop.data.walkSpeedFactor
 import io.github.jnbp.nextstop.data.transferWalkSeconds
@@ -260,6 +288,7 @@ import io.github.jnbp.nextstop.data.samePlatformRecord
 import io.github.jnbp.nextstop.data.ChangePositions
 import io.github.jnbp.nextstop.data.OsmStations
 import io.github.jnbp.nextstop.data.WalkTargetKind
+import io.github.jnbp.nextstop.data.WalkAccess
 import io.github.jnbp.nextstop.data.platformNumber
 import io.github.jnbp.nextstop.data.lineKey
 import io.github.jnbp.nextstop.data.OsmLine
@@ -272,6 +301,7 @@ import io.github.jnbp.nextstop.data.searchOrder
 import io.github.jnbp.nextstop.data.journeyChangesOf
 import io.github.jnbp.nextstop.data.loosestLevel
 import io.github.jnbp.nextstop.data.loadRapidNetwork
+import io.github.jnbp.nextstop.data.loadTramNetwork
 import io.github.jnbp.nextstop.data.normalStationId
 import io.github.jnbp.nextstop.data.plainStopName
 import io.github.jnbp.nextstop.data.refreshed
@@ -288,6 +318,7 @@ import io.github.jnbp.nextstop.data.viaAhead
 import io.github.jnbp.nextstop.data.upcomingAppointments
 import io.github.jnbp.nextstop.ui.theme.AppColors
 import io.github.jnbp.nextstop.ui.theme.Appearance
+import io.github.jnbp.nextstop.ui.theme.MapVehiclesChoice
 import io.github.jnbp.nextstop.ui.theme.VehicleDirectionChoice
 import io.github.jnbp.nextstop.wear.PhoneBridge
 import io.github.jnbp.nextstop.widget.WidgetJourneys
@@ -317,26 +348,76 @@ private enum class TimeTarget { Journey, Departures }
 /** The page in front of the map. A change from one to another is animated. */
 internal enum class Screen { Start, Search, Settings, Plan, Connections, Trip, Course, Departures, MapSheet, Favorites }
 
-// Predictive back between the pages (see PredictiveBackHandler in AppRoot): how long the
-// change takes as the gesture moves it, how small the page in front gets, how far it moves
-// from the edge, how far it sinks (share of its height) and how round its corners get.
-private const val BACK_PAGE_MILLIS = 300
-
 // The signs of disruptions on the map: from this zoom on the area in view is asked (see
 // MapNoticePool.refreshArea) once the map rests this long; new signs fade in this long.
 private const val NOTICE_REFRESH_ZOOM = 13.0
 private const val NOTICE_REFRESH_DELAY_MILLIS = 1500L
 private const val NOTICE_APPEAR_MILLIS = 260
-private const val BACK_MIN_SCALE = 0.9f
-private const val BACK_SHIFT_DP = 8f
-private const val BACK_SINK = 0.04f
-private const val BACK_CORNER_DP = 28f
 
-/** The page under a back gesture is there after the first quarter of it. */
-private val BackUnderEasing = Easing { fraction -> (fraction * 4f).coerceAtMost(1f) }
+// A change between the pages of two tabs (a tap on the tab bar, or a link to another tab)
+// slides along the order of the tabs: the new page comes in from the side of its tab, this
+// far (share of the width), while the old one leaves to the other side; both fade.
+private const val TAB_SLIDE_MILLIS = 250
+private const val TAB_SLIDE_SHARE = 0.12f
 
-/** The page a back gesture leaves stays until the last fifth: it fades once the gesture was let go. */
-private val BackAwayEasing = Easing { fraction -> ((fraction - 0.8f) / 0.2f).coerceIn(0f, 1f) }
+// Emphasized easing of Material motion: the page coming in decelerates into place, the one
+// leaving accelerates away.
+private val TabEnterEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+private val TabExitEasing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+
+/**
+ * The place in the tab bar of the tab a page belongs to, or null for a page that lies over
+ * any tab (the search, a line course): a change from or to one of those is not a tab change.
+ */
+internal fun tabOrderOf(screen: Screen): Int? = when (screen) {
+    Screen.Start, Screen.Plan, Screen.Connections, Screen.Trip, Screen.Settings -> Tab.Route.ordinal
+    Screen.Departures -> Tab.Departures.ordinal
+    Screen.MapSheet -> Tab.Map.ordinal
+    Screen.Favorites -> Tab.Favorites.ordinal
+    Screen.Search, Screen.Course -> null
+}
+
+/** Which way a change from [from] to [to] slides: 1 to a tab further right, -1 left, 0 none (same tab, or no tab). */
+internal fun tabSlideOf(from: Screen, to: Screen): Int {
+    val before = tabOrderOf(from) ?: return 0
+    val after = tabOrderOf(to) ?: return 0
+    return after.compareTo(before)
+}
+
+/** What a page lies on: the map itself, fog over the map, or the plain ground (the map switched off). */
+internal enum class PageGround { Map, Fog, Plain }
+
+/** The pages that do not need the map: they lie on fog, or on the plain ground without the map. */
+internal val GROUNDED_PAGES = setOf(Screen.Search, Screen.Settings, Screen.Connections, Screen.Departures, Screen.Favorites)
+
+/** What [page] lies on; [startMap] is whether the map is on outside the pages that are about it. */
+internal fun pageGround(page: Screen, startMap: Boolean): PageGround = when {
+    page in GROUNDED_PAGES -> if (startMap) PageGround.Fog else PageGround.Plain
+    page == Screen.Start && !startMap -> PageGround.Plain
+    else -> PageGround.Map
+}
+
+// How long a back gesture from a page on the map waits at most for the picture of the map it
+// takes along (see the back handler of AppRoot); without it the page shrinks without its map.
+private const val BACK_SHOT_MILLIS = 180L
+// Off a page on its own ground onto the map: its content fades first, its ground after it.
+private const val CONTENT_OUT_MILLIS = 120
+private const val GROUND_OUT_MILLIS = 140
+
+/**
+ * A change from [from] on its own ground (fog or plain) to [to] on the map that fades and
+ * rises (not a change of tab, the search or the course, which move in their own ways): the
+ * ground goes last.
+ */
+internal fun groundLast(from: Screen, to: Screen, startMap: Boolean): Boolean =
+    from != to && tabSlideOf(from, to) == 0 && from != Screen.Search && to != Screen.Course &&
+        pageGround(from, startMap) != PageGround.Map && pageGround(to, startMap) == PageGround.Map
+
+// How fast the page a back gesture leaves fades once let go: quickly, so nothing of it
+// lingers over the page back leads to.
+private const val BACK_COMMIT_FADE_MILLIS = 150
+// How long the pictures a page took along take to give way to the live map after a cancelled back.
+private const val BACK_SHOT_FADE_MILLIS = 180
 
 /** What decides which page is in front of the map (see [pageOf]). */
 internal data class PageState(
@@ -349,6 +430,8 @@ internal data class PageState(
     val planning: Boolean,
     // The map tab was opened from the departures ("Show on map", "Station on map"): back leads there.
     val backToDepartures: Boolean = false,
+    // "My routes" was opened from the map tab (all disruptions, from a sign on the map): back leads there.
+    val backToMap: Boolean = false,
 )
 
 /** The page in front of the map for [state]. */
@@ -386,6 +469,7 @@ internal fun pageAfterBack(state: PageState, planFirst: Boolean): Screen? {
             searchMode != null -> copy(searchMode = null)
             settingsOpen && tab == Tab.Route -> copy(settingsOpen = false)
             tab == Tab.Map && backToDepartures -> copy(tab = Tab.Departures)
+            tab == Tab.Favorites && backToMap -> copy(tab = Tab.Map, backToMap = false)
             tab != Tab.Route -> copy(tab = Tab.Route)
             tripOpen -> copy(tripOpen = false)
             showingConnections && !planning && planFirst -> copy(planning = true)
@@ -396,22 +480,72 @@ internal fun pageAfterBack(state: PageState, planFirst: Boolean): Screen? {
     return pageOf(after).takeIf { it != pageOf(state) }
 }
 
+/**
+ * What one back does (see goBack in AppRoot), in the order back takes them: first what lies
+ * on the page in front (a walk on the big map, a marked place, a card of the map, a page of
+ * "My routes"), then the pages themselves. [System] leaves back to the system.
+ */
+internal enum class BackStep {
+    CloseWalk, Unpin, ClosePick, ClosePosition, UnmarkStop, LeaveCourse, CloseSearch, FavoritesPage,
+    CloseSettings, MapToDepartures, FavoritesToMap, RouteTab, CloseTrip, ToPlan, CloseConnections, System;
+
+    /**
+     * Back stays on the same page and changes what it shows: the page previews it itself
+     * (see the preview of AppRoot inside a page). Every other step leads to another page
+     * ([pageAfterBack]), which the gesture shows underneath.
+     */
+    val inPage: Boolean
+        get() = this == CloseWalk || this == Unpin || this == ClosePick || this == ClosePosition || this == UnmarkStop ||
+            this == FavoritesPage
+}
+
+/** What else than the page decides where back leads (see [backStep]). */
+internal data class BackFacts(
+    val page: PageState,
+    // A walk is on the big map (the page has slid away).
+    val walk: Boolean = false,
+    // A marked place shows: in the start sheet or as the card of the map tab.
+    val pin: Boolean = false,
+    // The card of a stop tapped on the map of the start page shows in the start sheet.
+    val pickedStop: Boolean = false,
+    // The card of a stop position on the map tab, or that of the marked stop.
+    val positionCard: Boolean = false,
+    val stopCard: Boolean = false,
+    // A page of "My routes" lies over its first page (over the page opened from the map tab,
+    // where "My routes" was opened from there: see PageState.backToMap).
+    val favoritesSub: Boolean = false,
+)
+
+/** What back does from [facts]: the one table goBack and the predictive back of AppRoot share. */
+internal fun backStep(facts: BackFacts, planFirst: Boolean): BackStep = with(facts.page) {
+    when {
+        facts.walk -> BackStep.CloseWalk
+        facts.pin && !courseView -> BackStep.Unpin
+        facts.pickedStop && !courseView -> BackStep.ClosePick
+        facts.positionCard -> BackStep.ClosePosition
+        facts.stopCard -> BackStep.UnmarkStop
+        courseView -> BackStep.LeaveCourse
+        searchMode != null -> BackStep.CloseSearch
+        facts.favoritesSub && tab == Tab.Favorites -> BackStep.FavoritesPage
+        settingsOpen && tab == Tab.Route -> BackStep.CloseSettings
+        tab == Tab.Map && backToDepartures -> BackStep.MapToDepartures
+        tab == Tab.Favorites && backToMap -> BackStep.FavoritesToMap
+        tab != Tab.Route -> BackStep.RouteTab
+        tripOpen -> BackStep.CloseTrip
+        showingConnections && !planning && planFirst -> BackStep.ToPlan
+        showingConnections -> BackStep.CloseConnections
+        else -> BackStep.System
+    }
+}
+
 // Used when no location is available or the device is outside the Berlin area.
 private val FALLBACK_CENTER = 52.5219 to 13.4132
 
 // Moving the map further than this loads the stops around the new centre.
 private const val RELOAD_DISTANCE_METERS = 250
 
-// Vehicles are only loaded when the map shows less than this many degrees of latitude.
-private const val MAX_VEHICLE_SPAN = 0.2
-
-// The products the district tier of the map shows as dots: S-Bahn, U-Bahn and trains.
-private val RAPID_VEHICLE_PRODUCTS = setOf("suburban", "subway", "regional")
-
-// "Nearby" departures: so many stops around the user are asked, at most so many of them
-// within the radius are loaded, and so many departures of each.
-private const val NEARBY_STOP_RESULTS = 20
-private const val NEARBY_STOP_LIMIT = 10
+// "Nearby" departures: so many departures of each stop within the radius; how many stops are
+// asked and kept follows the radius (see nearbyStopsAsked, nearbyStopsKept).
 private const val NEARBY_DEPARTURES_PER_STOP = 8
 
 // The departures of one stop are asked for in pages of this many.
@@ -420,8 +554,7 @@ private const val DEPARTURE_PAGE = 12
 // HAFAS answers for the hour after the time asked: an empty page moves the next one on by that.
 private const val MORE_DEPARTURES_SKIP_MINUTES = 60L
 
-// No more vehicles than this are asked for and drawn at once. MapLibre draws them in its own
-// layers, so a busy district stays smooth.
+// A refresh with this many vehicles or more is logged (see loadMapVehicles for the limits).
 private const val MAX_VEHICLES = 150
 
 // A tap this close to a vehicle on the map, in dp, hits it.
@@ -432,8 +565,22 @@ private const val STOP_TAP_DP = 6f
 // A tap this close to a sign of disruptions opens it before the stop whose corner it sits on.
 private const val NOTICE_TAP_DP = 3f
 
-// The network of the city view is read or built this long after the start.
+// The network of the city view is read or built this long after the map was shown, at a rest of the camera (see MapQuiet).
 private const val RAPID_NETWORK_DELAY_MILLIS = 4_000L
+
+// The packs of other states are read no sooner than this after the map was shown (see MapQuiet).
+private const val OSM_PACKS_AFTER_SHOWN_MILLIS = 3_000L
+
+// The tram network is read (or built) a little after the S- and U-Bahn network.
+private const val TRAM_NETWORK_DELAY_MILLIS = 6_000L
+
+// Below this zoom the camera reads no more of the OpenStreetMap packs (see OsmStations.ensureRegions):
+// nothing of them shows that far out.
+private const val OSM_REGIONS_MIN_ZOOM = 11.0
+
+// Logged with PERF_LOG_TAG: work on the main thread longer than this, and more stop signs than this.
+private const val PERF_SLOW_MAIN_MILLIS = 50L
+private const val PERF_MANY_SIGNS = 1_500
 
 // The glide of a vehicle from one update to the next lasts as long as the provider looks ahead.
 internal const val VEHICLE_GLIDE_MILLIS = 30_000L
@@ -442,6 +589,19 @@ internal const val VEHICLE_GLIDE_MILLIS = 30_000L
 internal const val VEHICLE_SETTLE_SHARE = 1_200f / VEHICLE_GLIDE_MILLIS
 
 internal const val CURRENT_LOCATION_ID = "current-location"
+
+// Whether a start at the position of the user is awaited ([0], like a flag), with the wait that runs for it.
+internal class StartWait {
+    var pending = false
+    var job: Job? = null
+
+    // Says that no start was found (startNotFound of AppRoot, declared after its first user).
+    var notFound: (() -> Unit)? = null
+    operator fun get(index: Int): Boolean = pending
+    operator fun set(index: Int, value: Boolean) {
+        pending = value
+    }
+}
 
 // So many places picked in searches are remembered.
 private const val MAX_SEARCH_HISTORY = 50
@@ -501,12 +661,21 @@ private const val LOCATION_MIN_METERS = 5f
 // A fresh position is waited for this long per source; after that the last known one has to do.
 private const val LOCATE_TIMEOUT_MILLIS = 10_000L
 
+// How long a search waits for a fresh position of its start before the last known one stands in.
+private const val START_WAIT_MILLIS = 5_000L
+
 // A position this near to the one in use is not a new place: the selected stop and the map stay as they are.
 private const val POSITION_SHIFT_METERS = 50
 
 // While no trip is followed, the position is asked for at this calmer pace.
 private const val POSITION_INTERVAL_MILLIS = 10_000L
 private const val POSITION_MIN_METERS = 20f
+
+// Faster than this, in metres per second, the user rides in a vehicle: while the map follows
+// the user then, the position is asked for as often as on a followed trip. Below the lower
+// speed the calm pace comes back (two speeds, so it does not flip at one).
+private const val RIDING_SPEED = 4f
+private const val WALKING_SPEED = 1.5f
 
 // A position this young still says where the device is: asking for it anew would tell nothing.
 private const val POSITION_FRESH_MILLIS = 30_000L
@@ -621,13 +790,14 @@ private fun tripRoutes(
         .filter { now.isBefore(it.departure) }
         .mapNotNull { ride -> ride.tripId?.let { courses[it] }?.let { approachRoute(ride, it, now) } }
     val rides = journeyRoutes(journey) { leg, route ->
+        // A ride without a way of its own stays a dashed connector, also once it is split.
         when {
-            !now.isBefore(leg.arrival) -> listOf(MapRoute(TRAVELLED_COLOR, route.points, dotted = false))
+            !now.isBefore(leg.arrival) -> listOf(MapRoute(TRAVELLED_COLOR, route.points, dotted = false, dashed = route.dashed))
             !now.isBefore(leg.departure) -> {
                 val (behind, ahead) = splitWay(route.points, vehicleAt(leg), leg, now)
                 listOfNotNull(
-                    MapRoute(TRAVELLED_COLOR, behind, dotted = false).takeIf { behind.size >= 2 },
-                    MapRoute(route.color, ahead, dotted = false).takeIf { ahead.size >= 2 },
+                    MapRoute(TRAVELLED_COLOR, behind, dotted = false, dashed = route.dashed).takeIf { behind.size >= 2 },
+                    MapRoute(route.color, ahead, dotted = false, dashed = route.dashed).takeIf { ahead.size >= 2 },
                 )
             }
             else -> listOf(route)
@@ -809,10 +979,34 @@ private fun journeyRoutes(
                     else -> routes.add(MapRoute(WALK_COLOR, listOf(before.path.last(), leg.path.first()), dotted = true))
                 }
             }
-            routes.addAll(ride(leg, MapRoute(lineColor(leg), thinned(leg.path), dotted = false)))
+            // A bus without a way of its own (only the straight lines between its stops, as for a
+            // rail replacement without a shape): a dashed connector, not a road through the fields.
+            val noWay = movesWithoutWay(leg.product, leg.path, legStopPoints(leg))
+            routes.addAll(ride(leg, MapRoute(lineColor(leg), thinned(leg.path), dotted = false, dashed = noWay)))
         }
     }
     return routes
+}
+
+/** The positions of the stops of the ride [leg] in order: where it is boarded, the stops on the way, where it is left. */
+private fun legStopPoints(leg: Leg): List<Pair<Double, Double>> =
+    listOfNotNull(leg.fromPlace?.position) + leg.stopovers.mapNotNull { it.place?.position } + listOfNotNull(leg.toPlace?.position)
+
+/**
+ * The way of the trip [course] on the map: its own way, solid; where it has none, or only the
+ * straight lines between its stops for a bus (see movesWithoutWay), a dashed connector through
+ * its stops. Empty where not even two stops have a position.
+ */
+private fun courseRoutes(course: TripCourse): List<MapRoute> {
+    val stops = course.stops.mapNotNull { it.place?.position }
+    val color = lineColor(course)
+    return when {
+        course.path.size >= 2 && !movesWithoutWay(course.product, course.path, stops) ->
+            listOf(MapRoute(color, course.path, dotted = false))
+        course.path.size >= 2 -> listOf(MapRoute(color, course.path, dotted = false, dashed = true))
+        stops.size >= 2 -> listOf(MapRoute(color, stops, dotted = false, dashed = true))
+        else -> emptyList()
+    }
 }
 
 /** What a point of a journey on the map is: where it starts, a change, or where it ends. */
@@ -945,6 +1139,9 @@ private const val DEPARTURES_LIST = 3
 // The live hint pill grows from this size as it comes in.
 private const val HINT_ENTER_SCALE = 0.82f
 
+// How long the vehicle hint pill takes to fade in or out.
+private const val HINT_FADE_MILLIS = 250
+
 // The camera flies back to the user in this time.
 private const val LOCATE_MILLIS = 700
 
@@ -1031,10 +1228,53 @@ private fun withFound(journeys: List<Journey>, found: Map<String, TransferComfor
 private fun levelsOf(journeys: List<Journey>?): Map<String, TransferComfort> =
     journeys.orEmpty().associate { it.id to journeyComfort(it) }
 
+/** Whether the page [screen] shows the lists of the journeys found (see listsShown in AppRoot). */
+private fun journeyListsShown(screen: Screen): Boolean = screen == Screen.Connections || screen == Screen.Plan
+
+/** What [rememberWhileShown] holds: the keys it was worked out for, and the value. */
+private class HeldValue<T>(var keys: Array<out Any?>? = null, var value: T? = null)
+
+/**
+ * Like remember with [keys], but worked out again only while [shown]: hidden, a change of the
+ * keys keeps the last value (worked out once if there is none yet), and the first composition
+ * with [shown] after a change works it out anew. For lists of a page that is not on screen.
+ */
+@Composable
+private fun <T> rememberWhileShown(shown: Boolean, vararg keys: Any?, calculation: () -> T): T {
+    val held = remember { HeldValue<T>() }
+    val known = held.keys
+    if (known == null || (shown && !known.contentEquals(keys))) {
+        held.value = calculation()
+        held.keys = keys.copyOf()
+    }
+    @Suppress("UNCHECKED_CAST")
+    return held.value as T
+}
+
 // SeekableTransitionState drives the pages for the predictive back.
 @OptIn(ExperimentalTransitionApi::class)
+/** What the plan and the connections show of the journeys found (see the pages in AppRoot). */
+private class PageLists(
+    val selection: JourneySelection,
+    val shownJourneys: List<Journey>?,
+    val directIds: Set<String>,
+    val patternNote: String?,
+    val filteredOut: List<Journey>,
+    val filteredLevels: Set<TransferComfort>,
+    val showFiltered: () -> Unit,
+    val productsOff: Set<String>,
+    val useAllProducts: () -> Unit,
+    val fromName: String,
+    val toName: String,
+)
+
+
+// Back on screen, the extras of the page start this long after its first refreshes (see appSettled).
+private const val REFRESH_SPREAD_MILLIS = 350L
+
 @Composable
 fun AppRoot() {
+    AllocProbe.tick(AllocProbe.APP_ROOT)
     val context = LocalContext.current
     val prefs = remember { AppPrefs(context) }
     // The providers are picked anew for every request from what the settings say right now.
@@ -1046,9 +1286,15 @@ fun AppRoot() {
     var delayDisplay by remember { mutableStateOf(prefs.delayDisplay) }
     var options by remember { mutableStateOf(prefs.searchOptions) }
     // With an accessibility setting, the walks of changes count without steps and escalators.
-    LaunchedEffect(options.accessibility) { stepFreeWalks = options.accessibility != Accessibility.None }
+    LaunchedEffect(options.accessibility) {
+        stepFreeWalks = options.accessibility != Accessibility.None
+        noteRatingSettings()
+    }
     // "Langsamer unterwegs": every walk the app measures itself (changes, stop positions) takes longer.
-    LaunchedEffect(options.slower) { walkSpeedFactor = walkFactor(options.slower) }
+    LaunchedEffect(options.slower) {
+        walkSpeedFactor = walkFactor(options.slower)
+        noteRatingSettings()
+    }
     var startVehicles by remember { mutableStateOf(prefs.startVehicles) }
     // False: the start page lies over a plain ground and the map rests until a page needs it.
     var startMap by remember { mutableStateOf(prefs.startMap) }
@@ -1103,6 +1349,7 @@ fun AppRoot() {
     var connectionsFull by remember { mutableStateOf(prefs.connectionsFull) }
     // True: the chart names the stops of the changes between the rides.
     var chartChangeStops by remember { mutableStateOf(prefs.chartChangeStops) }
+    var chartTotalTime by remember { mutableStateOf(prefs.chartTotalTime) }
     // The favourite places of the start page, and the one whose place the search is asking for.
     var favoritePlaces by remember { mutableStateOf(prefs.loadFavoritePlaces()) }
     var editingPlace by remember { mutableStateOf<Int?>(null) }
@@ -1169,6 +1416,7 @@ fun AppRoot() {
     val watchedWalk = remember { arrayOfNulls<String>(1) }
     // The picture of the map behind the glass surfaces.
     val backdrop = remember { Backdrop() }
+    TrackBackdropTone(backdrop)
     // The next journeys of the tiles, by the id of start and destination.
     val placeTrips = remember { mutableStateMapOf<String, PlaceTrip>() }
     // The journey whose stops on the way could not be loaded.
@@ -1184,13 +1432,15 @@ fun AppRoot() {
     var locationTrouble by remember { mutableStateOf(LocationTrouble.None) }
     // Where the device is, as exactly as it last said; null without a position in the Berlin area.
     var devicePosition by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    // True while the device moves as fast as a vehicle (see RIDING_SPEED).
+    var riding by remember { mutableStateOf(false) }
     // When the device last said where it is, on the clock that runs since it was switched on; 0 for never.
     val lastFix = remember { longArrayOf(0L) }
     // True once the user moved the map or picked a stop by hand: the stops and the map then
     // stay where they were put, until the user asks for the own position again.
     var viewHeld by remember { mutableStateOf(false) }
     // True from picking "current location" as the start without a position until one is there.
-    val originPending = remember { booleanArrayOf(false) }
+    val originPending = remember { StartWait() }
     // Other connections from a transfer stop, while the companion offers them.
     var alternatives by remember { mutableStateOf<Alternatives?>(null) }
     // The connecting departures loaded for changes of the journeys of the open search, by offerKey.
@@ -1220,6 +1470,8 @@ fun AppRoot() {
     val courseOrigin = remember { arrayOfNulls<Rect>(1) }
     // False when the open course was asked to leave the map where it is.
     val courseFit = remember { booleanArrayOf(true) }
+    // The camera of a course opened from a vehicle: on the vehicle and its next stops, or the whole line.
+    val courseCamera = remember { CourseCamera() }
     // Where the user was when the course was opened.
     val courseStart = remember { arrayOfNulls<Pair<Double, Double>>(1) }
     // Where the "Where to?" card sits on the screen, and the height the search field starts its way from.
@@ -1230,15 +1482,42 @@ fun AppRoot() {
     val lifecycleOwner = LocalLifecycleOwner.current
     // True while the app is on screen. Everything that asks the provider again and again
     // stops when it is not, and picks up where it was when the app comes back.
+    // Back on screen, the page first shows what it had (its first frame, which takes touches)
+    // and only then starts its refreshes: [appStarted] after the first frame, [appSettled] for
+    // the extras (vehicles, tiles, offers, the calendar, the signs of disruptions) a moment
+    // later, so their answers and the work on them do not all land on the main thread at once.
     var appStarted by remember {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
+    var appSettled by remember { mutableStateOf(appStarted) }
+    val startScope = rememberCoroutineScope()
     DisposableEffect(lifecycleOwner) {
+        var release: Job? = null
         val observer = LifecycleEventObserver { owner, _ ->
-            appStarted = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            val started = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            if (!started) {
+                release?.cancel()
+                release = null
+                appStarted = false
+                appSettled = false
+            } else if (!appStarted && release?.isActive != true) {
+                release = startScope.launch {
+                    // The frame in the making and the one after it: the page is on screen again.
+                    withFrameNanos { }
+                    withFrameNanos { }
+                    appStarted = true
+                    ResumeLog.once("refreshes released")
+                    delay(REFRESH_SPREAD_MILLIS)
+                    appSettled = true
+                    ResumeLog.once("extras released")
+                }
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            release?.cancel()
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
     var savedRoutes by remember { mutableStateOf(prefs.loadRoutes()) }
     // Disruptions on the favourites: the status of a saved route, and all current notices (see
@@ -1291,6 +1570,11 @@ fun AppRoot() {
     // (see showDepartureOnMap, showStationOnMap). Any other tab lets go of it.
     var mapFromDepartures by remember { mutableStateOf(false) }
     LaunchedEffect(tab) { if (tab != Tab.Map) mapFromDepartures = false }
+    // "My routes" was opened from the map tab with a page of its own (all disruptions, from a
+    // sign on the map): back from that page leads to the map again, not to the first page of
+    // "My routes" and then the route tab. Any other tab, or the tab's own button, lets go of it.
+    var favoritesFromMap by remember { mutableStateOf(false) }
+    LaunchedEffect(tab) { if (tab != Tab.Favorites) favoritesFromMap = false }
     // Each tab keeps its own pages: the pages opened on "My routes" (all disruptions, those
     // around a place), last on top, and the line course a tab had open when another tab was
     // picked; picking the tab again brings it back (see FloatingNav below).
@@ -1336,6 +1620,13 @@ fun AppRoot() {
     // A pinned place lets go of the marked stop, a stop marked again lets go of the place.
     LaunchedEffect(pinned) { if (pinned != null) stopMarked = false }
     LaunchedEffect(stopMarked) { if (stopMarked) pinned = null }
+    // A stop tapped on the map of the start page: the start sheet shows its card (its
+    // departures, from here, to here) until it is let go or another stop becomes the selected one.
+    var mapPickedStopId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(stopMarked) { if (!stopMarked) mapPickedStopId = null }
+    // A long press on a stop sign of the map: its small menu at the point pressed (on the screen).
+    var stopMenu by remember { mutableStateOf<Pair<Stop, PointF>?>(null) }
+    val stopMenuHaptics = LocalHapticFeedback.current
     // A stop position of the marked stop tapped on the map: its card takes the place of the
     // stop's card; back or its close lead to the stop's card again.
     var pickedPosition by remember { mutableStateOf<MapPositionPick?>(null) }
@@ -1381,16 +1672,44 @@ fun AppRoot() {
     var styleTick by remember { mutableIntStateOf(0) }
     // How much the map shows by its zoom; only changes of the tier recompose.
     var tier by remember { mutableStateOf(MapTier.Neighbourhood) }
+    // Close enough for the vehicles with the setting "Dynamic" (DYNAMIC_VEHICLE_MIN_ZOOM); only its changes recompose.
+    var vehiclesClose by remember { mutableStateOf(true) }
     // The app's own S- and U-Bahn network for the city view, once built or read from the files.
     var rapidNetwork by remember { mutableStateOf<FeatureCollection?>(null) }
     LaunchedEffect(Unit) {
-        // A little later than the first requests of the start page, which matter more.
-        delay(RAPID_NETWORK_DELAY_MILLIS)
+        // A little later than the first requests of the start page, which matter more, and only
+        // once the map rests a moment: right after the start it loads its tiles while people
+        // already pan it (see MapQuiet).
+        MapQuiet.awaitRest(RAPID_NETWORK_DELAY_MILLIS)
         loadRapidNetwork(context, RAPID_LINE_NAMES) { lines ->
-            val features = rapidNetworkFeatures(lines) { name ->
-                lineColor(name, if (name.startsWith("U")) "subway" else "suburban", LineColors.BERLIN_CENTRE)
+            // Made into map features once per network that comes in, off the main thread: the
+            // ways are finer since 0.1.2 (see NETWORK_SIMPLIFY_METRES) and finding the lines that
+            // share track goes over all of them.
+            launch {
+                val started = SystemClock.uptimeMillis()
+                val features = withContext(Dispatchers.Default) {
+                    AllocProbe.measureAny(AllocProbe.RAPID_NETWORK) {
+                        rapidNetworkFeatures(lines) { name ->
+                            lineColor(name, if (name.startsWith("U")) "subway" else "suburban", LineColors.BERLIN_CENTRE)
+                        }
+                    }
+                }
+                DiagLog.i(PERF_LOG_TAG) { "rapid network: ${lines.size} lines, ${lines.sumOf { it.points.size }} points in ${SystemClock.uptimeMillis() - started} ms" }
+                rapidNetwork = features
             }
-            rapidNetwork = features
+        }
+    }
+
+    // The app's own tram network for the overview (see loadTramNetwork), after the S- and U-Bahn.
+    var tramNetwork by remember { mutableStateOf<FeatureCollection?>(null) }
+    LaunchedEffect(Unit) {
+        MapQuiet.awaitRest(TRAM_NETWORK_DELAY_MILLIS)
+        loadTramNetwork(context) { lines ->
+            launch {
+                tramNetwork = withContext(Dispatchers.Default) {
+                    AllocProbe.measureAny(AllocProbe.TRAM_NETWORK) { tramNetworkFeatures(lines) }
+                }
+            }
         }
     }
 
@@ -1428,6 +1747,12 @@ fun AppRoot() {
     var journeys by remember { mutableStateOf<List<Journey>?>(null) }
     var journeysLoading by remember { mutableStateOf(false) }
     var journeysError by remember { mutableStateOf<String?>(null) }
+    // True while a search runs again in the background (pull to refresh, "Try again", or the
+    // retries of a failed search): what is shown stays until the answer is there.
+    var journeysRefreshing by remember { mutableStateOf(false) }
+    // Whether the refresh that runs was asked for by hand (pull, "Try again"): only then the
+    // pull indicator shows it, not for the retries of a failed search.
+    var journeysAsked by remember { mutableStateOf(false) }
     // The references to the pages before and after the loaded ones, one per level of transfer
     // comfort that is asked for: the picked one, or all of them when every connection is shown.
     var earlierRefs by remember { mutableStateOf<Map<TransferComfort, String>>(emptyMap()) }
@@ -1455,6 +1780,7 @@ fun AppRoot() {
         value = OffsetDateTime.now()
         while (true) {
             delay(15_000)
+            AllocProbe.tick(AllocProbe.NOW_TICK)
             value = OffsetDateTime.now()
         }
     }
@@ -1467,10 +1793,69 @@ fun AppRoot() {
         if (locationGranted) {
             locateRound++
         } else {
+            if (originPending[0] && destination != null) originPending.notFound?.invoke()
             originPending[0] = false
             locationTrouble = LocationTrouble.NoPermission
         }
     }
+    // The open journey page comes back after Android ended the process in the background
+    // (see OpenJourneyKeeper): shown at once from the kept copy, then loaded fresh by the
+    // refreshes of the trip and the connections, which take its refresh handles.
+    val restoredTrip = remember {
+        val kept = OpenJourneyKeeper.take() ?: return@remember false
+        Tab.entries.firstOrNull { it.name == kept.tab }?.let { tab = it }
+        origin = kept.origin
+        destination = kept.destination
+        via = kept.via
+        journeyTime = kept.time?.let { TimeChoice(it, arrival = kept.timeArrival) }
+        kept.journeys?.let { list ->
+            journeys = list
+            journeyLevels = levelsOf(list)
+            foundLevels = list.mapNotNull { journey -> journey.foundLevel?.let { journeyKey(journey) to it } }.toMap()
+            connectionsState = ConnectionsState().apply {
+                selectedId = kept.selectedId?.takeIf { id -> list.any { it.id == id } }
+                detailPage = kept.detailPage && selectedId != null
+            }
+            planning = kept.planning
+        }
+        val followed = kept.followed?.takeIf { companion == null } ?: return@remember false
+        companion = followed
+        companionOpen = kept.tripOpen
+        true
+    }
+    // A restored trip goes on in the background as it did, where notifications are allowed.
+    LaunchedEffect(restoredTrip) {
+        if (restoredTrip && companion != null && !tripServiceRunning && tripNotificationsAllowed(context)) {
+            notificationsOff = !startTripService(context)
+        }
+    }
+    KeepOpenJourney(
+        key = {
+            listOf(
+                tab, companionOpen, companion?.id, origin?.id, destination?.id, via, journeyTime,
+                journeys?.size, journeys?.firstOrNull()?.id, journeys?.lastOrNull()?.id,
+                connectionsState.selectedId, connectionsState.detailPage, planning,
+            )
+        },
+        snapshot = {
+            KeptPage(
+                savedAt = System.currentTimeMillis(),
+                tab = tab.name,
+                tripOpen = companionOpen,
+                followed = companion,
+                origin = origin,
+                destination = destination,
+                via = via,
+                time = journeyTime?.time,
+                timeArrival = journeyTime?.arrival == true,
+                journeys = journeys,
+                selectedId = connectionsState.selectedId,
+                detailPage = connectionsState.detailPage,
+                planning = planning,
+            )
+        },
+    )
+
     // With the permission the trip goes on in the background with its notification; without
     // it the app keeps the trip fresh only while it is open, and says so.
     val notificationLauncher = rememberLauncherForActivityResult(
@@ -1651,7 +2036,7 @@ fun AppRoot() {
     val nearbyWanted = nearbyOn && tab == Tab.Departures && appStarted && !usingFallback
     // The position in steps of about 100 m: a walk across the street does not start over.
     val nearbyAnchor = (center.first * 1000).toInt() to (center.second * 1000).toInt()
-    LaunchedEffect(nearbyWanted, nearbyRadius, options.products, departuresFrom, nearbyAnchor, departuresPull) {
+    LaunchedEffect(nearbyWanted, nearbyRadius, options.products, departuresFrom, nearbyAnchor, departuresPull, leaveOrderOn) {
         if (!nearbyWanted) return@LaunchedEffect
         // A pull keeps the list in view while the new one loads.
         if (!departuresRefreshing) {
@@ -1661,7 +2046,7 @@ fun AppRoot() {
         while (true) {
             try {
                 val here = center
-                val around = source.nearbyStops(here.first, here.second, NEARBY_STOP_RESULTS)
+                val around = source.nearbyStops(here.first, here.second, nearbyStopsAsked(nearbyRadius))
                     .mapNotNull { stop ->
                         val latitude = stop.latitude ?: return@mapNotNull null
                         val longitude = stop.longitude ?: return@mapNotNull null
@@ -1669,12 +2054,18 @@ fun AppRoot() {
                     }
                     .filter { (it.distanceMeters ?: Int.MAX_VALUE) <= nearbyRadius && it.kind == PlaceKind.Stop }
                     .sortedBy { it.distanceMeters }
-                    .take(NEARBY_STOP_LIMIT)
+                    .take(nearbyStopsKept(nearbyRadius))
                 val lists = coroutineScope {
                     around.map { stop ->
                         async {
                             try {
-                                source.departures(stop.id, NEARBY_DEPARTURES_PER_STOP, options.products, departuresFrom)
+                                // For "when to leave" each stop from when the user can be there.
+                                val from = if (leaveOrderOn) {
+                                    leaveDeparturesFrom(leaveStopWalkSeconds(here, stop), departuresFrom, OffsetDateTime.now())
+                                } else {
+                                    departuresFrom
+                                }
+                                source.departures(stop.id, NEARBY_DEPARTURES_PER_STOP, options.products, from)
                                     .map { it.copy(stop = stop.copy(distanceMeters = null)) }
                             } catch (e: CancellationException) {
                                 throw e
@@ -1711,9 +2102,11 @@ fun AppRoot() {
     val addedStops = if (extraAnchor == selectedStopId && !nearbyShown) extraStops else emptyList()
     // Their departures, one request per stop and round, while the tab shows them.
     val extraWanted = addedStops.isNotEmpty() && tab == Tab.Departures && appStarted
-    LaunchedEffect(extraWanted, addedStops, options.products, departuresFrom, departuresPull) {
+    // For "when to leave" the added stops are asked from when the user can be there (see leaveDeparturesFrom).
+    val extraLeaveFrom = leaveOrderOn && !usingFallback
+    LaunchedEffect(extraWanted, addedStops, options.products, departuresFrom, departuresPull, extraLeaveFrom) {
         if (!extraWanted) return@LaunchedEffect
-        val question = listOf(options.products, departuresFrom)
+        val question = listOf(options.products, departuresFrom, extraLeaveFrom)
         // Another question: the old answers go; a stop added or removed keeps the others'.
         extraBoards = if (extraBoardsFor == question) {
             extraBoards.filterKeys { id -> addedStops.any { it.id == id } }
@@ -1727,7 +2120,12 @@ fun AppRoot() {
                 asked.map { stop ->
                     async {
                         try {
-                            stop.id to source.departures(stop.id, DEPARTURE_PAGE, options.products, departuresFrom).placedAt(stop.position)
+                            val from = if (extraLeaveFrom) {
+                                leaveDeparturesFrom(leaveStopWalkSeconds(center, stop), departuresFrom, OffsetDateTime.now())
+                            } else {
+                                departuresFrom
+                            }
+                            stop.id to source.departures(stop.id, DEPARTURE_PAGE, options.products, from).placedAt(stop.position)
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -1743,7 +2141,9 @@ fun AppRoot() {
     }
     // The board of the selected stop with those added: by time, each row naming its stop.
     val selectedForBoard = stops.firstOrNull { it.id == selectedStopId } ?: foundStops.firstOrNull { it.id == selectedStopId }
-    val shownBoard = remember(departureBoard, departures, extraBoards, addedStops, selectedForBoard) {
+    // For "when to leave" the boards end by the time to set off, each stop with its own walk.
+    val leaveHere = if (extraLeaveFrom) center else null
+    val shownBoard = remember(departureBoard, departures, extraBoards, addedStops, selectedForBoard, leaveHere) {
         if (addedStops.isEmpty() || selectedForBoard == null) {
             departureBoard
         } else {
@@ -1752,6 +2152,7 @@ fun AppRoot() {
                     addedStops.mapNotNull { stop ->
                         extraBoards[stop.id]?.let { list -> StopDepartures(stop, list, list.size >= DEPARTURE_PAGE) }
                     },
+                walkSeconds = { stop -> leaveHere?.let { leaveStopWalkSeconds(it, stop) } },
             )
         }
     }
@@ -1822,8 +2223,11 @@ fun AppRoot() {
 
     // What covers the map, in pixels of the screen: [0] the top edge of the start page's
     // sheet or cards, [1] the height of the map, [2] the top edge of the stop card on the
-    // map tab. Read when the map centres itself, so it never makes the page compose again.
-    val mapCover = remember { floatArrayOf(Float.NaN, Float.NaN, Float.NaN) }
+    // map tab, [3] the system navigation at the bottom: the map reaches down under it, the pages
+    // and their tab bar end above it (systemBarsPadding). Read when the map centres itself, so
+    // it never makes the page compose again.
+    val mapCover = remember { floatArrayOf(Float.NaN, Float.NaN, Float.NaN, 0f) }
+    mapCover[3] = WindowInsets.navigationBars.getBottom(LocalDensity.current).toFloat()
     // The top edge of the start page's sheet as state, for the quiet logo on the plain ground
     // without the map (StartLogoMark); read only while placing, so it costs no composition.
     val startLogoCover = remember { mutableStateOf(Float.NaN) }
@@ -1846,7 +2250,7 @@ fun AppRoot() {
             onStart -> mapCover[0]
             onMapTab && stopMarked && selectedStop != null -> mapCover[2]
             // The top of the tab bar.
-            else -> height - (navInset - SHEET_NAV_GAP).value * density
+            else -> height - mapCover[3] - (navInset - SHEET_NAV_GAP).value * density
         }
         if (height.isNaN() || coverTop.isNaN() || coverTop > height) return target
         val visibleTop = statusTop + MAP_TOP_COVER_DP * density
@@ -1920,9 +2324,13 @@ fun AppRoot() {
     }
 
     // Where the map rests while it follows the user: the position in the middle of what is in view.
+    // The camera follows every position the device reports, not only the steps of [center]
+    // (which moves on after POSITION_SHIFT_METERS, for the stops around): else it stood still
+    // between those steps and then jumped, which looked like a frozen position on the way.
+    val followPosition = if (usingFallback) center else devicePosition ?: center
     var followTarget by remember { mutableStateOf(center) }
-    LaunchedEffect(center, map, coverKnown) {
-        val shifted = visibleTarget(center, null)
+    LaunchedEffect(followPosition, map, coverKnown) {
+        val shifted = visibleTarget(followPosition, null)
         followTarget = shifted.latitude to shifted.longitude
     }
 
@@ -1933,21 +2341,55 @@ fun AppRoot() {
     // With the map switched off for the start page, it only runs on the pages that are about it.
     val walkView = walkFocus != null
     val mapShown = startMap || onMapTab || planView || tripView || courseView || walkView
-    val pageState = PageState(courseView, searchMode, tab, settingsOpen, tripOpen, showingConnections, planning, mapFromDepartures)
+    val pageState = PageState(courseView, searchMode, tab, settingsOpen, tripOpen, showingConnections, planning, mapFromDepartures, favoritesFromMap)
     val screen = pageOf(pageState)
     // The pages follow [screen] through a seekable transition, so a back gesture can show the
-    // page before while it goes on (see PredictiveBackHandler below): [backFrom] is the page
+    // page before while it goes on (see AppBackHandler below): [backFrom] is the page
     // the gesture started on while it runs, [backProgress] how far it went (0 to 1), from the
     // left edge or the right ([backFromLeft]); [backSwipe] picks the transition for it.
     val screenSeek = remember { SeekableTransitionState(screen) }
+    val pageTransition = rememberTransition(screenSeek, label = "screen")
     var backFrom by remember { mutableStateOf<Screen?>(null) }
     var backSwipe by remember { mutableStateOf(false) }
     var backFromLeft by remember { mutableStateOf(true) }
     val backProgress = remember { Animatable(0f) }
+    // The picture of the map the page a gesture leaves takes along (see the handler below);
+    // where the pages lie on the screen and how large the map is, to lay it where the map is.
+    var backShot by remember { mutableStateOf<ImageBitmap?>(null) }
+    // The rest of what it takes along, and how it goes (see BackStage).
+    val backStage = remember { BackStage() }
+    backStage.marks = rememberGraphicsLayer()
+    backStage.backdrop = backdrop
+    backStage.progress = backProgress
+    backStage.seek = screenSeek
+    // Only for the back log of the performance lab, and let go with AppRoot.
+    if (BackLog.on) {
+        DisposableEffect(backStage) {
+            BackProbe.stage = backStage
+            onDispose { if (BackProbe.stage === backStage) BackProbe.stage = null }
+        }
+    }
+    val pagesOrigin = remember { floatArrayOf(0f, 0f) }
+    val mapSize = remember { intArrayOf(0, 0) }
+    // Counts the back gestures: the end of one (its last animation) only clears the state when
+    // no newer gesture has started in the meantime.
+    val backGestures = remember { intArrayOf(0) }
     fun endBack() {
         backFrom = null
         backSwipe = false
-        scope.launch { backProgress.snapTo(0f) }
+        backShot = null
+        backStage.marksShot = null
+        backStage.mapStays = false
+        backStage.mapCard = false
+        backStage.plainAfter = false
+        backStage.plainBefore = false
+        backStage.fogBefore = false
+        backStage.fogAfter = false
+        scope.launch {
+            backProgress.snapTo(0f)
+            backStage.fade.snapTo(1f)
+            backStage.shots.snapTo(1f)
+        }
     }
     // Every other change of the page animates as it always did; also the page a back gesture
     // ended on, should it not be the one it showed.
@@ -1987,9 +2429,22 @@ fun AppRoot() {
     // A remembered connection shows only the journeys that ride its lines, while one of them
     // leaves within the window; otherwise the normal ones, with a note.
     val patternFrom = (journeyTime?.takeIf { !it.arrival }?.time ?: now).minusMinutes(1)
-    val visiblePattern = patternView(journeys, patternFilter?.lines, patternFrom)
-    val visibleJourneys = visiblePattern?.takeIf { it.running }?.matching
-        ?: journeySelection(journeys, shownComfort, journeyLevels).shown
+    // Worked out again only when what they come from changes: AppRoot composes again for a pick
+    // in the chart (just as the journey page grows out of it) and for much else, and rating every
+    // journey anew each time cost the first frames of the opening (see the page lists below).
+    val selectionRating = ratingSettingsShown.intValue
+    // Only while a page that shows them is in front or coming (the connections, the plan):
+    // a search kept behind the map tab was rated anew with every tick of the clock and every
+    // pack of OpenStreetMap that came in, on the main thread, though nothing showed it.
+    val listsShown = journeyListsShown(screen) || journeyListsShown(pageTransition.currentState) ||
+        journeyListsShown(pageTransition.targetState)
+    val visiblePattern = rememberWhileShown(listsShown, journeys, patternFilter?.lines, patternFrom) {
+        AllocProbe.measure(AllocProbe.PAGE_LISTS) { patternView(journeys, patternFilter?.lines, patternFrom) }
+    }
+    val visibleSelection = rememberWhileShown(listsShown, journeys, shownComfort, journeyLevels, selectionRating, now) {
+        AllocProbe.measure(AllocProbe.PAGE_LISTS) { journeySelection(journeys, shownComfort, journeyLevels) }
+    }
+    val visibleJourneys = visiblePattern?.takeIf { it.running }?.matching ?: visibleSelection.shown
     val planShown = planWindow(visibleJourneys.orEmpty(), journeyTime, connectionsState.selectedId, now)
     val planPicked = planShown.firstOrNull { it.id == connectionsState.selectedId }
         ?: defaultJourney(planShown, journeyTime, now)
@@ -2167,8 +2622,10 @@ fun AppRoot() {
         destination = null
         everyMinute = false
         via = null
-        // The next search from the start page leaves now again.
+        // The next search from the start page leaves now again, and from where the user is
+        // when its start came back with a page of an earlier run (see startAfterClose).
         journeyTime = null
+        origin = OpenJourneyKeeper.startClosed(origin)
     }
 
     // The levels of transfer comfort a search asks for: all of them, so the chosen level only
@@ -2176,8 +2633,18 @@ fun AppRoot() {
     // Levels that ask with the same change time (risky and very risky) are asked once.
     fun searchLevels(): List<TransferComfort> = TransferComfort.entries.distinctBy { it.minutes }
 
+    // What the journeys of a search gathered: changes asked about, offers, adapted journeys.
+    fun forgetJourneyExtras() {
+        tightAsked.clear()
+        transferOffers.clear()
+        adaptedFrom.clear()
+    }
+
     // [keepView] stays on the page the search was started from instead of opening the first page of a search.
-    fun searchJourneys(keepView: Boolean = false) {
+    // [quiet] asks again for the search that is shown (see refreshJourneys): the journeys, the
+    // pick and a message stay until the answer is there, and a failure only shows where no
+    // journey is left to show.
+    fun searchJourneys(keepView: Boolean = false, quiet: Boolean = false) {
         val from = origin ?: selectedStop ?: return
         val to = destination ?: return
         searchJob?.cancel()
@@ -2185,29 +2652,31 @@ fun AppRoot() {
         earlierJob?.cancel()
         offersJob?.cancel()
         tightJob?.cancel()
-        tightAsked.clear()
-        transferOffers.clear()
-        adaptedFrom.clear()
+        // A refresh keeps what belongs to the journeys shown until new ones are there.
+        if (!quiet) forgetJourneyExtras()
         loadingLater = false
         loadingEarlier = false
-        journeys = null
-        // A trip that is followed goes on; only its page makes room for the new search.
-        companionOpen = false
-        stopsFailedId = null
-        connectionsState = ConnectionsState()
-        // With the map step switched off, a search opens its connections at once.
-        if (!keepView) planning = planFirst
-        // The pair is kept, so the same search can be started again from the start page.
-        val pair = SavedRoute(from.copy(distanceMeters = null), to.copy(distanceMeters = null))
-        recentRoutes = (listOf(pair) + recentRoutes.filter { it.id != pair.id }).take(MAX_RECENT_ROUTES)
-        prefs.saveRecentRoutes(recentRoutes)
-        journeysError = null
-        earlierRefs = emptyMap()
-        laterRefs = emptyMap()
-        journeyLevels = emptyMap()
-        foundLevels = emptyMap()
-        comfortOverride = null
-        journeysLoading = true
+        if (!quiet) {
+            journeys = null
+            // A trip that is followed goes on; only its page makes room for the new search.
+            companionOpen = false
+            stopsFailedId = null
+            connectionsState = ConnectionsState()
+            // With the map step switched off, a search opens its connections at once.
+            if (!keepView) planning = planFirst
+            // The pair is kept, so the same search can be started again from the start page.
+            val pair = SavedRoute(from.copy(distanceMeters = null), to.copy(distanceMeters = null))
+            recentRoutes = (listOf(pair) + recentRoutes.filter { it.id != pair.id }).take(MAX_RECENT_ROUTES)
+            prefs.saveRecentRoutes(recentRoutes)
+            journeysError = null
+            journeyLevels = emptyMap()
+            foundLevels = emptyMap()
+            comfortOverride = null
+            journeysLoading = true
+            earlierRefs = emptyMap()
+            laterRefs = emptyMap()
+        }
+        journeysRefreshing = quiet
         val time = journeyTime
         val levels = searchLevels()
         val askedVia = via
@@ -2223,8 +2692,11 @@ fun AppRoot() {
             }
             val found = pages.filter { it.page != null }
             if (found.isNotEmpty()) {
+                // An answer clears the message of a search that failed before, whichever way it was asked again.
+                journeysError = null
+                if (quiet) forgetJourneyExtras()
                 foundLevels = withFoundLevels(emptyMap(), found)
-                journeys = withFound(mergeSearchPages(emptyList(), found.flatMap { it.page!!.journeys }), foundLevels)
+                journeys = withFound(mergeSearchPages(emptyList(), found.flatMap { it.page!!.journeys }, OffsetDateTime.now()), foundLevels)
                 journeyLevels = levelsOf(journeys)
                 earlierRefs = found.mapNotNull { part -> part.page!!.earlierRef?.let { part.level to it } }.toMap()
                 laterRefs = found.mapNotNull { part -> part.page!!.laterRef?.let { part.level to it } }.toMap()
@@ -2232,10 +2704,37 @@ fun AppRoot() {
                 // The provider found no journey at all, e.g. to a place away from any way it knows:
                 // that is an empty list with its own message, not a failed request.
                 val failure = pages.mapNotNull { it.error }.firstOrNull { !(it is HttpStatusException && it.nothingFound) }
-                if (failure == null) journeys = emptyList() else journeysError = errorText(context, failure)
+                if (failure == null) {
+                    journeysError = null
+                    journeys = emptyList()
+                } else if (!quiet || journeys.isNullOrEmpty()) {
+                    // A refresh that fails keeps the journeys it was asked over; with none to show it says why.
+                    journeysError = errorText(context, failure)
+                }
             }
             journeysLoading = false
+            journeysRefreshing = false
         }
+        // Cancelled by another search: that one sets both flags again.
+        searchJob?.invokeOnCompletion { if (it != null && searchJob?.isActive != true) journeysRefreshing = false }
+    }
+
+    // Asks again for the search that is shown, in the background: a pull to refresh, "Try again"
+    // ([asked]), or a retry of a failed search. One that already runs is waited for, not started
+    // anew. Asked for by hand, the backends that failed lately are tried again at once instead of
+    // resting a while (see SourceHealth): the user asks because something may have come back.
+    fun refreshJourneys(asked: Boolean): Job? {
+        // Off screen nothing is asked again; the retries go on once the app is back.
+        if (!appStarted) return null
+        if (journeysRefreshing && searchJob?.isActive == true) {
+            if (asked) journeysAsked = true
+            return searchJob
+        }
+        if (journeysLoading) return searchJob
+        if (asked) SourceHealth.shared.reset()
+        journeysAsked = asked
+        searchJourneys(keepView = true, quiet = true)
+        return searchJob
     }
 
     fun loadLater() {
@@ -2252,7 +2751,7 @@ fun AppRoot() {
             val found = pages.filter { it.page != null }
             if (found.isNotEmpty()) {
                 foundLevels = withFoundLevels(foundLevels, found)
-                journeys = withFound(mergeSearchPages(journeys.orEmpty(), found.flatMap { it.page!!.journeys }), foundLevels)
+                journeys = withFound(mergeSearchPages(journeys.orEmpty(), found.flatMap { it.page!!.journeys }, OffsetDateTime.now()), foundLevels)
                 journeyLevels = levelsOf(journeys)
                 laterRefs = laterRefs - found.map { it.level }.toSet() +
                     found.mapNotNull { part -> part.page!!.laterRef?.let { part.level to it } }
@@ -2275,7 +2774,7 @@ fun AppRoot() {
             if (found.isNotEmpty()) {
                 foundLevels = withFoundLevels(foundLevels, found)
                 // The journeys shown win over the same ones on the new page (see mergeSearchPages).
-                journeys = withFound(mergeSearchPages(journeys.orEmpty(), found.flatMap { it.page!!.journeys }), foundLevels)
+                journeys = withFound(mergeSearchPages(journeys.orEmpty(), found.flatMap { it.page!!.journeys }, OffsetDateTime.now()), foundLevels)
                 journeyLevels = levelsOf(journeys)
                 earlierRefs = earlierRefs - found.map { it.level }.toSet() +
                     found.mapNotNull { part -> part.page!!.earlierRef?.let { part.level to it } }
@@ -2286,6 +2785,7 @@ fun AppRoot() {
 
     // Puts fresh live data in the place of a loaded journey. The ways are not loaded again,
     // so the known ones are kept, and so are stops on the way that the fresh data leaves out.
+    // A walk keeps its way with the target and exit it was led to, as one (see WalkAccess.keptWay).
     // A pick follows its journey should the id have changed. False when nothing was replaced.
     fun replaceJourney(old: Journey, fresh: Journey): Boolean {
         val list = journeys ?: return false
@@ -2293,17 +2793,21 @@ fun AppRoot() {
         val updated = Journey(
             legs = fresh.legs.mapIndexed { index, leg ->
                 val known = old.legs[index]
-                leg.copy(path = known.path, stopovers = leg.stopovers.ifEmpty { known.stopovers })
+                WalkAccess.keptWay(leg, known).copy(stopovers = leg.stopovers.ifEmpty { known.stopovers })
             },
             refreshToken = fresh.refreshToken ?: old.refreshToken,
             split = old.split,
             via = old.via,
             foundLevel = old.foundLevel,
+            // The other change points it offers stay on offer.
+            altChanges = old.altChanges,
         )
         if (updated.id != old.id && list.any { it.id == updated.id }) return false
         // New live times can move it past its neighbours: the list keeps its order (see searchOrder),
         // and the views glide the journey to its new place.
-        journeys = list.map { if (it.id == old.id) updated else it }.sortedWith(searchOrder)
+        // The rides it shares with other journeys take its fresh live times too: one ride, one set
+        // of times and one rating of its changes in every journey (see shareLiveTimes).
+        journeys = shareLiveTimes(list.map { if (it.id == old.id) updated else it }, fresher = listOf(updated)).sortedWith(searchOrder)
         // The category of the journey follows it too.
         journeyLevels = levelsOf(journeys)
         if (connectionsState.selectedId == old.id) connectionsState.selectedId = updated.id
@@ -2394,6 +2898,12 @@ fun AppRoot() {
         return inside
     }
 
+    // The notice "Finding your location …" goes once the start is there.
+    fun endLocatingNotice() {
+        val shown = snackbar.currentSnackbarData ?: return
+        if (shown.visuals.message == context.getString(R.string.start_locating)) shown.dismiss()
+    }
+
     // "Current location" as the start: a position that was waited for becomes the start, and
     // with [moved] one that turns out to lie elsewhere runs the open search again from there.
     fun startFromPosition(moved: Boolean) {
@@ -2401,6 +2911,7 @@ fun AppRoot() {
         if (originPending[0]) {
             originPending[0] = false
             origin = currentPlace(center)
+            endLocatingNotice()
             if (destination != null) searchJourneys()
         } else if (moved && origin?.id == CURRENT_LOCATION_ID) {
             origin = currentPlace(center)
@@ -2470,9 +2981,28 @@ fun AppRoot() {
 
     // A new choice of how tight changes may be is kept. Every search loads all levels, so
     // the choice only changes which of the loaded journeys are shown.
+    // The level "Undo" goes back to: the one before a row of picks (a drag across the levels).
+    var levelUndo by remember { mutableStateOf<TransferComfort?>(null) }
+
+    // The connections stay on the connection they showed (see ConnectionsScreen); "Undo" in a
+    // snackbar goes back to the level before.
     fun pickComfort(comfort: TransferComfort) {
         if (comfort == options.comfort) return
+        val before = levelUndo ?: options.comfort
+        levelUndo = before
         updateOptions(options.copy(comfort = comfort))
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            val result = snackbar.showSnackbar(
+                message = context.getString(R.string.level_changed, context.getString(levelNameRes(comfort))),
+                actionLabel = context.getString(R.string.undo),
+                duration = SnackbarDuration.Short,
+            )
+            // A later pick took this snackbar away: that one decides.
+            if (options.comfort != comfort) return@launch
+            levelUndo = null
+            if (result == SnackbarResult.ActionPerformed && before != comfort) updateOptions(options.copy(comfort = before))
+        }
     }
 
     // A picked time closes the sheet. An open search runs again with it and stays on its page;
@@ -2660,7 +3190,9 @@ fun AppRoot() {
     fun adaptJourney(journey: Journey, keepLegs: Int, option: Journey) {
         val list = journeys ?: return
         if (list.none { it.id == journey.id }) return
-        val changed = spliceJourney(journey, keepLegs, option)
+        // The same rides changed at another stop: that variant as a whole (see switchToAltChange).
+        val switching = keepLegs == ALT_CHANGE_SWITCH
+        val changed = if (switching) option else spliceJourney(journey, keepLegs, option)
         if (changed.id == journey.id) return
         if (list.any { it.id == changed.id }) {
             // The search found this very journey as well: it is picked instead of being made twice.
@@ -2670,9 +3202,11 @@ fun AppRoot() {
         // Another rest arrives at another time, which can change its place among equal departures.
         journeys = list.map { if (it.id == journey.id) changed else it }.sortedWith(searchOrder)
         journeyLevels = levelsOf(journeys)
-        adaptedFrom[changed.id] = adaptedFrom.remove(journey.id) ?: journey
-        // The choice at this change stays on offer, now with the other departure picked.
-        transferOffers[offerKey(journey.id, keepLegs)]?.let { transferOffers[offerKey(changed.id, keepLegs)] = it }
+        if (!switching) {
+            adaptedFrom[changed.id] = adaptedFrom.remove(journey.id) ?: journey
+            // The choice at this change stays on offer, now with the other departure picked.
+            transferOffers[offerKey(journey.id, keepLegs)]?.let { transferOffers[offerKey(changed.id, keepLegs)] = it }
+        }
         if (stopsFailedId == journey.id) stopsFailedId = null
         connectionsState.selectedId = changed.id
     }
@@ -2704,6 +3238,7 @@ fun AppRoot() {
         color: Int? = null,
         textColor: Int? = null,
         at: Pair<Double, Double>? = null,
+        fromVehicle: Boolean = false,
     ) {
         if (tripId == null) return
         pinned = null
@@ -2714,7 +3249,7 @@ fun AppRoot() {
             courseOrigin[0] = OpenOrigin.take()
         }
         courseFit[0] = fit
-        courseRequest = CourseRequest(tripId, line, product, direction, fromStop, color, textColor, at)
+        courseRequest = CourseRequest(tripId, line, product, direction, fromStop, color, textColor, at, fromVehicle)
     }
 
     // Closes the course; the map goes back to where it looked before. Where it would have
@@ -2960,6 +3495,50 @@ fun AppRoot() {
         if (destination != null) searchJourneys(keepView = true)
     }
 
+    // No position for a start that was waited for: said, with the way to choose another start.
+    fun startNotFound() {
+        endLocatingNotice()
+        scope.launch {
+            val result = snackbar.showSnackbar(
+                message = context.getString(R.string.start_not_found),
+                actionLabel = context.getString(R.string.choose_start),
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) searchMode = SearchMode.Origin
+        }
+    }
+    originPending.notFound = ::startNotFound
+
+    // A destination is picked while the start at the position of the user is not known yet:
+    // the search waits for a fresh position (at most START_WAIT_MILLIS, also taken by the round
+    // of startFromPosition where that answers first) and says so; else the last known position
+    // stands in, and without any the user is told and can choose a start.
+    fun awaitStart() {
+        originPending[0] = true
+        // One wait at a time: a new one replaces the one before, with its request and notice.
+        originPending.job?.cancel()
+        endLocatingNotice()
+        scope.launch {
+            snackbar.showSnackbar(context.getString(R.string.start_locating), duration = SnackbarDuration.Long)
+        }
+        originPending.job = scope.launch {
+            val fresh = withTimeoutOrNull(START_WAIT_MILLIS) { currentLocation(context) }
+                ?.let { it.latitude to it.longitude }
+                ?.takeIf { prefs.sourceChoice.covers(it.first, it.second) }
+            // The position came in another way meanwhile and the search runs already.
+            if (!originPending[0]) return@launch
+            val place = fresh ?: readLocation(context, prefs.sourceChoice)
+            originPending[0] = false
+            if (place == null) {
+                startNotFound()
+                return@launch
+            }
+            origin = currentPlace(place)
+            endLocatingNotice()
+            if (destination != null) searchJourneys()
+        }
+    }
+
     fun pickDestination(target: Stop) {
         // A remembered connection is set again after this by the one who opens it.
         patternFilter = null
@@ -2968,13 +3547,24 @@ fun AppRoot() {
         destination = target
         rememberSearch(target)
         searchMode = null
-        // A start at the position of the user that is still awaited runs the search once it is there.
-        if (originPending[0]) return
+        // A start at the position of the user that is still awaited runs the search once it is
+        // there; so does a start that is not known at all. Never nothing: the user is told.
+        if (originPending[0] || (origin == null && selectedStop == null)) {
+            awaitStart()
+            return
+        }
         searchJourneys()
     }
 
     fun pickOrigin(place: Stop) {
         patternFilter = null
+        if (place.id != CURRENT_LOCATION_ID && originPending[0]) {
+            // A start picked by hand ends the wait for the position and its notice.
+            originPending[0] = false
+            originPending.job?.cancel()
+            originPending.job = null
+            endLocatingNotice()
+        }
         if (place.id == CURRENT_LOCATION_ID) {
             if (usingFallback) {
                 // No position yet: it is asked for and becomes the start once it is there,
@@ -3416,10 +4006,14 @@ fun AppRoot() {
     }
 
     // Live vehicles: loaded for the visible part of the map while the map is in view and
-    // the app on screen; on the start page only when the user wants them there.
-    val mapInView = appStarted && ((onStart && startVehicles && startMap) || onMapTab)
-    // Zoomed out to the whole city no vehicles are shown, so none are loaded.
-    val vehiclesWanted = mapInView && tier != MapTier.City
+    // the app on screen; on the start page only when the user wants them there. With the
+    // setting "Vehicles on the map" off none are asked for at all; with "Dynamic" only zoomed
+    // in close (vehiclesClose), further out the list is emptied.
+    val mapInView = appSettled && ((onStart && startVehicles && startMap) || onMapTab)
+    // Vehicles show as dots down to VEHICLE_DOT_MIN_ZOOM; which ones are asked for at which
+    // zoom, and which known ones stay, see loadMapVehicles.
+    val vehiclesWanted = mapInView && mapVehiclesWanted(Appearance.mapVehicles, vehiclesClose)
+    val seenVehicles = remember { SeenVehicles() }
     LaunchedEffect(map, vehiclesWanted, mapCenter, tier) {
         val readyMap = map
         if (readyMap == null || !vehiclesWanted) {
@@ -3430,42 +4024,14 @@ fun AppRoot() {
         delay(600)
         while (true) {
             try {
-                val first = readyMap.projection.fromScreenLocation(PointF(0f, 0f))
-                val second = readyMap.projection.fromScreenLocation(PointF(readyMap.width, readyMap.height))
-                // Sorted by hand, so a rotated map still gives a valid box.
-                var north = maxOf(first.latitude, second.latitude)
-                var south = minOf(first.latitude, second.latitude)
-                var east = maxOf(first.longitude, second.longitude)
-                var west = minOf(first.longitude, second.longitude)
-                // A tilted map reaches far towards the horizon: the box is then cut to the
-                // usual span around the middle of the view instead of loading nothing.
-                if (north - south > MAX_VEHICLE_SPAN && readyMap.cameraPosition.tilt > 1.0) {
-                    val middle = readyMap.cameraPosition.target
-                    if (middle != null) {
-                        val half = MAX_VEHICLE_SPAN / 2
-                        north = middle.latitude + half
-                        south = middle.latitude - half
-                        east = minOf(east, middle.longitude + half * 1.6)
-                        west = maxOf(west, middle.longitude - half * 1.6)
-                    }
+                val loaded = loadMapVehicles(source, readyMap, tier, vehicles, seenVehicles)
+                // Zoomed out beyond the dots nothing is asked for: the last vehicles stay, so
+                // zooming back in finds them at once instead of a map that fills up again.
+                if (loaded != null) {
+                    vehicles = loaded
+                    vehiclesSince = SystemClock.uptimeMillis()
+                    if (loaded.size >= MAX_VEHICLES) DiagLog.d(PERF_LOG_TAG) { "${loaded.size} vehicles at tier $tier" }
                 }
-                // Zoomed far out there would be hundreds of vehicles: show none then.
-                vehicles = if (north - south > MAX_VEHICLE_SPAN) {
-                    emptyList()
-                } else {
-                    // The district tier draws only trains (dots of the rapid network): ask for
-                    // those alone. Unfiltered, the limit of the request filled up with buses
-                    // and trams of the large box first, and hardly a train was left to draw.
-                    source.vehicles(
-                        north = north,
-                        west = west,
-                        south = south,
-                        east = east,
-                        results = MAX_VEHICLES,
-                        products = if (tier == MapTier.District) RAPID_VEHICLE_PRODUCTS else null,
-                    )
-                }
-                vehiclesSince = SystemClock.uptimeMillis()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -3526,7 +4092,15 @@ fun AppRoot() {
                         val loaded = source.tripCourse(runId)
                         loaded.copy(path = thinned(loaded.path))
                     } else {
-                        source.tripStopovers(runId).takeIf { it.isNotEmpty() }?.let { known.copy(stops = it) }
+                        source.tripStopovers(runId).takeIf { it.isNotEmpty() }?.let { stops ->
+                            // The air hops count by stop: with another number of stops they are found anew (see TripTrack).
+                            val hops = if (stops.size == known.stops.size) {
+                                known.airHops
+                            } else {
+                                io.github.jnbp.nextstop.data.airHops(known.path, stops.map { it.place?.position })
+                            }
+                            known.copy(stops = stops, airHops = hops)
+                        }
                     }
                     if (fresh != null) {
                         tripCourses[tripId] = fresh
@@ -3611,6 +4185,9 @@ fun AppRoot() {
         val followed = companion ?: return@LaunchedEffect
         frameTrip(tripFocus(followed, OffsetDateTime.now(), ownLocation, tripTracks, feederTracks))
     }
+    // And between framings the camera moves along with the traveller, until the map is moved by hand.
+    val ownDot = remember { OwnDot() }
+    OwnFollow(map, active = tripView && !tripFrameHeld, dot = ownDot, frameKey = "$frameKey|$frameVehicleKnown|${ownLocation != null}")
 
     // A walk on the big map frames itself and the own position, and moves along as the
     // position changes, until the map is moved by hand. Another page ends it.
@@ -3629,7 +4206,7 @@ fun AppRoot() {
     // ride the traveller is on or of a connecting ride changes which of them can be caught.
     // A switch to another departure keeps them; the next change or the next trip loads anew.
     val change = companion?.let { upcomingChange(it, now) }
-    val offersWanted = tripView && appStarted
+    val offersWanted = tripView && appSettled
     LaunchedEffect(tripSerial, change?.stop?.id, change?.keepLegs, offersWanted) {
         if (change == null) {
             alternatives = null
@@ -3682,12 +4259,12 @@ fun AppRoot() {
     }
 
     // The appointments for the tile on the start page, read again and again while it is in view.
-    LaunchedEffect(calendarGranted, onStart, appStarted) {
+    LaunchedEffect(calendarGranted, onStart, appSettled) {
         if (!calendarGranted) {
             appointments = null
             return@LaunchedEffect
         }
-        if (!onStart || !appStarted) return@LaunchedEffect
+        if (!onStart || !appSettled) return@LaunchedEffect
         while (true) {
             appointments = upcomingAppointments(context)
             delay(CALENDAR_REFRESH_MILLIS)
@@ -3954,6 +4531,8 @@ fun AppRoot() {
         }
     }
     val iconLabels = PlaceIcon.entries.associateWith { placeIconLabel(it) }
+    // Where the device is, for "You are here" on the tile of a place.
+    val herePosition = ownLocation ?: devicePosition
     val tiles = buildList<PlaceTile> {
         favoritePlaces.forEachIndexed { index, favorite ->
             val place = favorite.place
@@ -3967,7 +4546,15 @@ fun AppRoot() {
                     journey = known?.journey,
                     // Who already is at the place has no journey to wait for.
                     loaded = known != null || place?.id == startPlace?.id,
-                    here = place != null && startPlace != null && atPlace(startPlace, place),
+                    // At the place already (see atSavedPlace): "You are here", not "No connection found".
+                    here = place != null && atSavedPlace(
+                        place = place.position,
+                        placeId = place.id,
+                        startId = startPlace?.id,
+                        start = startPlace?.position,
+                        device = herePosition,
+                        noJourney = known != null && known.journey == null,
+                    ),
                     onClick = {
                         if (place != null) {
                             pickDestination(place)
@@ -4009,7 +4596,7 @@ fun AppRoot() {
             )
         }
     }
-    val tilesInView = appStarted && (onStart || (tab == Tab.Favorites && !courseView))
+    val tilesInView = appSettled && (onStart || (tab == Tab.Favorites && !courseView))
     LaunchedEffect(tilesInView, tileRoutes.joinToString { it.id }, options) {
         if (!tilesInView) return@LaunchedEffect
         delay(TILE_SETTLE_MILLIS)
@@ -4121,7 +4708,11 @@ fun AppRoot() {
             // Ended by a newer request, this one leaves the state to it.
             if (locateRound == round) {
                 locating = false
-                originPending[0] = false
+                // A start that waited for this position and got none: never silently nothing.
+                if (originPending[0]) {
+                    originPending[0] = false
+                    if (destination != null) startNotFound()
+                }
             }
         }
     }
@@ -4129,15 +4720,23 @@ fun AppRoot() {
     // While the app is in front and may ask, the device reports where it is: often while a
     // trip is followed, at a calmer pace otherwise. This one listener serves the start page,
     // the map and the companion. Leaving the app ends the updates.
-    DisposableEffect(appStarted, locationGranted, tripView, walkView) {
+    // The map follows the user while riding: then the position comes as often as on a trip.
+    val mapFollowsUser = mapShown && (onStart || onMapTab) && !viewHeld
+    val ridingFollowed = riding && mapFollowsUser
+    DisposableEffect(appStarted, locationGranted, tripView, walkView, ridingFollowed) {
         if (!tripView || !locationGranted) ownLocation = null
         if (!appStarted || !locationGranted || !hasLocationPermission(context)) return@DisposableEffect onDispose { }
         val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val following = tripView
-        // A walk on the map follows the position as closely as a trip does.
-        val often = following || walkView
+        // A walk on the map follows the position as closely as a trip does, and so does the map
+        // that follows a user who rides.
+        val often = following || walkView || ridingFollowed
         val listener = LocationListener { location ->
             val place = location.latitude to location.longitude
+            if (location.hasSpeed()) {
+                if (!riding && location.speed > RIDING_SPEED) riding = true
+                if (riding && location.speed < WALKING_SPEED) riding = false
+            }
             // The widgets get no position of their own in the background: they take this one.
             recordWidgetPosition(context, location)
             // On a walk the traveller may leave its way: then a new one is asked for.
@@ -4154,6 +4753,8 @@ fun AppRoot() {
             listener = listener,
             intervalMillis = if (often) LOCATION_INTERVAL_MILLIS else POSITION_INTERVAL_MILLIS,
             minMeters = if (often) LOCATION_MIN_METERS else POSITION_MIN_METERS,
+            precise = often,
+            executor = context.mainExecutor,
         )
         onDispose { stopLocationUpdates(manager, listener) }
     }
@@ -4263,6 +4864,8 @@ fun AppRoot() {
         if (course?.tripId != courseId) {
             course = null
             courseFailed = false
+            // A new course looks at its vehicle again; where the line is not to be framed, the map stays.
+            courseCamera.open(follow = courseFit[0])
             try {
                 val loaded = source.tripCourse(courseId)
                 val path = thinned(loaded.path)
@@ -4272,7 +4875,11 @@ fun AppRoot() {
                     // The list of stops comes in with the course: the frame waits until it stands,
                     // so the room between header and list is measured as it is.
                     delay(COURSE_FIT_WAIT_MILLIS)
-                    fitCamera(path.ifEmpty { loaded.stops.mapNotNull { it.place?.position } }, topDp = 130, bottomDp = 360)
+                    // From a tapped vehicle the camera follows it with its next stops (see CourseFollow).
+                    val request = courseRequest
+                    if (request?.fromVehicle != true || request.tripId != courseId) {
+                        fitCamera(path.ifEmpty { loaded.stops.mapNotNull { it.place?.position } }, topDp = 130, bottomDp = 360)
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -4403,82 +5010,263 @@ fun AppRoot() {
         kind = PlaceKind.Address,
     )
 
+    // Back is taken by the app wherever it leads somewhere inside it; on the start page it is
+    // left to the system (back to the home screen, with its own animation). What one back does
+    // comes from one table (see backStep), shared by goBack and its preview below.
+    // A page of "My routes" over its first page: back stays in the tab (the screen stays the same).
+    // Opened from the map tab, its first page is the one back leads from to the map.
+    val favoritesSubOpen = tab == Tab.Favorites && favoritesPages.size > (if (favoritesFromMap) 1 else 0) && !courseView &&
+        searchMode == null
+    // The card of a stop tapped on the map of the start page (see startPickedStop): back lets go of it first.
+    val startStopCard = mapShown && onStart && stopMarked && mapPickedStopId != null && mapPickedStopId == selectedStopId
+    val backFacts = BackFacts(
+        page = pageState,
+        walk = walkView,
+        pin = pinned != null && (onStart || onMapTab),
+        pickedStop = startStopCard,
+        positionCard = pickedPosition != null && onMapTab,
+        stopCard = stopMarked && selectedStop != null && onMapTab && !mapFromDepartures,
+        favoritesSub = favoritesSubOpen,
+    )
+    val step = backStep(backFacts, planFirst)
+
     fun goBack() {
-        when {
+        when (backStep(backFacts, planFirst)) {
             // A walk on the big map goes back to the page it was opened from.
-            walkView -> closeWalk()
+            BackStep.CloseWalk -> closeWalk()
             // A marked place is let go first: the start sheet shows its own content again.
-            pinned != null && (onStart || onMapTab) && !courseView -> pinned = null
+            BackStep.Unpin -> pinned = null
+            // The card of a stop tapped on the start page's map, as its close button does.
+            BackStep.ClosePick -> mapPickedStopId = null
             // On the map tab the card on top goes first: a stop position's, then the stop's.
-            pickedPosition != null && onMapTab -> pickedPosition = null
-            stopMarked && selectedStop != null && onMapTab && !mapFromDepartures -> stopMarked = false
-            courseView -> leaveCourse()
-            searchMode != null -> closeSearch()
+            BackStep.ClosePosition -> pickedPosition = null
+            BackStep.UnmarkStop -> stopMarked = false
+            BackStep.LeaveCourse -> leaveCourse()
+            BackStep.CloseSearch -> closeSearch()
             // A page opened on "My routes" goes back to the one below it, within the tab.
-            tab == Tab.Favorites && favoritesPages.isNotEmpty() -> favoritesPages.removeAt(favoritesPages.lastIndex)
-            settingsOpen && tab == Tab.Route -> settingsOpen = false
-            tab == Tab.Map && mapFromDepartures -> tab = Tab.Departures
-            tab != Tab.Route -> tab = Tab.Route
+            BackStep.FavoritesPage -> if (favoritesPages.isNotEmpty()) favoritesPages.removeAt(favoritesPages.lastIndex)
+            BackStep.CloseSettings -> settingsOpen = false
+            BackStep.MapToDepartures -> tab = Tab.Departures
+            // The page stays with the tab, as a tab keeps what it had open.
+            BackStep.FavoritesToMap -> tab = Tab.Map
+            BackStep.RouteTab -> tab = Tab.Route
             // The trip goes on; its card on the start page leads back to it.
-            tripOpen -> companionOpen = false
+            BackStep.CloseTrip -> companionOpen = false
             // From the connections back to the map with the options, where that step is
             // switched on, and from there back to the start.
-            showingConnections && !planning && planFirst -> planning = true
-            showingConnections -> closeConnections()
-            else -> tab = Tab.Route
+            BackStep.ToPlan -> planning = true
+            BackStep.CloseConnections -> closeConnections()
+            BackStep.System -> tab = Tab.Route
         }
     }
 
-    // Back is taken by the app wherever it leads somewhere inside it; on the start page it is
-    // left to the system (back to the home screen, with its own animation).
-    val mapCardOpen = onMapTab && (pickedPosition != null || (stopMarked && selectedStop != null && !mapFromDepartures))
-    val backEnabled = walkView || courseView || searchMode != null || settingsOpen || showingConnections || tab != Tab.Route ||
-        tripOpen || (pinned != null && (onStart || onMapTab)) || mapCardOpen
-    // Where back leads to another page, the gesture shows it (predictive back): the page in
-    // front shrinks with the swipe and rounds its corners, the page before it lies underneath;
-    // let go, it goes; called off, it springs back. Back that stays on the page (a walk on the
-    // map, a marked place) goes at once as before.
-    // A page of "My routes" over its first page: back stays in the tab (the screen stays the same).
-    val favoritesSubOpen = tab == Tab.Favorites && favoritesPages.isNotEmpty() && !courseView && searchMode == null
-    val backPage = if (walkView || (pinned != null && (onStart || onMapTab) && !courseView) || mapCardOpen || favoritesSubOpen) {
-        null
-    } else {
-        pageAfterBack(pageState, planFirst)
-    }
-    BackHandler(enabled = backEnabled && backPage == null) { goBack() }
-    PredictiveBackHandler(enabled = backEnabled && backPage != null) { events ->
-        val target = backPage ?: return@PredictiveBackHandler
-        val from = screen
-        backFrom = from
-        backSwipe = true
-        var committed = false
+    // Every back that changes what is on screen is predictive: the gesture shows where it
+    // leads. Back to another page: the page in front shrinks with the swipe and rounds its
+    // corners, the page before it lies underneath; let go, it goes; called off, it springs
+    // back. Back within the page (see BackStep.inPage) runs [inPageBack], and the part of the
+    // page that goes shows the same: a card or a page of "My routes" shrinks over what is
+    // underneath, the start sheet swaps back to its content, the page of a walk rises again.
+    // [inPageStep] is the step that preview is about while it runs.
+    val backPage = if (step.inPage || step == BackStep.System) null else pageAfterBack(pageState, planFirst)
+    val inPageBack = remember { BackPreview() }
+    var inPageStep by remember { mutableStateOf(BackStep.System) }
+    val backAnimate = rememberAnimationsOn()
+    // This is the one back handler of the app. A back inside the page in front (the page of
+    // one journey, "Advanced" of the settings, see PredictiveNestedBackHandler) is a layer of
+    // it, not a handler of its own: where back goes is decided at the start of each gesture
+    // from the state as it is then, never from the order in which handlers were added or
+    // switched on, so back can neither reach a page underneath nor fall through to the
+    // system (and close the app) while something in it is open.
+    val backLayers = remember { BackLayers() }
+    val topLayer = backLayers.top()
+    // Once a gesture has started the handler stays on until it ends: switched off halfway the
+    // system would call the gesture off.
+    var backGesture by remember { mutableStateOf(false) }
+    val backEnabled = backGesture || topLayer != null || step != BackStep.System
+    val backActivity = remember(context) { context.backActivity() }
+    SideEffect { BackLog.state(backEnabled, step, topLayer?.label, screen) }
+    if (BackLog.on) SideEffect { BackProbe.front = if (topLayer != null) "layer:${topLayer.label}" else "page:$screen" }
+    AppBackHandler(enabled = backEnabled) { events ->
+        backGesture = true
+        val milestones = BackMilestones()
         try {
-            events.collect { event ->
-                backFromLeft = event.swipeEdge == BackEventCompat.EDGE_LEFT
-                backProgress.snapTo(event.progress)
-                screenSeek.seekTo(event.progress.coerceIn(0f, 1f), targetState = target)
+            // A layer inside the page in front goes first; its page shows the preview.
+            val layer = backLayers.top()
+            if (layer != null) {
+                BackLog.log("start handler=layer:${layer.label} screen=$screen pages=${BackLog.pages()}")
+                layer.preview.follow(
+                    events = events,
+                    scope = scope,
+                    animate = backAnimate,
+                    onSeek = { shown ->
+                        milestones.at(shown)
+                        layer.onSeek(shown)
+                    },
+                    onCancel = {
+                        BackLog.log("cancel layer:${layer.label}")
+                        layer.onCancel()
+                    },
+                ) {
+                    BackLog.log("commit layer:${layer.label}")
+                    layer.onBack()
+                }
+                return@AppBackHandler
             }
-            committed = true
-            goBack()
-            screenSeek.animateTo(target)
-        } finally {
-            if (committed) {
-                endBack()
-            } else {
-                // Called off: the page grows back and the one underneath goes again.
-                scope.launch {
-                    try {
-                        coroutineScope {
-                            launch { backProgress.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
-                            screenSeek.animateTo(from)
+            if (step == BackStep.System) {
+                // On a moment too long (back leads out of the app now): back does what the
+                // system does on the first page of an app.
+                BackLog.log("start handler=root step=System (late) screen=$screen")
+                events.collect { }
+                // As the system does: the task goes to the back from its root activity, any
+                // other activity (opened on top of another app's task) simply finishes.
+                val activity = backActivity
+                if (activity == null || activity.isTaskRoot) {
+                    BackLog.log("commit System: task to back")
+                    activity?.moveTaskToBack(true)
+                } else {
+                    BackLog.log("commit System: finish")
+                    activity.finish()
+                }
+                return@AppBackHandler
+            }
+            // The page under the gesture as it is when the gesture starts.
+            val target = backPage
+            BackLog.log("start handler=root step=$step from=$screen target=${target ?: "-"} animate=$backAnimate pages=${BackLog.pages()}")
+            if (target == null || !backAnimate) {
+                // Back within the page (or without animations): the page shows it itself.
+                inPageStep = step
+                inPageBack.follow(
+                    events = events,
+                    scope = scope,
+                    animate = backAnimate && step.inPage,
+                    onSeek = { shown -> milestones.at(shown) },
+                    onCancel = { BackLog.log("cancel $step") },
+                ) {
+                    BackLog.log("commit $step")
+                    goBack()
+                }
+                return@AppBackHandler
+            }
+            val from = screen
+            val gesture = ++backGestures[0]
+            var committed = false
+            try {
+                // How the page goes (see BackStage): a page on the map back to a page on the
+                // map leaves the map where it is and only its own UI shrinks; any other page
+                // shrinks whole as a card over the page back leads to, a page on the map with
+                // the picture of its map, so nothing of the page underneath shows through it.
+                val fromGround = pageGround(from, startMap)
+                val toGround = pageGround(target, startMap)
+                // Left over from a gesture whose end was cut short by this one: reset before the
+                // flags of this gesture are set, so the bars never show the old values with them.
+                backStage.fade.snapTo(1f)
+                backProgress.snapTo(0f)
+                backStage.mapShot = false
+                backStage.mapStays = mapShown && fromGround == PageGround.Map && toGround == PageGround.Map
+                backStage.mapCard = mapShown && fromGround == PageGround.Map && !backStage.mapStays
+                // The row of the status bar shows what the page back leads to shows there:
+                // the plain ground where its map is off, which comes with the gesture.
+                backStage.plainAfter = mapShown && toGround == PageGround.Plain
+                // Off the plain ground onto the map: the ground gives way once let go.
+                backStage.plainBefore = !mapShown && toGround != PageGround.Plain
+                // Between a page on fog and one that is not: the fog in the rows of the bars
+                // goes or comes with the gesture (see BackStage.barFog).
+                backStage.fogBefore = fromGround == PageGround.Fog && toGround != PageGround.Fog
+                backStage.fogAfter = fromGround != PageGround.Fog && toGround == PageGround.Fog
+                // The map is no part of the page (one map lies under all of them, a surface of
+                // its own that no transformation of the page reaches): a page that shows it
+                // takes a picture of it along, which shrinks with the page, so the page in
+                // front is whole and the page back leads to lies under it on its own ground.
+                val shotMap = map
+                if (backStage.mapCard && shotMap != null) {
+                    val shot = withTimeoutOrNull(BACK_SHOT_MILLIS) { shotMap.awaitBackShot() }
+                    BackLog.log(if (shot != null) "map picture ${shot.width}x${shot.height}" else "map picture missing")
+                    backStage.mapShot = shot != null
+                    backShot = shot?.asImageBitmap()
+                    // The ways and marks are no part of the map's picture (they are drawn over
+                    // it): their picture goes along too, so the page keeps its route.
+                    backStage.marksShot = backStage.marks?.let { layer ->
+                        try {
+                            layer.toImageBitmap()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            null
                         }
-                    } finally {
-                        endBack()
+                    }
+                    BackLog.log(if (backStage.marksShot != null) "marks picture" else "marks picture missing")
+                }
+                // Left over from a gesture whose end was cut short by this one.
+                backStage.shots.snapTo(1f)
+                backFrom = from
+                backSwipe = true
+                events.collect { event ->
+                    backFromLeft = event.swipeEdge == BackEventCompat.EDGE_LEFT
+                    backProgress.snapTo(event.progress)
+                    screenSeek.seekTo(event.progress.coerceIn(0f, 1f), targetState = target)
+                    milestones.at(event.progress)
+                }
+                committed = true
+                BackLog.log("commit $step: $from -> $target")
+                goBack()
+            } finally {
+                if (committed) {
+                    // The rest of the way runs in the scope of AppRoot: going back may switch this
+                    // handler off (back on the start page is the system's), which would cancel it
+                    // halfway and leave the page shrunk.
+                    scope.launch {
+                        try {
+                            // The page in front fades as it goes, from wherever the finger let
+                            // go: it stays whole and opaque while the finger is on it.
+                            coroutineScope {
+                                launch { backStage.fade.animateTo(0f, tween(BACK_COMMIT_FADE_MILLIS, easing = LinearEasing)) }
+                                screenSeek.animateTo(target, tween(BACK_PAGE_MILLIS))
+                            }
+                            BackLog.log("settled on $target (screen=${screenSeek.currentState})")
+                        } finally {
+                            if (backGestures[0] == gesture) endBack()
+                        }
+                    }
+                } else {
+                    BackLog.log("cancel $step: back to $from")
+                    // Called off: the page grows back and the one underneath goes again. The
+                    // change of the pages is not animated back by itself (its own animations
+                    // and the spring of the page ran apart, and where they handed over the rows
+                    // of the bars, which follow the change, see BackStage.toward, changed in one
+                    // frame): it follows the page as it grows back, frame by frame, and settles
+                    // on the page in front once that is whole, where the page underneath is gone.
+                    scope.launch {
+                        try {
+                            coroutineScope {
+                                val follow = launch {
+                                    snapshotFlow { backProgress.value }.collect { shown ->
+                                        screenSeek.seekTo(shown.coerceIn(0f, 1f), targetState = target)
+                                    }
+                                }
+                                backProgress.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                follow.cancel()
+                            }
+                            screenSeek.seekTo(0f, targetState = target)
+                            screenSeek.snapTo(from)
+                            BackLog.log("called off: settled on $from")
+                            // The pictures the page took along give way to the live map softly:
+                            // a map that moved meanwhile (a followed trip) does not jump.
+                            if (backShot != null || backStage.marksShot != null) {
+                                backStage.shots.animateTo(0f, tween(BACK_SHOT_FADE_MILLIS))
+                            }
+                        } finally {
+                            if (backGestures[0] == gesture) endBack()
+                        }
                     }
                 }
             }
+        } finally {
+            milestones.done()
+            backGesture = false
         }
     }
+    // The preview within the page, for the part of it that [inPageStep] is about.
+    fun inPagePreview(vararg steps: BackStep): BackPreview? = inPageBack.takeIf { inPageStep in steps }
 
     // A tap on the map while it shows the route options: the option whose way lies nearest
     // to the tap is picked, if one lies near enough. The option in front is left out, so a
@@ -4540,6 +5328,7 @@ fun AppRoot() {
                 openCourse(
                     vehicle.tripId, vehicle.line, vehicle.product, vehicle.direction, fromStop = null, fit = fitLine,
                     color = vehicle.providerColor, textColor = vehicle.providerTextColor, at = vehicle.ridePlace,
+                    fromVehicle = true,
                 )
             }
             vehicle != null
@@ -4555,6 +5344,7 @@ fun AppRoot() {
         if (osmStop == null || at == null) {
             if (!isOsmOnlyStop(stopId)) {
                 selectStop(stopId)
+                mapPickedStopId = stopId
                 val tapped = stops.firstOrNull { it.id == stopId } ?: foundStops.firstOrNull { it.id == stopId }
                 focusTapped(tapped?.position)
             }
@@ -4582,6 +5372,7 @@ fun AppRoot() {
                     // Kept with the stops found by name, so it stays selected wherever the map loads stops.
                     foundStops = (listOf(picked) + foundStops.filter { it.id != picked.id }).take(8)
                     selectStop(picked.id)
+                    mapPickedStopId = picked.id
                 }
             }
         }
@@ -4590,24 +5381,50 @@ fun AppRoot() {
     // The app's own layers (network, vehicles, stops) belong to the surroundings: hidden while a
     // journey or a line is on the map.
     val ownLayersShown = mapShown && (onStart || onMapTab)
-    LaunchedEffect(map, styleTick, ownLayersShown, StationDetailSetting.shown, EntranceSetting.mode) {
-        map?.style?.takeIf { it.isFullyLoaded }?.let { showAppLayers(it, ownLayersShown) }
+    LaunchedEffect(map, styleTick, ownLayersShown, StationDetailSetting.shown, EntranceSetting.mode, PerfLab.hiddenLayers) {
+        map?.style?.takeIf { it.isFullyLoaded }?.let {
+            showAppLayers(it, ownLayersShown)
+            // Debug and staging builds: the layer groups switched off in the performance lab.
+            if (PerfLab.available) applyPerfLabLayers(it)
+        }
     }
     // The packs of other German states, where the app has them: those where the map is.
     // Whoever added a pack (this map, a journey search, a call cut short by a newer map
     // position), the details of all stations are made anew from it, so entrances and lifts
     // show the same way in every state as in Berlin.
     val osmGeneration by OsmStations.generations.collectAsState()
+    // With journeys to rate, the change walks are read off the main thread before the first
+    // rating asks for them there (see OsmStations.warmWalks).
+    val journeysToRate = journeys != null
+    LaunchedEffect(journeysToRate, osmLoaded, osmGeneration) {
+        if (journeysToRate && osmLoaded) OsmStations.warmWalks()
+    }
     LaunchedEffect(osmLoaded, mapCenter) {
         val center = mapCenter ?: return@LaunchedEffect
         if (!osmLoaded) return@LaunchedEffect
+        // Zoomed far out the map shows nothing of these packs (no signs below the district
+        // tier), but every rest of the camera over another part of the country read more of
+        // them: the data grew with each, everything made from it (station details, signs,
+        // notices) was made anew over all of it, and the app stuttered until it was closed.
+        val zoom = map?.cameraPosition?.zoom ?: return@LaunchedEffect
+        if (zoom < OSM_REGIONS_MIN_ZOOM) return@LaunchedEffect
+        // A new pack is read whole and makes the details, signs and notices anew: in the first
+        // seconds of the map that waits until it rests a moment (see MapQuiet).
+        if (MapQuiet.fresh()) MapQuiet.awaitRest(OSM_PACKS_AFTER_SHOWN_MILLIS)
         OsmStations.ensureRegions(listOf(center))
     }
     LaunchedEffect(map, styleTick, osmLoaded, osmGeneration) {
         if (!osmLoaded) return@LaunchedEffect
-        // Built off the main thread (cached per generation), then handed to the map.
+        // Built off the main thread (cached per generation), then handed to the map while it
+        // rests: some ten thousand features into one source, cut into tiles anew.
         prepareStationDetails()
-        map?.style?.takeIf { it.isFullyLoaded }?.let { setStationDetails(it) }
+        MapQuiet.awaitRest(0L)
+        map?.style?.takeIf { it.isFullyLoaded }?.let { style ->
+            val started = SystemClock.uptimeMillis()
+            setStationDetails(style)
+            val took = SystemClock.uptimeMillis() - started
+            if (took > PERF_SLOW_MAIN_MILLIS) DiagLog.w(PERF_LOG_TAG) { "station details generation $osmGeneration set in $took ms on the main thread" }
+        }
     }
     // The colours of the stop signs follow the look of the app.
     val signColors = StopSignColors(
@@ -4628,30 +5445,53 @@ fun AppRoot() {
     // off the main thread from the cells OsmStations keeps anyway.
     LaunchedEffect(mapBox, tier, osmLoaded, osmGeneration) {
         val box = mapBox
-        if (box == null || !osmLoaded || tier == MapTier.City) {
+        // Zoomed out to the city the signs are not drawn; the stops found so far stay, so
+        // zooming back in to the same place needs no new ones (and no new signs).
+        if (tier == MapTier.City) return@LaunchedEffect
+        if (box == null || !osmLoaded) {
             if (osmMapStops.isNotEmpty()) osmMapStops = emptyList()
             return@LaunchedEffect
         }
         delay(120)
         val grown = grownBox(box)
         osmMapStops = withContext(Dispatchers.Default) {
-            OsmStations.mapStops(grown[0], grown[1], grown[2], grown[3], stationsOnly = tier == MapTier.District)
+            AllocProbe.measureAny(AllocProbe.MAP_STOPS, { it.size }) {
+                OsmStations.mapStops(grown[0], grown[1], grown[2], grown[3], stationsOnly = tier == MapTier.District)
+            }
         }
     }
     val markedForSigns = selectedStop?.takeIf { it.id == markedStopId }
-    val signStops = remember(stops, osmMapStops, tier, markedStopId, markedForSigns, ownLayersShown, osmGeneration) {
-        if (!ownLayersShown) {
+    // Merging the stops and grouping them into stations takes a while with many stops: it runs
+    // off the main thread, so a map that comes to rest or the map tab that opens does not
+    // stutter meanwhile. The signs shown so far stay until the new ones are ready.
+    val signsInBackground = PerfLab.signsInBackground
+    var signStops by remember { mutableStateOf<List<Stop>>(emptyList()) }
+    LaunchedEffect(stops, osmMapStops, tier, markedStopId, markedForSigns, ownLayersShown, osmGeneration, signsInBackground) {
+        val providerStops = stops
+        val offlineStops = osmMapStops
+        val signTier = tier
+        val marked = markedForSigns
+        val markedId = markedStopId
+        val shown = ownLayersShown
+        // Zoomed out to the city the sign layer draws nothing (it starts at CITY_ZOOM): the
+        // signs stay as they are, so zooming back in does not build and put them anew.
+        if (shown && signTier == MapTier.City) return@LaunchedEffect
+        fun buildSigns(): List<Stop> = if (!shown) {
             emptyList<Stop>()
         } else {
             // The provider's stops with their ids, and the offline ones no provider stop stands for;
             // one sign per station, none beside the marked one (see stationSigns).
-            val all = stationSigns(mergeMapStops(stops, osmMapStops, markedForSigns), markedForSigns, ::osmStationComplex)
-            when (tier) {
+            val all = stationSigns(mergeMapStops(providerStops, offlineStops, marked), marked, ::osmStationComplex)
+            when (signTier) {
                 MapTier.City -> emptyList<Stop>()
-                MapTier.District -> all.filter { stop -> stop.id != markedStopId && stop.products.any(::isMajorProduct) }
-                MapTier.Neighbourhood -> all.filter { stop -> stop.id != markedStopId }
+                MapTier.District -> all.filter { stop -> stop.id != markedId && stop.products.any(::isMajorProduct) }
+                MapTier.Neighbourhood -> all.filter { stop -> stop.id != markedId }
             }
         }
+        fun build(): List<Stop> = AllocProbe.measureAny(AllocProbe.SIGNS_BUILD, { it.size }) { buildSigns() }
+        val built = if (!shown || signTier == MapTier.City || !signsInBackground) build() else withContext(Dispatchers.Default) { build() }
+        if (built.size > PERF_MANY_SIGNS) DiagLog.w(PERF_LOG_TAG) { "${built.size} stop signs at tier $signTier (${offlineStops.size} offline stops)" }
+        if (built != signStops) signStops = built
     }
     // At the start the signs fade in once they are there, a step after the map (see StopSignsIntro).
     StopSignsIntro(map = map, styleTick = styleTick, hasSigns = signStops.isNotEmpty())
@@ -4716,9 +5556,9 @@ fun AppRoot() {
     LaunchedEffect(nearbyDepartures) {
         if (nearbyDepartures.isNotEmpty()) MapNoticePool.putDepartures("nearby", nearbyDepartures, null)
     }
-    LaunchedEffect(mapBox, noticesOn, appStarted) {
+    LaunchedEffect(mapBox, noticesOn, appSettled) {
         val box = mapBox ?: return@LaunchedEffect
-        if (!noticesOn || !appStarted) return@LaunchedEffect
+        if (!noticesOn || !appSettled) return@LaunchedEffect
         val zoom = map?.cameraPosition?.zoom ?: return@LaunchedEffect
         if (zoom < NOTICE_REFRESH_ZOOM) return@LaunchedEffect
         // Only once the map rests there a moment.
@@ -4744,9 +5584,11 @@ fun AppRoot() {
         val hiddenIds = hiddenNotices.mapTo(HashSet()) { it.id }
         val known = stops
         val (seen, markers) = withContext(Dispatchers.Default) {
-            val items = MapNoticePool.known(context, noticeRouteIds)
-            val names = MapNoticePool.namesFor(items, known, osmGeneration)
-            items.mapTo(HashSet()) { it.id } to noticeMarkers(items, names, hiddenIds)
+            AllocProbe.measureAny(AllocProbe.NOTICE_MARKS, { it.second.size }) {
+                val items = MapNoticePool.known(context, noticeRouteIds)
+                val names = MapNoticePool.namesFor(items, known, osmGeneration)
+                items.mapTo(HashSet()) { it.id } to noticeMarkers(items, names, hiddenIds)
+            }
         }
         HiddenNotices.prune(context, seen)
         mapNoticeMarks = markers
@@ -4782,14 +5624,23 @@ fun AppRoot() {
             onAll = {
                 favoritesPages.clear()
                 favoritesPages.add(FavoritesPage.AllDisruptions)
+                favoritesFromMap = tab == Tab.Map
                 tab = Tab.Favorites
             },
             onDismiss = { openNotice = null },
         )
     }
+    // Into the map while it rests: a new source of thousands of points is cut into tiles anew
+    // and competes with the tiles of a moving map.
     LaunchedEffect(map, styleTick, rapidNetwork) {
         val network = rapidNetwork ?: return@LaunchedEffect
-        map?.style?.takeIf { it.isFullyLoaded }?.let { setRapidNetwork(it, network) }
+        MapQuiet.awaitRest(0L)
+        map?.style?.takeIf { it.isFullyLoaded }?.let { AllocProbe.measure(AllocProbe.NETWORK_PUSH) { setRapidNetwork(it, network) } }
+    }
+    LaunchedEffect(map, styleTick, tramNetwork) {
+        val network = tramNetwork ?: return@LaunchedEffect
+        MapQuiet.awaitRest(0L)
+        map?.style?.takeIf { it.isFullyLoaded }?.let { AllocProbe.measure(AllocProbe.NETWORK_PUSH) { setTramNetwork(it, network) } }
     }
 
     // What the card of a pinned place does, on the map tab and in the start sheet alike.
@@ -4839,6 +5690,12 @@ fun AppRoot() {
     // The content of the start sheet while a place is marked. Its values are taken now, so the
     // sheet still shows them while it swaps back.
     val startPin = if (mapShown && onStart) pinned else null
+    // Else a stop tapped on its map (see mapPickedStopId), with its departures a tap away.
+    val startPickedStop = if (startStopCard) {
+        selectedStop
+    } else {
+        null
+    }
     val startPinContent: (@Composable () -> Unit)? = startPin?.let { pin ->
         val shownTitle = pinTitle
         val shownAddress = pinnedDetails?.address
@@ -4859,28 +5716,56 @@ fun AppRoot() {
             )
         }
         content
+    } ?: startPickedStop?.let { picked ->
+        val content: @Composable () -> Unit = {
+            StopPickContent(
+                stop = picked,
+                onDepartures = {
+                    mapPickedStopId = null
+                    stopAction(picked, StopAction.Departures)
+                },
+                onFrom = {
+                    mapPickedStopId = null
+                    stopAction(picked, StopAction.From)
+                },
+                onTo = {
+                    mapPickedStopId = null
+                    stopAction(picked, StopAction.To)
+                },
+                onClose = { mapPickedStopId = null },
+                modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 2.dp, bottom = 8.dp),
+            )
+        }
+        content
     }
 
-    CompositionLocalProvider(
-        LocalDelayDisplay provides delayDisplay,
-        LocalChartChangeStops provides chartChangeStops,
-        LocalNavInset provides navInset,
-        LocalMapCover provides frameCover,
-        // Without the map there is no picture behind the glass: it turns nearly opaque.
-        LocalBackdrop provides (if (mapShown) backdrop else null),
-    ) {
-    Box(modifier = Modifier.fillMaxSize().onSizeChanged { mapCover[1] = it.height.toFloat() }) {
+    // The parts of the screen below are lambdas of their own, each taking along only what it
+    // uses. Written inline, the content of the CompositionLocalProvider took along well over
+    // 200 values of AppRoot in one method, and the dex verifier on the device refused the
+    // whole of AppRoot for it (VerifyError, D8 runs out of registers). Keep each part small.
+    // The map and its plain ground, the menu of a stop pressed long, the fog.
+    val mapLayer: @Composable BoxScope.() -> Unit = {
+        // The map switched off: while the pages change between a page on the map and one on the
+        // plain ground, the map stays until the change is over, so it never goes in one frame;
+        // the plain ground comes over it in the rows of the bars as the change goes (below),
+        // the page on the plain ground brings its own in its room.
+        val groundFrom = pageGround(pageTransition.currentState, startMap)
+        val groundTo = pageGround(pageTransition.targetState, startMap)
+        val mapHeld = !mapShown && groundFrom != groundTo && (groundFrom == PageGround.Map || groundTo == PageGround.Map)
         MapBackground(
             latitude = followTarget.first,
             longitude = followTarget.second,
             interactive = onStart || onMapTab || planView || tripView || courseView || walkView,
             modifier = Modifier.fillMaxSize(),
             backdrop = backdrop,
-            visible = mapShown,
+            visible = mapShown || mapHeld,
             // A journey or a line on the map keeps it: a new position does not pull it away.
             // Neither does it once the user has moved the map by hand.
             follow = !(planView || tripView || courseView || walkView) && !viewHeld,
             styleUrl = mapStyleUrl(Appearance.mapStyle, AppColors.palette.dark),
+            // The big logo while the map loads only on the start page: over a page opened by a
+            // link (a route from the website) it would lie in the middle of it.
+            logo = onStart,
             onStyleLoaded = { style ->
                 installAppLayers(style, density, currentSignColors)
                 showAppLayers(style, mapFree)
@@ -4888,19 +5773,34 @@ fun AppRoot() {
             },
             onMapReady = { readyMap ->
                 map = readyMap
+                // Heavy work that is no hurry waits for a quiet map (see MapQuiet).
+                MapQuiet.mapReady()
                 tier = mapTier(readyMap.cameraPosition.zoom)
+                vehiclesClose = closeForVehicles(readyMap.cameraPosition.zoom)
                 readyMap.addOnCameraMoveListener {
+                    AllocProbe.begin(AllocProbe.CAMERA_MOVE)
+                    MapQuiet.moved()
                     cameraTick++
-                    val now = mapTier(readyMap.cameraPosition.zoom)
+                    // One camera position per move (each call makes a new one).
+                    val camera = readyMap.cameraPosition
+                    val now = mapTier(camera.zoom)
                     if (now != tier) tier = now
+                    val close = closeForVehicles(camera.zoom)
+                    if (close != vehiclesClose) vehiclesClose = close
                     // The pills of the marked stop give way to each other as the zoom changes.
                     readyMap.style?.takeIf { it.isFullyLoaded }?.let { style ->
-                        declutterSelectedPositions(style, readyMap.cameraPosition.zoom, readyMap.cameraPosition.bearing)
+                        declutterSelectedPositions(style, camera.zoom, camera.bearing)
                     }
+                    AllocProbe.end(AllocProbe.CAMERA_MOVE)
                 }
                 // A move by the finger takes the view in hand: positions that follow leave it alone.
                 readyMap.addOnCameraMoveStartedListener { reason ->
-                    if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) mapGesture[0] = true
+                    MapQuiet.moveStarted()
+                    if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                        mapGesture[0] = true
+                        // A course stops following its vehicle until asked to again.
+                        courseCamera.held = true
+                    }
                     if (reason != MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE && !mapGesture[2]) {
                         mapGesture[1] = true
                     }
@@ -4994,6 +5894,23 @@ fun AppRoot() {
                     }
                 }
                 readyMap.addOnMapLongClickListener { point ->
+                    // A long press on a stop sign opens the stop's small menu (its departures,
+                    // from here, to here) instead of dropping a pin there.
+                    if (mapFree) {
+                        val screen = readyMap.projection.toScreenLocation(point)
+                        val stopHit = stopAt(readyMap, screen, STOP_TAP_DP * density)
+                        if (stopHit != null) {
+                            val known = stops.firstOrNull { it.id == stopHit } ?: foundStops.firstOrNull { it.id == stopHit }
+                            if (known != null && !isOsmOnlyStop(stopHit)) {
+                                stopMenuHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                stopMenu = known.copy(distanceMeters = null) to PointF(screen.x, screen.y)
+                            } else {
+                                // A stop known only from OpenStreetMap is found first: it is selected, with its card.
+                                pickStop(stopHit)
+                            }
+                            return@addOnMapLongClickListener true
+                        }
+                    }
                     // Not while a journey or a line is shown: the map belongs to them then.
                     if (mapFree) {
                         pinnedPoi = null
@@ -5004,6 +5921,7 @@ fun AppRoot() {
                     true
                 }
                 readyMap.addOnCameraIdleListener {
+                    MapQuiet.idle()
                     mapGesture.fill(false)
                     cameraTick++
                     val target = readyMap.cameraPosition.target
@@ -5016,12 +5934,44 @@ fun AppRoot() {
 
         // The map switched off: a calm plain ground takes its place, on the start page with
         // the quiet mark of the app in the free part above the sheet.
-        if (!mapShown) {
+        // A back gesture from it onto a page on the map: it gives way once let go (see BackStage.plainBefore).
+        if ((!mapShown && !mapHeld) || backStage.plainBefore) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .graphicsLayer { if (backStage.plainBefore) alpha = backStage.fade.value }
                     .background(AppColors.PlainGround),
             )
+        } else if (mapHeld || backStage.plainAfter) {
+            // Between a page on the map and one on the plain ground (a change of page, or a back
+            // gesture onto the plain ground and the way after it): the rows of the bars take the
+            // plain ground as far as the change went (see BackStage.barPlain). Under a back
+            // gesture onto the plain ground the rows are drawn over the ways (see BackBarRows).
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawBehind {
+                        // Under a back gesture onto the plain ground the rows are BackBarRows'.
+                        if (backStage.plainAfter) return@drawBehind
+                        val shown = backStage.barPlain(groundTo == PageGround.Plain)
+                        if (shown <= 0f) return@drawBehind
+                        val top = backStage.pagesBox[0]
+                        val bottom = backStage.pagesBox[1]
+                        if (top > 0f) {
+                            drawRect(AppColors.PlainGround, size = Size(size.width, top), alpha = shown)
+                        }
+                        if (bottom > 0f && bottom < size.height) {
+                            drawRect(
+                                AppColors.PlainGround,
+                                topLeft = Offset(0f, bottom),
+                                size = Size(size.width, size.height - bottom),
+                                alpha = shown,
+                            )
+                        }
+                    },
+            )
+        }
+        if (!mapShown) {
             if (onStart) {
                 StartLogoMark(
                     coverTop = { startLogoCover.value },
@@ -5030,20 +5980,73 @@ fun AppRoot() {
             }
         }
 
-        // Pages that do not need the map lie on fog; it fades in and out with them.
-        AnimatedVisibility(
-            visible = mapShown && !(planView || tripView || onStart || onMapTab || courseView || walkView),
-            enter = fadeIn(tween(250)),
-            exit = fadeOut(tween(250)),
-        ) {
-            // The fog is the map itself, blurred, under a light veil.
+        // The menu of a stop pressed long on the map, at the point pressed.
+        stopMenu?.let { (menuStop, at) ->
+            Box(modifier = Modifier.offset { IntOffset(at.x.roundToInt(), at.y.roundToInt()) }.size(1.dp)) {
+                StopMenu(
+                    open = true,
+                    onDismiss = { stopMenu = null },
+                    onAction = { action -> stopAction(menuStop, action) },
+                    // It is on the map already.
+                    omit = setOf(StopAction.Map),
+                )
+            }
+        }
+
+        // Pages that do not need the map lie on fog (see pageGround). While the page stays on
+        // fog it lies here, under every page; while a page changes to or from one on the map,
+        // each page brings its own fog along (see the pages below), so that a page a back
+        // gesture shrinks takes its fog with it and the page underneath lies on its own ground.
+        if (startMap) {
+            // The fog is the map itself, blurred, under a light veil. While the page changes
+            // between a page on fog and one that is not, the pages bring their fog only into
+            // their own room: the rows of the status bar and the gesture bar take it here, as
+            // far as the change went (see BackStage.barFog), never in one frame.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .drawWithContent {
+                        val fogBefore = pageGround(pageTransition.currentState, startMap) == PageGround.Fog
+                        val fogAfter = pageGround(pageTransition.targetState, startMap) == PageGround.Fog
+                        // What lies in the rows of the bars from here, for the back probe.
+                        backStage.rowMap = -1f
+                        if (walkView || !(fogBefore || fogAfter)) return@drawWithContent
+                        if (fogBefore && fogAfter) {
+                            backStage.rowMap = 1f
+                            drawContent()
+                            return@drawWithContent
+                        }
+                        // Under a back gesture onto fog the rows are drawn over the ways (see BackBarRows).
+                        if (backStage.fogAfter) return@drawWithContent
+                        val shown = backStage.barFog(fogAfter)
+                        backStage.rowMap = shown
+                        if (shown <= 0f) return@drawWithContent
+                        // The float bounds of the platform canvas: no Rect made each frame.
+                        val paint = backStage.fogPaint
+                        paint.alpha = shown
+                        val top = backStage.pagesBox[0]
+                        val bottom = backStage.pagesBox[1]
+                        if (top > 0f) {
+                            clipRect(bottom = top) {
+                                drawContext.canvas.nativeCanvas.saveLayer(0f, 0f, size.width, top, paint.asFrameworkPaint())
+                                this@drawWithContent.drawContent()
+                                drawContext.canvas.nativeCanvas.restore()
+                            }
+                        }
+                        if (bottom > 0f && bottom < size.height) {
+                            clipRect(top = bottom) {
+                                drawContext.canvas.nativeCanvas.saveLayer(0f, bottom, size.width, size.height, paint.asFrameworkPaint())
+                                this@drawWithContent.drawContent()
+                                drawContext.canvas.nativeCanvas.restore()
+                            }
+                        }
+                    }
                     .then(glassGround(tint = AppColors.FogTint, fallback = AppColors.Fog, highlight = Color.Transparent)),
             )
         }
-
+    }
+    // Ways, markers and the position on the map.
+    val mapMarks: @Composable BoxScope.() -> Unit = {
         // Ways lie above the fog, so a journey stays readable behind its cards. They draw
         // themselves onto the map when they appear.
         val shownCourse = course
@@ -5066,12 +6069,11 @@ fun AppRoot() {
                     RouteLayer(map = readyMap, cameraTick = { cameraTick }, routes = routes)
                 }
 
-                courseView -> if (shownCourse != null && shownCourse.path.size >= 2) {
+                courseView -> if (shownCourse != null) {
                     key(shownCourse.tripId) {
-                        val routes = remember(shownCourse.path) {
-                            listOf(MapRoute(lineColor(shownCourse), shownCourse.path, dotted = false))
-                        }
-                        RouteLayer(map = readyMap, cameraTick = { cameraTick }, routes = routes)
+                        // Drawn anew once colours of lines come in (a pack of OpenStreetMap loaded later).
+                        val routes = remember(shownCourse.path, shownCourse.stops, LineColors.version) { courseRoutes(shownCourse) }
+                        if (routes.isNotEmpty()) RouteLayer(map = readyMap, cameraTick = { cameraTick }, routes = routes)
                     }
                 }
 
@@ -5137,7 +6139,8 @@ fun AppRoot() {
             styleTick = styleTick,
             vehicles = shownVehicles,
             moving = appStarted,
-            shown = ownLayersShown,
+            // Off in the settings: no vehicle layers and no glide loop at all.
+            shown = ownLayersShown && Appearance.mapVehicles != MapVehiclesChoice.Off,
             direction = if (Appearance.vehicleDirection == VehicleDirectionChoice.On) DEFAULT_DIRECTION_STYLE else null,
         )
         if (mapShown && (onStart || onMapTab)) {
@@ -5182,14 +6185,36 @@ fun AppRoot() {
         }
         // The stops of the open line course on its way, and its vehicle where it is right now.
         if (courseView && shownCourse != null) {
+            val track = courseTrack?.takeIf { it.tripId == shownCourse.tripId } ?: TripTrack(shownCourse)
+            // A report placed on an air line between stations (see Vehicle.onAirLine) gives way to the
+            // track: on the real tracks where the course has them, else at a station.
+            val live = courseLive?.takeIf { it.vehicle.tripId == shownCourse.tripId && (!it.vehicle.onAirLine || !track.usable) }
+            // Where the vehicle is right now: the live report first, else the timetable.
+            val vehicleAt: (DoubleArray) -> Boolean = { out ->
+                if (live != null) live.locate(SystemClock.uptimeMillis(), out) else track.locate(System.currentTimeMillis(), out)
+            }
             CourseMarkers(
                 map = map,
                 cameraTick = { cameraTick },
                 course = shownCourse,
                 fromStop = courseRequest?.fromStop,
+                // The names of its ends stay whole between the header and the list.
+                freeTop = { frameCover[0] },
+                freeBottom = { frameCover[1] },
+                // Into an array of CourseMarkers' own: no Pair for each frame.
+                vehicleAt = vehicleAt,
             )
-            val track = courseTrack?.takeIf { it.tripId == shownCourse.tripId } ?: TripTrack(shownCourse)
-            val live = courseLive?.takeIf { it.vehicle.tripId == shownCourse.tripId }
+            // Opened from a vehicle: the camera stays on it (and its next stops) as it moves.
+            if (courseRequest?.fromVehicle == true) {
+                CourseFollow(
+                    map = map,
+                    camera = courseCamera,
+                    course = shownCourse,
+                    track = track,
+                    vehicleAt = vehicleAt,
+                    cover = frameCover,
+                )
+            }
             TrackMarkers(
                 map = map,
                 cameraTick = { cameraTick },
@@ -5218,6 +6243,8 @@ fun AppRoot() {
                     .distinctBy { it.tripId },
                 // A ride whose times come from live data (leg.realtime) carries the live dot.
                 realtime = tripRides.filter { it.realtime }.mapNotNull { it.tripId }.toSet(),
+                // The traveller in or at one of them rides on its badge.
+                own = ownDot,
             )
         }
 
@@ -5230,11 +6257,19 @@ fun AppRoot() {
             mapShown && (onStart || onMapTab) -> devicePosition
             else -> null
         }
-        PositionDot(map = map, cameraTick = { cameraTick }, position = ownPosition)
+        PositionDot(map = map, cameraTick = { cameraTick }, position = ownPosition, dot = ownDot)
 
         // Where the vehicle positions come from: a small pill at the lower left of the map
         // that is not covered, while vehicles are drawn (see VehicleHint).
-        if (vehicleHintWanted(VehicleHintSetting.shown(context), ownLayersShown, vehicles.size)) {
+        // Steady: it shows once vehicles have been there a moment, stays at least two seconds
+        // and outlasts a reload of the vehicles (see rememberSteadyHint); it fades in and out.
+        val hintSteady by rememberSteadyHint(vehicleHintWanted(VehicleHintSetting.shown(context), ownLayersShown, vehicles.size))
+        val hintFade = remember { Animatable(0f) }
+        LaunchedEffect(hintSteady) {
+            hintFade.animateTo(if (hintSteady) 1f else 0f, tween(if (animationsOn) HINT_FADE_MILLIS else 0))
+        }
+        val hintFading by remember { derivedStateOf { hintFade.value > 0f } }
+        if (hintSteady || hintFading) {
             val hintOpen = remember { mutableStateOf(false) }
             val hintBeat = rememberBeat()
             // The pill comes in last at the start, after the vehicles and the cards, with a
@@ -5258,7 +6293,8 @@ fun AppRoot() {
                         val coverTop = when {
                             onStart -> mapCover[0]
                             onMapTab && stopMarked && selectedStop != null -> mapCover[2]
-                            else -> height - (navInset - SHEET_NAV_GAP).value * density
+                            // The top of the tab bar, above the system navigation.
+                            else -> height - mapCover[3] - (navInset - SHEET_NAV_GAP).value * density
                         }
                         val panel = frameCover[2]
                         val left = (if (!panel.isNaN() && panel > 0f) panel else 0f) + 12f * density
@@ -5273,13 +6309,1045 @@ fun AppRoot() {
                     }
                 }.graphicsLayer {
                     val shown = hintIn.value
-                    alpha = shown.coerceIn(0f, 1f)
+                    alpha = shown.coerceIn(0f, 1f) * hintFade.value
                     scaleX = HINT_ENTER_SCALE + (1f - HINT_ENTER_SCALE) * shown
                     scaleY = scaleX
                     transformOrigin = TransformOrigin(0f, 1f)
                 },
             )
         }
+    }
+    // The pages (see the AnimatedContent below), one lambda each.
+    val coursePage: @Composable (CourseRequest?) -> Unit = { shownRequest ->
+        if (shownRequest != null) {
+            CourseScreen(
+                request = shownRequest,
+                // What was loaded for another trip is not shown for this one.
+                course = course?.takeIf { it.tripId == shownRequest.tripId },
+                failed = courseFailed,
+                now = now,
+                // The vehicle in the list where the map has it live.
+                liveProgress = { millis ->
+                    val live = courseLive?.takeIf { it.vehicle.tripId == shownRequest.tripId }
+                    val track = courseTrack?.takeIf { it.tripId == shownRequest.tripId }
+                    val spot = DoubleArray(2)
+                    if (live != null && track != null && live.locate(millis, spot)) track.progressAt(spot[0], spot[1]) else null
+                },
+                onBack = { leaveCourse() },
+                // The whole line and back to the vehicle and its next stops (see CourseFollow).
+                onWholeLine = if (shownRequest.fromVehicle) courseCamera::toggleWhole else null,
+                wholeShown = courseCamera.whole,
+                onShowStop = { place ->
+                    val position = place.position
+                    if (position != null) {
+                        // The stop is looked at: the camera no longer follows the vehicle.
+                        courseCamera.held = true
+                        map?.animateCamera(
+                            CameraUpdateFactory.newLatLngZoom(
+                                LatLng(position.first, position.second),
+                                STOP_ZOOM,
+                            ),
+                        )
+                    }
+                },
+                onStopAction = { place, action ->
+                    closeCourse()
+                    stopAction(place, action)
+                },
+            )
+        }
+    }
+    val searchPage: @Composable (SearchMode?, String) -> Unit = { shownMode, placeLabel ->
+        if (shownMode != null) {
+            // A new share opens the search afresh, with its text in the field.
+            val shared = sharedSearch?.takeIf { shownMode == SearchMode.Destination }
+            key(shownMode, shared?.serial) {
+                val pickFound: (Stop) -> Unit = { place ->
+                    when (shownMode) {
+                        SearchMode.Origin -> pickOrigin(place)
+                        SearchMode.Destination -> pickDestination(place)
+                        SearchMode.Place -> pickFavoritePlace(place)
+                        SearchMode.DepartureStop -> pickDepartureStop(place)
+                        // The time to stay there is asked next.
+                        SearchMode.Via -> {
+                            viaPending = Via(place.copy(distanceMeters = null), via?.minutes ?: 0)
+                            searchMode = null
+                        }
+                        SearchMode.TripTarget -> {
+                            searchMode = null
+                            startRetarget(place.copy(distanceMeters = null), tripTargetAppend)
+                        }
+                        SearchMode.MapPlace -> pickMapPlace(place)
+                    }
+                }
+                SearchPanel(
+                    source = source,
+                    placeholder = when (shownMode) {
+                        SearchMode.Origin -> stringResource(R.string.where_from)
+                        SearchMode.Destination -> stringResource(R.string.where_to)
+                        SearchMode.Place -> placeLabel
+                        SearchMode.DepartureStop -> stringResource(R.string.choose_stop)
+                        SearchMode.Via -> stringResource(R.string.via_search)
+                        SearchMode.TripTarget -> stringResource(
+                            if (tripTargetAppend) R.string.retarget_continue_search else R.string.retarget_change_search,
+                        )
+                        SearchMode.MapPlace -> stringResource(R.string.map_search_hint)
+                    },
+                    // The places picked before come from the history (see below).
+                    suggestions = when {
+                        shownMode == SearchMode.Destination -> emptyList()
+                        shownMode == SearchMode.DepartureStop -> foundStops
+                        shownMode != SearchMode.Origin -> emptyList()
+                        // The position of the user always comes first.
+                        else -> listOf(currentPlace(center)) + stops.filter { it.id != destination?.id }
+                    },
+                    expandFromY = searchOrigin,
+                    onPick = pickFound,
+                    // An appointment as the destination: be there by its start.
+                    onPickAppointment = { appointment, place ->
+                        if (shownMode == SearchMode.Destination) {
+                            journeyTime = TimeChoice(appointment.begin, arrival = true)
+                        }
+                        pickFound(place)
+                    },
+                    onCalendarGranted = {
+                        calendarGranted = true
+                        calendarDenied = false
+                    },
+                    onClose = { closeSearch() },
+                    stopsOnly = shownMode == SearchMode.DepartureStop,
+                    // Choosing a favourite place itself offers no favourite places.
+                    favorites = if (shownMode == SearchMode.Place) emptyList() else favoritePlaces,
+                    saved = if (shownMode == SearchMode.Place) emptyList() else savedPlaces,
+                    history = searchHistory,
+                    onRemember = { rememberSearch(it) },
+                    onForget = { forgetSearch(it) },
+                    initialQuery = shared?.query.orEmpty(),
+                    offered = shared?.place,
+                )
+            }
+        }
+    }
+    val settingsPage: @Composable () -> Unit = {
+        SettingsScreen(
+            options = options,
+            onOptions = { updateOptions(it) },
+            startVehicles = startVehicles,
+            onStartVehicles = { value ->
+                startVehicles = value
+                prefs.startVehicles = value
+            },
+            startMap = startMap,
+            onStartMap = { value ->
+                // What only shows on the map is let go of with it.
+                if (!value) pinned = null
+                startMap = value
+                prefs.startMap = value
+            },
+            startClassic = startClassic,
+            onStartClassic = { value ->
+                startClassic = value
+                prefs.startClassic = value
+            },
+            startCards = startCards,
+            onStartCards = { value ->
+                startCards = value
+                prefs.startCards = value
+            },
+            startDepartures = startDepartures,
+            nearbyRadius = nearbyRadius,
+            onNearbyRadius = { value ->
+                nearbyRadius = value
+                prefs.nearbyRadius = value
+            },
+            startCalendar = startCalendar,
+            onStartCalendar = { value ->
+                startCalendar = value
+                prefs.startCalendar = value
+                calendarLater = false
+            },
+            onStartDepartures = { value ->
+                startDepartures = value
+                prefs.startDepartures = value
+            },
+            boardingHints = boardingHints,
+            transferChoice = transferChoice,
+            onTransferChoice = { value ->
+                transferChoice = value
+                prefs.transferChoice = value
+                comfortOverride = null
+            },
+            onBoardingHints = { value ->
+                boardingHints = value
+                prefs.boardingHints = value
+                // The notification of a trip says where to board, or no longer does.
+                refreshTripNotification(context)
+            },
+            delayDisplay = delayDisplay,
+            fitLine = fitLine,
+            onFitLine = { value ->
+                fitLine = value
+                prefs.fitLine = value
+            },
+            onDelayDisplay = { value ->
+                delayDisplay = value
+                prefs.delayDisplay = value
+                // The notification of a trip and the widgets show times as well.
+                refreshTripNotification(context)
+                WidgetUpdates.redrawAll(context)
+            },
+            planFirst = planFirst,
+            onPlanFirst = { value ->
+                planFirst = value
+                prefs.planFirst = value
+            },
+            listView = listView,
+            onListView = { value ->
+                listView = value
+                prefs.connectionsList = value
+            },
+            onClearHistory = {
+                searchHistory = emptyList()
+                prefs.saveSearchHistory(emptyList())
+            },
+            connectionsFull = connectionsFull,
+            onConnectionsFull = { value ->
+                connectionsFull = value
+                prefs.connectionsFull = value
+            },
+            chartChangeStops = chartChangeStops,
+            onChartChangeStops = { value ->
+                chartChangeStops = value
+                prefs.chartChangeStops = value
+            },
+            chartTotalTime = chartTotalTime,
+            onChartTotalTime = { value ->
+                chartTotalTime = value
+                prefs.chartTotalTime = value
+            },
+            connectionChoice = connectionChoice,
+            onConnectionChoice = { value ->
+                connectionChoice = value
+                prefs.connectionChoice = value
+            },
+            ownServer = ownServer,
+            onOwnServer = { value ->
+                ownServer = value
+                prefs.ownServer = value
+                // Journeys on the tiles may have come from the other server.
+                placeTrips.clear()
+            },
+            sourceChoice = sourceChoice,
+            onSourceChoice = { value ->
+                sourceChoice = value
+                prefs.sourceChoice = value
+                // A changed order, switch or key: every backend gets a fresh chance.
+                SourceHealth.shared.reset()
+                // The journeys on the tiles may have come from another provider.
+                placeTrips.clear()
+            },
+            onBack = { settingsOpen = false },
+            focusWatch = settingsFocusWatch,
+            onFocusWatchDone = { settingsFocusWatch = false },
+            // "My routes", where the bells of the routes are.
+            onOpenWays = {
+                favoritesPages.clear()
+                tab = Tab.Favorites
+            },
+        )
+    }
+    val tripPage: @Composable (Journey?) -> Unit = { shownCompanion ->
+        if (shownCompanion != null) {
+            CompanionScreen(
+                journey = shownCompanion,
+                now = now,
+                alternatives = alternatives,
+                courses = tripCourses,
+                feeders = feederCourses,
+                onMinimize = { companionOpen = false },
+                onEnd = { endTrip() },
+                onMissed = { searchFromStop(it) },
+                onReplan = { replanFromHere(it) },
+                onFocusWalk = {
+                    // Showing a walk takes the map out of the trip's framing until "Back".
+                    tripFrameHeld = true
+                    focusWalk(it, shownCompanion)
+                },
+                onSwitch = { switchRest(it) },
+                everyMinute = tripEveryMinute,
+                onEveryMinute = {
+                everyMinuteHint(it)
+                setTripEveryMinute(it)
+            },
+                shortcutAlert = tripShortcutAlert,
+                onShortcutAlert = { TripState.shortcutAlert.value = it },
+                faster = fasterOffer,
+                onTakeFaster = { FasterWatch.take(context, it.key) },
+                onIgnoreFaster = { FasterWatch.ignore(context, it.key) },
+                onRecentre = if (tripFrameHeld) ({ tripFrameHeld = false }) else null,
+                notificationsOff = notificationsOff,
+                onNotificationsNoteSeen = { notificationsOff = false },
+                onChangeDestination = {
+                    tripTargetAppend = false
+                    searchMode = SearchMode.TripTarget
+                },
+                onContinueTo = {
+                    tripTargetAppend = true
+                    searchMode = SearchMode.TripTarget
+                },
+                // A walk of the trip re-routed on the way: its new minutes, and whether the ride after it is lost.
+                walkDetour = walkDetour?.let { state ->
+                    val index = state.legIndex ?: return@let null
+                    val (minutes, arrival) = state.remaining() ?: return@let null
+                    WalkDetour(index, minutes, arrival, late = walkMissesRide(shownCompanion, index, arrival))
+                },
+            )
+        }
+    }
+    val planPage: @Composable (PageLists) -> Unit = { lists ->
+        val selection = lists.selection
+        val shownJourneys = lists.shownJourneys
+        val filteredOut = lists.filteredOut
+        val filteredLevels = lists.filteredLevels
+        val showFiltered = lists.showFiltered
+        val productsOff = lists.productsOff
+        val useAllProducts = lists.useAllProducts
+        val fromName = lists.fromName
+        val toName = lists.toName
+        PlanScreen(
+            fromName = fromName,
+            toName = toName,
+            loading = journeysLoading,
+            error = journeysError,
+            count = shownJourneys?.size ?: 0,
+            filteredCount = filteredOut.size,
+            filteredLevels = filteredLevels,
+            tighterCount = selection.nextCount,
+            tighterLevel = selection.nextLevel,
+            onShowFiltered = showFiltered,
+            // A page on its way out shows the options it had.
+            options = if (showingConnections) {
+                planShown
+            } else {
+                planWindow(shownJourneys.orEmpty(), journeyTime, connectionsState.selectedId, now)
+            },
+            selectedId = planPicked?.id,
+            onSelect = { connectionsState.selectedId = it },
+            time = journeyTime,
+            onTime = { timeSheet = TimeTarget.Journey },
+            comfort = shownComfort,
+            levelChoice = transferChoice,
+            onComfort = { pickComfort(it) },
+            everyMinute = everyMinute,
+            onEveryMinute = {
+                everyMinuteHint(it)
+                everyMinute = it
+            },
+            via = via,
+            onAddVia = { searchMode = SearchMode.Via },
+            onEditVia = { viaPending = via },
+            onRemoveVia = { removeVia() },
+            routeSaved = savedRoutes.any { it.from.id == startPlace?.id && it.to.id == destination?.id },
+            onToggleRoute = { toggleRoute() },
+            onBack = { closeConnections() },
+            onPickOrigin = { searchMode = SearchMode.Origin },
+            onPickDestination = { searchMode = SearchMode.Destination },
+            onSwap = { swapEnds() },
+            onConfirm = { planning = false },
+            productsOff = productsOff,
+            onAllProducts = useAllProducts,
+            searchOptions = options,
+            onSearchOptions = { searchOptionsOpen = true },
+            onTicketOff = { filter -> ticketOff(filter) },
+        )
+    }
+    val connectionsPage: @Composable (PageLists) -> Unit = { lists ->
+        val selection = lists.selection
+        val shownJourneys = lists.shownJourneys
+        val directIds = lists.directIds
+        val patternNote = lists.patternNote
+        val filteredOut = lists.filteredOut
+        val filteredLevels = lists.filteredLevels
+        val showFiltered = lists.showFiltered
+        val productsOff = lists.productsOff
+        val useAllProducts = lists.useAllProducts
+        val fromName = lists.fromName
+        val toName = lists.toName
+        ConnectionsScreen(
+            fromName = fromName,
+            toName = toName,
+            journeys = shownJourneys,
+            loading = journeysLoading,
+            error = journeysError,
+            refreshing = journeysRefreshing && journeysAsked,
+            onRefresh = { asked -> refreshJourneys(asked) },
+            active = appStarted,
+            now = now,
+            state = connectionsState,
+            time = journeyTime,
+            onTime = { timeSheet = TimeTarget.Journey },
+            comfort = shownComfort,
+            levelChoice = transferChoice,
+            onComfort = { pickComfort(it) },
+            everyMinute = everyMinute,
+            onEveryMinute = {
+                everyMinuteHint(it)
+                everyMinute = it
+            },
+            via = via,
+            onAddVia = { searchMode = SearchMode.Via },
+            onEditVia = { viaPending = via },
+            onRemoveVia = { removeVia() },
+            levels = remember(journeyLevels, directIds) { journeyLevels - directIds },
+            filteredCount = filteredOut.size,
+            filteredLevels = filteredLevels,
+            tighterCount = selection.nextCount,
+            tighterLevel = selection.nextLevel,
+            onShowFiltered = showFiltered,
+            productsOff = productsOff,
+            onAllProducts = useAllProducts,
+            searchOptions = options,
+            onSearchOptions = { searchOptionsOpen = true },
+            onTicketOff = { filter -> ticketOff(filter) },
+            // Back leads to the map with the options, or without that step to the start.
+            onBack = { if (planFirst) planning = true else closeConnections() },
+            onPickOrigin = { searchMode = SearchMode.Origin },
+            onLoadEarlier = { loadEarlier() },
+            onLoadLater = { loadLater() },
+            routeSaved = savedRoutes.any { it.from.id == startPlace?.id && it.to.id == destination?.id },
+            onToggleRoute = { toggleRoute() },
+            stopsFailedId = stopsFailedId,
+            onLoadStops = { loadStops(it) },
+            onStopAction = { place, action -> stopAction(place, action) },
+            onStartTrip = { startTrip(it) },
+            fullScreen = connectionsFull,
+            listView = listView,
+            offers = transferOffers,
+            onLoadOffers = { journey, again -> loadTransferOffers(journey, again) },
+            onAdapt = { journey, keepLegs, option -> adaptJourney(journey, keepLegs, option) },
+            adaptedIds = adaptedFrom.keys,
+            onUndo = { undoAdapt(it) },
+            onCourse = { leg ->
+                openCourse(
+                    leg.tripId, leg.line, leg.product, leg.direction, leg.from,
+                    color = leg.providerColor, textColor = leg.providerTextColor, at = leg.ridePlace,
+                )
+            },
+            onFocusWalk = { walk ->
+                focusWalk(walk, journeys?.firstOrNull { it.id == connectionsState.selectedId })
+            },
+            onRememberPattern = { rememberPattern(it) },
+            patternTitle = patternFilter?.label,
+            patternNote = patternNote,
+            onClearPattern = { patternFilter = null },
+        )
+    }
+    val startPage: @Composable (String) -> Unit = { fromName ->
+        StartScreen(
+            classic = startClassic,
+            showCards = startCards,
+            showDepartures = startDepartures,
+            // The chips in the order of the distance they show (see stopsByDistance).
+            stops = remember(stops, center, usingFallback) { stopsByDistance(stops, if (usingFallback) null else center) },
+            selectedStopId = selectedStopId,
+            onSelectStop = { selectStopFramed(it) },
+            departures = departures,
+            departuresLoaded = departuresLoaded,
+            error = departuresError,
+            stopFavorite = favorites.any { it.id == selectedStopId },
+            onDepartureAction = { departure, action -> departureAction(departure, action) },
+            // All departures of the stop the card shows, under Departures.
+            onAllDepartures = {
+                settingsOpen = false
+                tab = Tab.Departures
+            },
+            locationNote = locationNote,
+            recentRoutes = recentRoutes,
+            onOpenRoute = { openRoute(it) },
+            time = journeyTime,
+            onTime = { timeSheet = TimeTarget.Journey },
+            now = now,
+            fromName = fromName,
+            onPickOrigin = { searchMode = SearchMode.Origin },
+            onSwap = { swapOnStart() },
+            tiles = startPageTiles(tiles, favoritePlaces),
+            trip = companion,
+            onOpenTrip = { companionOpen = true },
+            // The same sheet as the companion's "Change" button, from the ⋮ of the trip banner.
+            tripActions = companion?.let { followed ->
+                TripActions(
+                    onReplan = if (tripStep(followed, now).kind == StepKind.Arrived) {
+                        null
+                    } else {
+                        ({ replanFromHere(replanFallback(followed, now)) })
+                    },
+                    onChangeDestination = {
+                        tripTargetAppend = false
+                        searchMode = SearchMode.TripTarget
+                    },
+                    onContinueTo = {
+                        tripTargetAppend = true
+                        searchMode = SearchMode.TripTarget
+                    },
+                    onShare = { tripShareOpen = true },
+                    everyMinute = tripEveryMinute,
+                    onEveryMinute = {
+                        everyMinuteHint(it)
+                        setTripEveryMinute(it)
+                    },
+                    shortcutAlert = tripShortcutAlert,
+                    onShortcutAlert = { TripState.shortcutAlert.value = it },
+                    onEnd = { endTripWithUndo() },
+                )
+            },
+            showAppointment = startCalendar && !calendarLater,
+            onRemoveAppointment = {
+                startCalendar = false
+                prefs.startCalendar = false
+            },
+            onLaterAppointment = { calendarLater = true },
+            appointment = AppointmentTileState(
+                granted = calendarGranted,
+                denied = calendarDenied,
+                appointments = appointments,
+                shown = shownAppointment,
+                leaveAt = appointmentLeave
+                    ?.takeIf { it.key == shownAppointment?.key && it.fromId == startPlace?.id }
+                    ?.leaveAt,
+                placeMissing = appointmentLeave
+                    ?.takeIf { it.key == shownAppointment?.key }
+                    ?.let { it.place == null } == true,
+            ),
+            onEnableCalendar = { calendarLauncher.launch(Manifest.permission.READ_CALENDAR) },
+            onOpenAppointment = { openAppointment(it) },
+            onPickAppointment = { appointmentPick = it.key },
+            onSettings = { settingsOpen = true },
+            onSearch = {
+                searchOrigin = whereToY[0].takeIf { y -> !y.isNaN() }
+                searchMode = SearchMode.Destination
+            },
+            onWhereToPlaced = { y -> whereToY[0] = y },
+            place = startPinContent,
+            placeBack = inPagePreview(BackStep.Unpin, BackStep.ClosePick),
+            onCoverTop = { y ->
+                mapCover[0] = y
+                startLogoCover.value = y
+                if (!coverKnown) coverKnown = true
+                if (startMap) followCover(y)
+            },
+        )
+    }
+    val departuresPage: @Composable () -> Unit = {
+        DeparturesScreen(
+            stops = stops + foundStops.filter { found -> stops.none { it.id == found.id } },
+            selectedStopId = selectedStopId,
+            onSelectStop = { id ->
+                // A stop tapped in the list is shown on its own again.
+                extraStops = emptyList()
+                extraAnchor = null
+                selectStop(id)
+            },
+            addedStops = addedStops,
+            onToggleAdded = { stop ->
+                val anchor = selectedStopId
+                if (anchor != null && stop.id != anchor) {
+                    // Several stops by choice instead of all stops nearby.
+                    if (nearbyOn) {
+                        nearbyOn = false
+                        prefs.nearbyDepartures = false
+                    }
+                    val current = if (extraAnchor == anchor) extraStops else emptyList()
+                    extraStops = if (current.any { it.id == stop.id }) {
+                        current.filter { it.id != stop.id }
+                    } else {
+                        current + stop
+                    }
+                    extraAnchor = anchor
+                }
+            },
+            onStopAction = { stop, action -> stopAction(stop, action) },
+            departures = if (nearbyShown) nearbyDepartures else shownBoard,
+            loaded = if (nearbyOn && !usingFallback) nearbyLoaded else departuresLoaded,
+            error = departuresError,
+            now = now,
+            time = departuresTime,
+            onTime = { timeSheet = TimeTarget.Departures },
+            // With stops added, the star is that of their combination.
+            isFavorite = if (addedStops.isNotEmpty()) {
+                findStopGroup(stopGroups, listOfNotNull(selectedForBoard) + addedStops) != null
+            } else {
+                favorites.any { it.id == selectedStopId }
+            },
+            onToggleFavorite = { toggleFavorite() },
+            onDepartureAction = { departure, action -> departureAction(departure, action) },
+            stopFavorite = favorites.any { it.id == selectedStopId },
+            onSearchStop = {
+                searchOrigin = null
+                searchMode = SearchMode.DepartureStop
+            },
+            nearby = nearbyOn && !usingFallback,
+            onNearby = { value ->
+                nearbyOn = value
+                prefs.nearbyDepartures = value
+            },
+            nearbyRadius = nearbyRadius,
+            // Later departures for one stop; the lists of several stops have none.
+            more = if (nearbyShown || addedStops.isNotEmpty()) null else moreState,
+            onLoadMore = { loadMoreDepartures() },
+            onShowStation = { showStationOnMap() },
+            view = departuresView,
+            refreshing = departuresRefreshing,
+            onRefresh = {
+                departuresRefreshing = true
+                departuresPull++
+            },
+            here = if (usingFallback) null else center,
+            leaveOrder = leaveOrderOn,
+            onLeaveOrder = { value ->
+                leaveOrderOn = value
+                prefs.leaveOrder = value
+            },
+        )
+    }
+    val mapSheetPage: @Composable () -> Unit = {
+        MapStopSheet(
+            stop = if (stopMarked) selectedStop else null,
+            // Back from the card of the stop or of a stop position shows where it leads.
+            cardBack = inPagePreview(BackStep.UnmarkStop),
+            positionBack = inPagePreview(BackStep.ClosePosition),
+            // The card's close and a swipe down let go of the stop, as a tap on the bare map does.
+            onClose = { stopMarked = false },
+            departures = departures,
+            now = now,
+            isFavorite = favorites.any { it.id == selectedStopId },
+            onDepartureAction = { departure, action -> departureAction(departure, action) },
+            onRouteHere = { tab = Tab.Route },
+            onDepartures = { tab = Tab.Departures },
+            lines = stopLines,
+            lineDirections = lineDirections,
+            onLine = { line ->
+                lineJob?.cancel()
+                val stopId = selectedStopId
+                if (lineDirections?.line == line || stopId == null) {
+                    lineDirections = null
+                } else {
+                    lineDirections = LineDirections(line, null)
+                    lineJob = scope.launch {
+                        val found = try {
+                            source.lineDepartures(stopId, line.line, line.product)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+                        if (lineDirections?.line == line) lineDirections = LineDirections(line, found)
+                    }
+                }
+            },
+            onDirection = { departure ->
+                openCourse(
+                    departure.tripId, departure.line, departure.product, departure.direction, selectedStop?.name,
+                    color = departure.providerColor, textColor = departure.providerTextColor,
+                    at = departure.ridePlace ?: selectedStop?.position,
+                )
+            },
+            onCardTop = { y ->
+                mapCover[2] = y
+                if (stopMarked && selectedStop != null) followCover(y)
+            },
+            position = pickedPosition,
+            positionDepartures = remember(departures, pickedPosition) {
+                pickedPosition?.let { pick -> positionDepartures(departures, pick.pos, pick.lines) }.orEmpty()
+            },
+            onPositionClose = { pickedPosition = null },
+            onPositionLine = { line -> openPositionLine(line) },
+            onWalkHere = { walkToPosition() },
+        )
+    }
+    val favoritesPage: @Composable () -> Unit = {
+        FavoritesScreen(
+            tiles = tiles,
+            routes = savedRoutes,
+            favorites = favorites,
+            onOpenRoute = { openRoute(it) },
+            onRemoveRoute = { removeRoute(it) },
+            onOpen = { openFavorite(it) },
+            stopGroups = stopGroups,
+            onOpenGroup = { openStopGroup(it) },
+            savedPlaces = savedPlaces,
+            onOpenSaved = { saved -> pickDestination(saved.place) },
+            onSavedChange = { updateSaved(it) },
+            places = favoritePlaces,
+            onPlaceChange = { index, changed ->
+                updatePlaces(favoritePlaces.mapIndexed { at, favorite -> if (at == index) changed else favorite })
+            },
+            onPlaceChoose = { index ->
+                editingPlace = index
+                searchMode = SearchMode.Place
+            },
+            onPlaceRemove = { index -> updatePlaces(favoritePlaces.filterIndexed { at, _ -> at != index }) },
+            onPlaceAdd = {
+                // The first icon that no favourite place has yet.
+                val icon = PlaceIcon.entries.firstOrNull { icon -> favoritePlaces.none { it.icon == icon } }
+                    ?: PlaceIcon.Star
+                if (favoritePlaces.size < MAX_FAVORITE_PLACES) updatePlaces(favoritePlaces + FavoritePlace(icon))
+            },
+            patterns = savedPatterns,
+            onOpenPattern = { openPattern(it) },
+            onRemovePattern = { removePattern(it) },
+            disruptions = disruptionAccess,
+            page = favoritesPages.lastOrNull(),
+            pageBefore = favoritesPages.getOrNull(favoritesPages.lastIndex - 1),
+            back = inPagePreview(BackStep.FavoritesPage),
+            onPage = { favoritesPages.add(it) },
+            onPageBack = { if (favoritesPages.isNotEmpty()) favoritesPages.removeAt(favoritesPages.lastIndex) },
+            // A disruption's "Map": the stop it is about on the main map.
+            onShowStopOnMap = { stop -> showStop(stop, Tab.Map) },
+            // The map at the top: where the user is, and only where the map is wanted.
+            here = if (usingFallback) null else center,
+            showMap = startMap,
+            onShowArea = { points -> showAreaOnMap(points) },
+            // The bell's "Set times": the settings of the start, at the disruption watch.
+            onWatchSettings = {
+                settingsFocusWatch = true
+                tab = Tab.Route
+                settingsOpen = true
+            },
+        )
+    }
+    // What lies above the pages: the walk and map search bars, notes, cards and dialogs.
+    val pageOverlays: @Composable BoxScope.() -> Unit = {
+        // A walk on the big map: "Back" on top, where it leads at the bottom (see WalkFocus).
+        val shownWalk = lastNonNull(walkFocus)
+        AnimatedVisibility(
+            visible = walkView,
+            enter = fadeIn(tween(220)),
+            exit = fadeOut(tween(160)),
+        ) {
+            if (shownWalk != null) {
+                WalkFocusOverlay(
+                    focus = shownWalk,
+                    following = !walkFrameHeld,
+                    hasPosition = (ownLocation ?: devicePosition) != null,
+                    rerouteMinutes = walkDetour?.takeIf { it.leg == shownWalk.walk }?.remaining()?.first,
+                    onBack = { closeWalk() },
+                    onFollow = { walkFrameHeld = false },
+                )
+            }
+        }
+
+        // The search of the map tab: a glass pill on top, over the "my location" button.
+        // It names the place it found while that is marked; its ✕ lets go of it.
+        val mapSearchShown = mapSearchPick?.takeIf { pick ->
+            if (pick.kind == PlaceKind.Stop) stopMarked && selectedStopId == pick.id else pinned != null && pinned == pick.position
+        }
+        AnimatedVisibility(
+            visible = mapShown && onMapTab && !walkView,
+            enter = fadeIn(tween(200)) + slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) { -it / 2 },
+            exit = fadeOut(tween(140)) + slideOutVertically(tween(160)) { -it / 2 },
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .padding(start = SEARCH_FIELD_INSET, top = MAP_SEARCH_TOP, end = SEARCH_FIELD_INSET),
+        ) {
+            MapSearchPill(
+                label = mapSearchShown?.let { pick -> if (pick.kind == PlaceKind.Stop) pick.name.shortStopName() else pick.name },
+                onOpen = {
+                    searchOrigin = mapSearchY[0].takeIf { y -> !y.isNaN() }
+                    searchMode = SearchMode.MapPlace
+                },
+                onClear = {
+                    if (mapSearchShown?.kind == PlaceKind.Stop) stopMarked = false else pinned = null
+                    mapSearchPick = null
+                },
+                onPlaced = { y -> mapSearchY[0] = y },
+            )
+        }
+
+        // The start page says on its own what is known of the position; the map tab has no page on top that could.
+        if (mapShown && onMapTab && locationNote != null) {
+            LocationNote(
+                text = locationNote,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    // Below the search pill, beside the "my location" button.
+                    .padding(start = SEARCH_FIELD_INSET, top = MAP_BUTTONS_TOP, end = 72.dp),
+            )
+        }
+
+        if (mapShown && (onStart || onMapTab)) {
+            MapButtons(
+                locating = locating,
+                onLocate = {
+                    // The view follows the user again. The known place shows at once, with
+                    // the stops around it; the position is asked for anew, and one that
+                    // lies elsewhere moves the map again.
+                    viewHeld = false
+                    if (!usingFallback) {
+                        // Back to the user, facing north and seen from straight above.
+                        map?.animateCamera(
+                            CameraUpdateFactory.newCameraPosition(
+                                CameraPosition.Builder()
+                                    .target(visibleTarget(center, 15.0))
+                                    .zoom(15.0)
+                                    .bearing(0.0)
+                                    .tilt(0.0)
+                                    .build(),
+                            ),
+                            LOCATE_MILLIS,
+                        )
+                        pinStart()
+                        if (queryCenter == center) {
+                            // The stops around the user are on show: the nearest of them is the selected one again.
+                            stops.filter { it.distanceMeters != null }
+                                .minByOrNull { it.distanceMeters ?: 0 }
+                                ?.let { nearest -> selectedStopId = nearest.id }
+                        } else {
+                            if (distanceMeters(center, queryCenter) > RELOAD_DISTANCE_METERS) selectedStopId = null
+                            queryCenter = center
+                        }
+                    }
+                    requestPosition()
+                },
+                // Right under the settings button at the top right (8 dp from the top, 48 high).
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    // On the map tab below the search field, which is as tall as "Where to?".
+                    .padding(top = if (onMapTab) MAP_BUTTONS_TOP else 64.dp, end = 12.dp),
+            )
+        }
+
+        // A pinned place on the map tab: a card at the bottom, like the card of a stop, with
+        // its name, address and way on foot, and what to do with it. It springs in and out.
+        // On the start page the sheet itself shows the place instead (see StartScreen).
+        PlaceCard(
+            position = if (mapShown && onMapTab) pinned else null,
+            title = pinTitle,
+            address = pinnedDetails?.address,
+            own = devicePosition,
+            onFrom = placeFrom,
+            onTo = placeTo,
+            onSave = placeSave,
+            onClose = { pinned = null },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(start = 12.dp, end = 12.dp, bottom = navInset)
+                // Back shrinks the card over the map it leaves.
+                .backFront(inPagePreview(BackStep.Unpin)?.takeIf { it.active }),
+            loading = pinLookup && pinnedPoi == null,
+        )
+        retarget?.let { state ->
+            RetargetDialog(
+                state = state,
+                onApply = { applyRetarget(it) },
+                onOthers = { retargetOthers(state) },
+                onDismiss = {
+                    retargetJob?.cancel()
+                    retarget = null
+                },
+            )
+        }
+        patternToSave?.let { pattern ->
+            key(pattern.id) {
+                RememberPatternDialog(
+                    pattern = pattern,
+                    onSave = { name -> savePattern(pattern.copy(name = name)) },
+                    onDismiss = { patternToSave = null },
+                )
+            }
+        }
+        placeToSave?.let { place ->
+            key(place.id) {
+                SavePlaceDialog(
+                    initialName = (pinnedPoi ?: pinnedDetails?.title).orEmpty(),
+                    placeName = place.name.shortStopName(),
+                    canFavorite = favoritePlaces.size < MAX_FAVORITE_PLACES,
+                    onSave = { name, icon -> saveAsSaved(place, name, icon) },
+                    onFavorite = { name, icon -> saveAsFavorite(place, name, icon) },
+                    onDismiss = { placeToSave = null },
+                )
+            }
+        }
+        groupToSave?.let { group ->
+            key(group.id) {
+                val defaultName = stopGroupDefaultName(group)
+                SaveStopGroupDialog(
+                    initialName = defaultName,
+                    stopNames = group.stops.joinToString(" · ") { it.name.shortStopName() },
+                    // The name as offered is no name of its own: the list then names it by its stops.
+                    onSave = { name -> saveStopGroup(group.copy(name = if (name == defaultName) "" else name)) },
+                    onDismiss = { groupToSave = null },
+                )
+            }
+        }
+    }
+    // The tab bar and the bars at the bottom, sheets and dialogs.
+    val pageControls: @Composable BoxScope.(String, String) -> Unit = { fromName, toName ->
+        // A walk on the big map has its own "Back"; the tabs come back with the page.
+        if (searchMode == null && !walkView) {
+            FloatingNav(
+                current = tab,
+                // Tapping the tab that is already open leads back to its first page.
+                onSelect = { picked ->
+                    // An open line course makes room first; the same tab then just shows its page again.
+                    val hadCourse = courseView
+                    if (picked != tab) {
+                        // Another tab: what this tab has open (its course, its pages, the
+                        // settings of the start) stays with it and is there again when it
+                        // is picked again; the other tab shows what it had open.
+                        courseRequest?.let { open -> courseByTab[tab] = open }
+                        closeCourse()
+                        tab = picked
+                        courseByTab.remove(picked)?.let { kept ->
+                            openCourse(
+                                kept.tripId, kept.line, kept.product, kept.direction, kept.fromStop,
+                                color = kept.color, textColor = kept.textColor, at = kept.at,
+                            )
+                        }
+                    } else if (hadCourse) {
+                        closeCourse()
+                    } else if (picked == Tab.Favorites) {
+                        favoritesPages.clear()
+                        favoritesFromMap = false
+                    } else if (picked == Tab.Route) {
+                        // A followed trip goes on; its card on the start page leads back to it.
+                        settingsOpen = false
+                        companionOpen = false
+                        closeConnections()
+                    }
+                },
+
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = NAV_BAR_BOTTOM)
+                    // The bar, the gap below it and the gap that keeps sheets clear of it.
+                    .onSizeChanged { size -> navInset = (size.height / density).dp + NAV_BAR_BOTTOM + SHEET_NAV_GAP }
+                    // Its entrance at the start: drawn only, so its room is known at once.
+                    .graphicsLayer {
+                        val shown = navIntro.value
+                        translationY = (1f - shown) * NAV_INTRO_RISE.toPx()
+                        alpha = shown.coerceIn(0f, 1f)
+                    },
+            )
+        }
+
+        // The one host of all snackbars ("Undo" for another transfer level, a trip ended, a stop
+        // combination removed), on every page: drawn after the tab bar so it is never under it,
+        // and above it; at the bottom where the bar is away (search, a walk on the big map).
+        SnackbarHost(
+            hostState = snackbar,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(start = 12.dp, end = 12.dp, bottom = if (searchMode == null && !walkView) navInset + 12.dp else 12.dp),
+        )
+
+        // Which backend answers while the first choice fails ("Daten: Transitous"); nothing otherwise.
+        SourceHint(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = navInset),
+        )
+
+        val sheetFor = timeSheet
+        if (sheetFor != null) {
+            TimeSheet(
+                current = if (sheetFor == TimeTarget.Journey) journeyTime else departuresTime,
+                // Departures have no arrival: only the journey search can ask to be there by a time.
+                allowArrival = sheetFor == TimeTarget.Journey,
+                onApply = { applyTime(it) },
+                onDismiss = { timeSheet = null },
+            )
+        }
+        val sharedTrip = companion
+        if (tripShareOpen && sharedTrip != null) {
+            ShareSheet(
+                journey = sharedTrip,
+                fromName = sharedTrip.legs.first().from.plainStopName(),
+                toName = sharedTrip.legs.last().to.plainStopName(),
+                now = now,
+                following = true,
+                onDismiss = { tripShareOpen = false },
+            )
+        }
+        if (searchOptionsOpen) {
+            SearchOptionsSheet(
+                options = options,
+                onProducts = { products ->
+                    updateOptions(options.copy(products = products))
+                    searchJourneys(keepView = true)
+                },
+                onLocalOnly = { on ->
+                    // A shorthand for the long-distance products: stored as they are.
+                    updateOptions(options.withLocalOnly(on))
+                    searchJourneys(keepView = true)
+                },
+                onBike = { searchWithTickets(options.copy(bike = it)) },
+                onBikeCombo = { searchWithTickets(options.copy(bikeCombo = it)) },
+                onDismiss = { searchOptionsOpen = false },
+                // Only below the chart: the list has no columns to show it in.
+                totalTime = chartTotalTime.takeIf { !listView },
+                onTotalTime = { value ->
+                    chartTotalTime = value
+                    prefs.chartTotalTime = value
+                },
+            )
+        }
+        firstHint?.let { hint -> FirstHintDialog(hint = hint, onDismiss = { firstHint = null }) }
+        val viaAsked = viaPending
+        if (viaAsked != null) {
+            ViaStayDialog(
+                via = viaAsked,
+                onApply = { applyVia(it) },
+                onDismiss = { viaPending = null },
+            )
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalDelayDisplay provides delayDisplay,
+        LocalChartChangeStops provides chartChangeStops,
+        LocalChartTotalTime provides chartTotalTime,
+        LocalNavInset provides navInset,
+        LocalMapCover provides frameCover,
+        // Without the map there is no picture behind the glass: it turns nearly opaque.
+        LocalBackdrop provides (if (mapShown) backdrop else null),
+        LocalBackLayers provides backLayers,
+    ) {
+    Box(
+        modifier = Modifier.fillMaxSize().onSizeChanged {
+            mapCover[1] = it.height.toFloat()
+            mapSize[0] = it.width
+            mapSize[1] = it.height
+        },
+    ) {
+        mapLayer()
+
+        // The ways and marks are recorded as they are drawn (see BackStage.marks), so a page a
+        // back gesture leaves takes them along. Under that page they give way with the gesture
+        // (the page shows them, shrinking), and come back as it is called off; once let go
+        // they are the next page's.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    if (backStage.marksShot != null || backStage.mapStays) alpha = 1f - backProgress.value * backStage.fade.value
+                }
+                .drawWithContent {
+                    val layer = backStage.marks
+                    if (layer == null) {
+                        drawContent()
+                    } else {
+                        layer.record { this@drawWithContent.drawContent() }
+                        drawLayer(layer)
+                    }
+                },
+        ) {
+            mapMarks()
+        }
+
+        // The rows of the bars under a back gesture onto fog or the plain ground: over the ways,
+        // under the pages, as the page back leads to shows its ground (see BackBarRows).
+        BackBarRows(backStage)
 
         // How far the page is away while a walk is on the big map: 0 in place, 1 out of view.
         val pageAway by animateFloatAsState(
@@ -5291,7 +7359,14 @@ fun AppRoot() {
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .imePadding(),
+                .imePadding()
+                .onGloballyPositioned { coordinates ->
+                    val origin = coordinates.positionInRoot()
+                    pagesOrigin[0] = origin.x
+                    pagesOrigin[1] = origin.y
+                    backStage.pagesBox[0] = origin.y
+                    backStage.pagesBox[1] = origin.y + coordinates.size.height
+                },
         ) {
             // A page on its way out keeps showing what it had, also after its state was cleared.
             val shownMode = lastNonNull(searchMode)
@@ -5300,9 +7375,28 @@ fun AppRoot() {
             // Journeys tighter than the chosen level are left out (see journeySelection);
             // every view of the search takes these same lists.
             val allJourneys = if (showingConnections) journeys else heldJourneys
-            val directIds = allJourneys.orEmpty().filter { journeyChangesOf(it).isEmpty() }.map { it.id }.toSet()
-            val selection = journeySelection(allJourneys, shownComfort, journeyLevels)
-            val shownPattern = patternView(allJourneys, patternFilter?.lines, patternFrom)
+            // Worked out again only when the journeys, the level or the rating change (and with the
+            // clock, which rates estimated arrivals): every recomposition of AppRoot rated every
+            // journey here anew, and handed the pages new lists, so nothing in them could skip.
+            val ratingVersion = ratingSettingsShown.intValue
+            // Only while the pages that show them are in front or coming (see listsShown); the
+            // same lists as above where they come from the same journeys, not worked out twice.
+            val directIds = rememberWhileShown(listsShown, allJourneys) {
+                AllocProbe.measure(AllocProbe.PAGE_LISTS) {
+                    allJourneys.orEmpty().filter { journeyChangesOf(it).isEmpty() }.map { it.id }.toSet()
+                }
+            }
+            val sameJourneys = allJourneys === journeys && ratingVersion == selectionRating
+            val selection = rememberWhileShown(listsShown, allJourneys, shownComfort, journeyLevels, ratingVersion, now, sameJourneys) {
+                if (sameJourneys) {
+                    visibleSelection
+                } else {
+                    AllocProbe.measure(AllocProbe.PAGE_LISTS) { journeySelection(allJourneys, shownComfort, journeyLevels) }
+                }
+            }
+            val shownPattern = rememberWhileShown(listsShown, allJourneys, patternFilter?.lines, patternFrom, sameJourneys) {
+                if (sameJourneys) visiblePattern else AllocProbe.measure(AllocProbe.PAGE_LISTS) { patternView(allJourneys, patternFilter?.lines, patternFrom) }
+            }
             val shownJourneys = shownPattern?.takeIf { it.running }?.matching ?: selection.shown
             val patternNote = when {
                 shownPattern == null -> null
@@ -5319,7 +7413,7 @@ fun AppRoot() {
             // Kinds of transport switched off in the settings; one tap searches with all again.
             // Long-distance trains and coaches off are the Deutschlandticket, which has a chip of its own.
             val localOnlyOff = if (options.localOnly) LONG_DISTANCE_PRODUCTS else emptySet()
-            val productsOff = PRODUCT_KEYS.toSet() - options.products - localOnlyOff
+            val productsOff = remember(options.products, localOnlyOff) { PRODUCT_KEYS.toSet() - options.products - localOnlyOff }
             val useAllProducts: () -> Unit = {
                 updateOptions(options.copy(products = PRODUCT_KEYS.toSet() - localOnlyOff))
                 searchJourneys(keepView = true)
@@ -5331,22 +7425,64 @@ fun AppRoot() {
             val placeLabel = favoritePlaces.getOrNull(editingPlace ?: -1)
                 ?.let { favorite -> favorite.name.ifBlank { iconLabels.getValue(favorite.icon) } }
                 ?: stringResource(R.string.saved_places)
-            val pageTransition = rememberTransition(screenSeek, label = "screen")
+            // The same holder as long as what it holds is the same, so the pages that take it see no
+            // change; its actions always call the latest ones.
+            val showFilteredNow = rememberUpdatedState(showFiltered)
+            val useAllProductsNow = rememberUpdatedState(useAllProducts)
+            val pageLists = remember(selection, shownJourneys, directIds, patternNote, productsOff, fromName, toName) {
+                PageLists(
+                    selection = selection,
+                    shownJourneys = shownJourneys,
+                    directIds = directIds,
+                    patternNote = patternNote,
+                    filteredOut = filteredOut,
+                    filteredLevels = filteredLevels,
+                    showFiltered = { showFilteredNow.value() },
+                    productsOff = productsOff,
+                    useAllProducts = { useAllProductsNow.value() },
+                    fromName = fromName,
+                    toName = toName,
+                )
+            }
             pageTransition.AnimatedContent(
                 modifier = Modifier
                     .fillMaxSize()
                     // While a walk is on the big map the page slides down out of view and keeps its state.
-                    .graphicsLayer { translationY = size.height * pageAway },
+                    // A back gesture from the walk lifts it as far as the finger went; let go it
+                    // carries on with the spring above, called off it sinks again.
+                    .graphicsLayer {
+                        val walkBack = inPagePreview(BackStep.CloseWalk)?.takeIf { it.active }
+                        val away = if (walkBack != null) minOf(pageAway, 1f - walkBack.progress.value) else pageAway
+                        translationY = size.height * away
+                    },
                 // The new page fades in while it rises a little and settles with a spring; the old one just fades.
                 transitionSpec = {
                     if (backSwipe) {
                         // Predictive back: the page before is there underneath almost at once,
-                        // the page in front (above it) shrinks with the swipe and only fades
-                        // at the very end, once the gesture is let go.
+                        // always below the page in front, also below a page that came by an
+                        // earlier back; the page in front shrinks with the swipe and stays
+                        // opaque, it fades by itself once let go (see BackStage.fade).
                         (
-                            fadeIn(tween(BACK_PAGE_MILLIS, easing = BackUnderEasing)) togetherWith
-                                fadeOut(tween(BACK_PAGE_MILLIS, easing = BackAwayEasing))
-                            ).apply { targetContentZIndex = -1f }
+                            fadeIn(tween(BACK_PAGE_MILLIS, easing = if (backStage.mapStays) LinearEasing else BackUnderEasing)) togetherWith
+                                fadeOut(tween(BACK_PAGE_MILLIS, easing = BackHoldEasing))
+                            ).apply { targetContentZIndex = backUnderZ(backGestures[0]) }
+                    } else if (tabSlideOf(initialState, targetState) != 0) {
+                        // Another tab: the pages slide along the tab bar, in the direction of
+                        // the tab picked (drawn moves only; the map underneath stays as it is).
+                        val direction = tabSlideOf(initialState, targetState)
+                        if (animationsOn) {
+                            (
+                                slideInHorizontally(tween(TAB_SLIDE_MILLIS, easing = TabEnterEasing)) { width ->
+                                    (direction * width * TAB_SLIDE_SHARE).roundToInt()
+                                } + fadeIn(tween(TAB_SLIDE_MILLIS / 2, delayMillis = TAB_SLIDE_MILLIS / 5))
+                                ) togetherWith (
+                                slideOutHorizontally(tween(TAB_SLIDE_MILLIS, easing = TabExitEasing)) { width ->
+                                    (-direction * width * TAB_SLIDE_SHARE).roundToInt()
+                                } + fadeOut(tween(TAB_SLIDE_MILLIS / 2))
+                                )
+                        } else {
+                            EnterTransition.None togetherWith ExitTransition.None
+                        }
                     } else if (targetState == Screen.Search || initialState == Screen.Search) {
                         // The search field travels by itself; the pages only fade over.
                         fadeIn(tween(160)) togetherWith fadeOut(tween(120))
@@ -5365,970 +7501,154 @@ fun AppRoot() {
                                 visibilityThreshold = IntOffset.VisibilityThreshold,
                             ),
                         ) { height -> height / 18 }
-                        (fadeIn(tween(220)) + rise) togetherWith fadeOut(tween(160))
+                        // From a page on its own ground onto the map (the ride view from the page
+                        // of a journey): the page's content goes first and its ground only then
+                        // (see groundLast below), so the map never shows through its text.
+                        if (groundLast(initialState, targetState, startMap)) {
+                            (fadeIn(tween(220)) + rise) togetherWith
+                                fadeOut(tween(GROUND_OUT_MILLIS, delayMillis = CONTENT_OUT_MILLIS))
+                        } else {
+                            (fadeIn(tween(220)) + rise) togetherWith fadeOut(tween(160))
+                        }
                     }
                 },
             ) { page ->
                 val pageScope = this
+                if (BackLog.on) {
+                    DisposableEffect(page) {
+                        BackLog.pageIn(page)
+                        onDispose { BackLog.pageOut(page) }
+                    }
+                }
+                // What the page lies on while it changes to or from a page on another ground
+                // (see the fog above): a page a back gesture shrinks keeps its ground, and the
+                // page underneath has its own.
+                val ground = pageGround(page, startMap)
+                val ownGround: () -> Boolean = {
+                    pageGround(pageTransition.currentState, startMap) != ground ||
+                        pageGround(pageTransition.targetState, startMap) != ground
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        // Where the page lies, before any shrinking (see BackProbe).
+                        .then(if (BackLog.on) Modifier.onGloballyPositioned { BackProbe.top("page:$page", it) } else Modifier)
                         // The course grows out of the row it was opened from, and back into it.
                         .then(if (page == Screen.Course && !backSwipe) Modifier.growFrom(pageScope, courseOrigin[0]) else Modifier)
                         .graphicsLayer {
                             // The page a back gesture leaves shrinks and rounds with it, moves a
                             // little away from the edge it came from and sinks a little, as a sheet does.
-                            val progress = if (page == backFrom) backProgress.value else 0f
+                            val leaving = page == backFrom
+                            val progress = if (leaving) backProgress.value else 0f
+                            // Once let go it fades as it goes (the transition leaves it opaque).
+                            val fade = if (leaving) backStage.fade.value else 1f
+                            if (fade < 1f) alpha = fade
                             if (progress > 0f) {
                                 val scale = 1f - (1f - BACK_MIN_SCALE) * progress
                                 scaleX = scale
                                 scaleY = scale
                                 translationX = (if (backFromLeft) 1f else -1f) * BACK_SHIFT_DP.dp.toPx() * progress
                                 translationY = size.height * BACK_SINK * progress
-                                shape = RoundedCornerShape((BACK_CORNER_DP * progress).dp)
-                                clip = true
+                                // A card: what the page draws into the row of the status bar (the
+                                // map's picture) shrinks with it instead of being cut off. Over
+                                // a map that stays, only the UI moves, as one group, unclipped.
+                                if (!backStage.mapStays) {
+                                    shape = BackPageShape((BACK_CORNER_DP * progress).dp.toPx(), pagesOrigin[1])
+                                    clip = true
+                                }
+                            }
+                        }
+                        // A page on the map that a back gesture leaves shows the picture of
+                        // the map it took along (see the back handler), where the map lies.
+                        .drawBehind {
+                            if (page == backFrom && backStage.mapCard) {
+                                val at = IntOffset(-pagesOrigin[0].roundToInt(), -pagesOrigin[1].roundToInt())
+                                val room = IntSize(mapSize[0], mapSize[1])
+                                val shown = backStage.shots.value
+                                val shot = backShot
+                                if (shot != null) {
+                                    drawImage(shot, dstOffset = at, dstSize = room, alpha = shown)
+                                } else {
+                                    // No picture of the map came: the card stays opaque all the
+                                    // same, on the blurred picture behind the glass (or the plain ground).
+                                    drawRect(
+                                        AppColors.PlainGround,
+                                        topLeft = Offset(at.x.toFloat(), at.y.toFloat()),
+                                        size = Size(room.width.toFloat(), room.height.toFloat()),
+                                        alpha = shown,
+                                    )
+                                    val glass = backStage.backdrop
+                                    val blurred = glass?.image
+                                    if (glass != null && blurred != null) {
+                                        val ratio = glass.scale * glass.grow
+                                        withTransform({
+                                            translate(left = glass.shiftX - pagesOrigin[0], top = glass.shiftY - pagesOrigin[1])
+                                            scale(ratio, ratio, Offset.Zero)
+                                        }) {
+                                            drawImage(blurred, alpha = shown)
+                                        }
+                                    }
+                                }
+                                backStage.marksShot?.let { marks -> drawImage(marks, dstOffset = at, dstSize = room, alpha = shown) }
                             }
                         },
                 ) {
+                if (ground == PageGround.Fog) {
+                    val fog = glassGround(tint = AppColors.FogTint, fallback = AppColors.Fog, highlight = Color.Transparent)
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            // The page a back gesture leaves is a card on its own ground.
+                            .drawWithContent { if (ownGround() || page == backFrom) drawContent() }
+                            .then(fog),
+                    )
+                } else if (ground == PageGround.Plain) {
+                    Box(modifier = Modifier.matchParentSize().drawBehind { if (ownGround() || page == backFrom) drawRect(AppColors.PlainGround) })
+                }
+                // Leaving its ground for the map, the content of the page fades before its
+                // ground does (see the transition above).
+                val contentShown = pageScope.transition.animateFloat(
+                    transitionSpec = { tween(CONTENT_OUT_MILLIS) },
+                    label = "pageContent",
+                ) { state ->
+                    if (state == EnterExitState.PostExit && !backSwipe && groundLast(page, pageTransition.targetState, startMap)) 0f else 1f
+                }
+                Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = contentShown.value }) {
+                // Only the page in front takes back inside it (see PredictiveNestedBackHandler).
+                CompositionLocalProvider(LocalPageInFront provides (page == screen && !walkView)) {
                 when (page) {
-                    Screen.Course -> if (shownRequest != null) {
-                        CourseScreen(
-                            request = shownRequest,
-                            // What was loaded for another trip is not shown for this one.
-                            course = course?.takeIf { it.tripId == shownRequest.tripId },
-                            failed = courseFailed,
-                            now = now,
-                            // The vehicle in the list where the map has it live.
-                            liveProgress = { millis ->
-                                val live = courseLive?.takeIf { it.vehicle.tripId == shownRequest.tripId }
-                                val track = courseTrack?.takeIf { it.tripId == shownRequest.tripId }
-                                val spot = DoubleArray(2)
-                                if (live != null && track != null && live.locate(millis, spot)) track.progressAt(spot[0], spot[1]) else null
-                            },
-                            onBack = { leaveCourse() },
-                            onShowStop = { place ->
-                                val position = place.position
-                                if (position != null) {
-                                    map?.animateCamera(
-                                        CameraUpdateFactory.newLatLngZoom(
-                                            LatLng(position.first, position.second),
-                                            STOP_ZOOM,
-                                        ),
-                                    )
-                                }
-                            },
-                            onStopAction = { place, action ->
-                                closeCourse()
-                                stopAction(place, action)
-                            },
-                        )
-                    }
-
-                    Screen.Search -> if (shownMode != null) {
-                        // A new share opens the search afresh, with its text in the field.
-                        val shared = sharedSearch?.takeIf { shownMode == SearchMode.Destination }
-                        key(shownMode, shared?.serial) {
-                            val pickFound: (Stop) -> Unit = { place ->
-                                when (shownMode) {
-                                    SearchMode.Origin -> pickOrigin(place)
-                                    SearchMode.Destination -> pickDestination(place)
-                                    SearchMode.Place -> pickFavoritePlace(place)
-                                    SearchMode.DepartureStop -> pickDepartureStop(place)
-                                    // The time to stay there is asked next.
-                                    SearchMode.Via -> {
-                                        viaPending = Via(place.copy(distanceMeters = null), via?.minutes ?: 0)
-                                        searchMode = null
-                                    }
-                                    SearchMode.TripTarget -> {
-                                        searchMode = null
-                                        startRetarget(place.copy(distanceMeters = null), tripTargetAppend)
-                                    }
-                                    SearchMode.MapPlace -> pickMapPlace(place)
-                                }
-                            }
-                            SearchPanel(
-                                source = source,
-                                placeholder = when (shownMode) {
-                                    SearchMode.Origin -> stringResource(R.string.where_from)
-                                    SearchMode.Destination -> stringResource(R.string.where_to)
-                                    SearchMode.Place -> placeLabel
-                                    SearchMode.DepartureStop -> stringResource(R.string.choose_stop)
-                                    SearchMode.Via -> stringResource(R.string.via_search)
-                                    SearchMode.TripTarget -> stringResource(
-                                        if (tripTargetAppend) R.string.retarget_continue_search else R.string.retarget_change_search,
-                                    )
-                                    SearchMode.MapPlace -> stringResource(R.string.map_search_hint)
-                                },
-                                // The places picked before come from the history (see below).
-                                suggestions = when {
-                                    shownMode == SearchMode.Destination -> emptyList()
-                                    shownMode == SearchMode.DepartureStop -> foundStops
-                                    shownMode != SearchMode.Origin -> emptyList()
-                                    // The position of the user always comes first.
-                                    else -> listOf(currentPlace(center)) + stops.filter { it.id != destination?.id }
-                                },
-                                expandFromY = searchOrigin,
-                                onPick = pickFound,
-                                // An appointment as the destination: be there by its start.
-                                onPickAppointment = { appointment, place ->
-                                    if (shownMode == SearchMode.Destination) {
-                                        journeyTime = TimeChoice(appointment.begin, arrival = true)
-                                    }
-                                    pickFound(place)
-                                },
-                                onCalendarGranted = {
-                                    calendarGranted = true
-                                    calendarDenied = false
-                                },
-                                onClose = { closeSearch() },
-                                stopsOnly = shownMode == SearchMode.DepartureStop,
-                                // Choosing a favourite place itself offers no favourite places.
-                                favorites = if (shownMode == SearchMode.Place) emptyList() else favoritePlaces,
-                                saved = if (shownMode == SearchMode.Place) emptyList() else savedPlaces,
-                                history = searchHistory,
-                                onRemember = { rememberSearch(it) },
-                                onForget = { forgetSearch(it) },
-                                initialQuery = shared?.query.orEmpty(),
-                                offered = shared?.place,
-                            )
-                        }
-                    }
-
-                    Screen.Settings -> SettingsScreen(
-                        options = options,
-                        onOptions = { updateOptions(it) },
-                        startVehicles = startVehicles,
-                        onStartVehicles = { value ->
-                            startVehicles = value
-                            prefs.startVehicles = value
-                        },
-                        startMap = startMap,
-                        onStartMap = { value ->
-                            // What only shows on the map is let go of with it.
-                            if (!value) pinned = null
-                            startMap = value
-                            prefs.startMap = value
-                        },
-                        startClassic = startClassic,
-                        onStartClassic = { value ->
-                            startClassic = value
-                            prefs.startClassic = value
-                        },
-                        startCards = startCards,
-                        onStartCards = { value ->
-                            startCards = value
-                            prefs.startCards = value
-                        },
-                        startDepartures = startDepartures,
-                        nearbyRadius = nearbyRadius,
-                        onNearbyRadius = { value ->
-                            nearbyRadius = value
-                            prefs.nearbyRadius = value
-                        },
-                        startCalendar = startCalendar,
-                        onStartCalendar = { value ->
-                            startCalendar = value
-                            prefs.startCalendar = value
-                            calendarLater = false
-                        },
-                        onStartDepartures = { value ->
-                            startDepartures = value
-                            prefs.startDepartures = value
-                        },
-                        boardingHints = boardingHints,
-                        transferChoice = transferChoice,
-                        onTransferChoice = { value ->
-                            transferChoice = value
-                            prefs.transferChoice = value
-                            comfortOverride = null
-                        },
-                        onBoardingHints = { value ->
-                            boardingHints = value
-                            prefs.boardingHints = value
-                            // The notification of a trip says where to board, or no longer does.
-                            refreshTripNotification(context)
-                        },
-                        delayDisplay = delayDisplay,
-                        fitLine = fitLine,
-                        onFitLine = { value ->
-                            fitLine = value
-                            prefs.fitLine = value
-                        },
-                        onDelayDisplay = { value ->
-                            delayDisplay = value
-                            prefs.delayDisplay = value
-                            // The notification of a trip and the widgets show times as well.
-                            refreshTripNotification(context)
-                            WidgetUpdates.redrawAll(context)
-                        },
-                        planFirst = planFirst,
-                        onPlanFirst = { value ->
-                            planFirst = value
-                            prefs.planFirst = value
-                        },
-                        listView = listView,
-                        onListView = { value ->
-                            listView = value
-                            prefs.connectionsList = value
-                        },
-                        onClearHistory = {
-                            searchHistory = emptyList()
-                            prefs.saveSearchHistory(emptyList())
-                        },
-                        connectionsFull = connectionsFull,
-                        onConnectionsFull = { value ->
-                            connectionsFull = value
-                            prefs.connectionsFull = value
-                        },
-                        chartChangeStops = chartChangeStops,
-                        onChartChangeStops = { value ->
-                            chartChangeStops = value
-                            prefs.chartChangeStops = value
-                        },
-                        connectionChoice = connectionChoice,
-                        onConnectionChoice = { value ->
-                            connectionChoice = value
-                            prefs.connectionChoice = value
-                        },
-                        ownServer = ownServer,
-                        onOwnServer = { value ->
-                            ownServer = value
-                            prefs.ownServer = value
-                            // Journeys on the tiles may have come from the other server.
-                            placeTrips.clear()
-                        },
-                        sourceChoice = sourceChoice,
-                        onSourceChoice = { value ->
-                            sourceChoice = value
-                            prefs.sourceChoice = value
-                            // A changed order, switch or key: every backend gets a fresh chance.
-                            SourceHealth.shared.reset()
-                            // The journeys on the tiles may have come from another provider.
-                            placeTrips.clear()
-                        },
-                        onBack = { settingsOpen = false },
-                        focusWatch = settingsFocusWatch,
-                        onFocusWatchDone = { settingsFocusWatch = false },
-                        // "My routes", where the bells of the routes are.
-                        onOpenWays = {
-                            favoritesPages.clear()
-                            tab = Tab.Favorites
-                        },
-                    )
-
-                    Screen.Trip -> if (shownCompanion != null) {
-                        CompanionScreen(
-                            journey = shownCompanion,
-                            now = now,
-                            alternatives = alternatives,
-                            courses = tripCourses,
-                            feeders = feederCourses,
-                            onMinimize = { companionOpen = false },
-                            onEnd = { endTrip() },
-                            onMissed = { searchFromStop(it) },
-                            onReplan = { replanFromHere(it) },
-                            onFocusWalk = {
-                                // Showing a walk takes the map out of the trip's framing until "Back".
-                                tripFrameHeld = true
-                                focusWalk(it, shownCompanion)
-                            },
-                            onSwitch = { switchRest(it) },
-                            everyMinute = tripEveryMinute,
-                            onEveryMinute = {
-                            everyMinuteHint(it)
-                            setTripEveryMinute(it)
-                        },
-                            shortcutAlert = tripShortcutAlert,
-                            onShortcutAlert = { TripState.shortcutAlert.value = it },
-                            faster = fasterOffer,
-                            onTakeFaster = { FasterWatch.take(context, it.key) },
-                            onIgnoreFaster = { FasterWatch.ignore(context, it.key) },
-                            onRecentre = if (tripFrameHeld) ({ tripFrameHeld = false }) else null,
-                            notificationsOff = notificationsOff,
-                            onNotificationsNoteSeen = { notificationsOff = false },
-                            onChangeDestination = {
-                                tripTargetAppend = false
-                                searchMode = SearchMode.TripTarget
-                            },
-                            onContinueTo = {
-                                tripTargetAppend = true
-                                searchMode = SearchMode.TripTarget
-                            },
-                            // A walk of the trip re-routed on the way: its new minutes, and whether the ride after it is lost.
-                            walkDetour = walkDetour?.let { state ->
-                                val index = state.legIndex ?: return@let null
-                                val (minutes, arrival) = state.remaining() ?: return@let null
-                                WalkDetour(index, minutes, arrival, late = walkMissesRide(shownCompanion, index, arrival))
-                            },
-                        )
-                    }
-
-                    Screen.Plan -> PlanScreen(
-                        fromName = fromName,
-                        toName = toName,
-                        loading = journeysLoading,
-                        error = journeysError,
-                        count = shownJourneys?.size ?: 0,
-                        filteredCount = filteredOut.size,
-                        filteredLevels = filteredLevels,
-                        tighterCount = selection.nextCount,
-                        tighterLevel = selection.nextLevel,
-                        onShowFiltered = showFiltered,
-                        // A page on its way out shows the options it had.
-                        options = if (showingConnections) {
-                            planShown
-                        } else {
-                            planWindow(shownJourneys.orEmpty(), journeyTime, connectionsState.selectedId, now)
-                        },
-                        selectedId = planPicked?.id,
-                        onSelect = { connectionsState.selectedId = it },
-                        time = journeyTime,
-                        onTime = { timeSheet = TimeTarget.Journey },
-                        comfort = shownComfort,
-                        levelChoice = transferChoice,
-                        onComfort = { pickComfort(it) },
-                        everyMinute = everyMinute,
-                        onEveryMinute = {
-                            everyMinuteHint(it)
-                            everyMinute = it
-                        },
-                        via = via,
-                        onAddVia = { searchMode = SearchMode.Via },
-                        onEditVia = { viaPending = via },
-                        onRemoveVia = { removeVia() },
-                        routeSaved = savedRoutes.any { it.from.id == startPlace?.id && it.to.id == destination?.id },
-                        onToggleRoute = { toggleRoute() },
-                        onBack = { closeConnections() },
-                        onPickOrigin = { searchMode = SearchMode.Origin },
-                        onPickDestination = { searchMode = SearchMode.Destination },
-                        onSwap = { swapEnds() },
-                        onConfirm = { planning = false },
-                        productsOff = productsOff,
-                        onAllProducts = useAllProducts,
-                        searchOptions = options,
-                        onSearchOptions = { searchOptionsOpen = true },
-                        onTicketOff = { filter -> ticketOff(filter) },
-                    )
-
-                    Screen.Connections -> ConnectionsScreen(
-                        fromName = fromName,
-                        toName = toName,
-                        journeys = shownJourneys,
-                        loading = journeysLoading,
-                        error = journeysError,
-                        now = now,
-                        state = connectionsState,
-                        time = journeyTime,
-                        onTime = { timeSheet = TimeTarget.Journey },
-                        comfort = shownComfort,
-                        levelChoice = transferChoice,
-                        onComfort = { pickComfort(it) },
-                        everyMinute = everyMinute,
-                        onEveryMinute = {
-                            everyMinuteHint(it)
-                            everyMinute = it
-                        },
-                        via = via,
-                        onAddVia = { searchMode = SearchMode.Via },
-                        onEditVia = { viaPending = via },
-                        onRemoveVia = { removeVia() },
-                        levels = journeyLevels - directIds,
-                        filteredCount = filteredOut.size,
-                        filteredLevels = filteredLevels,
-                        tighterCount = selection.nextCount,
-                        tighterLevel = selection.nextLevel,
-                        onShowFiltered = showFiltered,
-                        productsOff = productsOff,
-                        onAllProducts = useAllProducts,
-                        searchOptions = options,
-                        onSearchOptions = { searchOptionsOpen = true },
-                        onTicketOff = { filter -> ticketOff(filter) },
-                        // Back leads to the map with the options, or without that step to the start.
-                        onBack = { if (planFirst) planning = true else closeConnections() },
-                        onPickOrigin = { searchMode = SearchMode.Origin },
-                        onLoadEarlier = { loadEarlier() },
-                        onLoadLater = { loadLater() },
-                        routeSaved = savedRoutes.any { it.from.id == startPlace?.id && it.to.id == destination?.id },
-                        onToggleRoute = { toggleRoute() },
-                        stopsFailedId = stopsFailedId,
-                        onLoadStops = { loadStops(it) },
-                        onStopAction = { place, action -> stopAction(place, action) },
-                        onStartTrip = { startTrip(it) },
-                        fullScreen = connectionsFull,
-                        listView = listView,
-                        offers = transferOffers,
-                        onLoadOffers = { journey, again -> loadTransferOffers(journey, again) },
-                        onAdapt = { journey, keepLegs, option -> adaptJourney(journey, keepLegs, option) },
-                        adaptedIds = adaptedFrom.keys,
-                        onUndo = { undoAdapt(it) },
-                        onCourse = { leg ->
-                            openCourse(
-                                leg.tripId, leg.line, leg.product, leg.direction, leg.from,
-                                color = leg.providerColor, textColor = leg.providerTextColor, at = leg.ridePlace,
-                            )
-                        },
-                        onFocusWalk = { walk ->
-                            focusWalk(walk, journeys?.firstOrNull { it.id == connectionsState.selectedId })
-                        },
-                        onRememberPattern = { rememberPattern(it) },
-                        patternTitle = patternFilter?.label,
-                        patternNote = patternNote,
-                        onClearPattern = { patternFilter = null },
-                    )
-
-                    Screen.Start -> StartScreen(
-                        classic = startClassic,
-                        showCards = startCards,
-                        showDepartures = startDepartures,
-                        // The chips in the order of the distance they show (see stopsByDistance).
-                        stops = remember(stops, center, usingFallback) { stopsByDistance(stops, if (usingFallback) null else center) },
-                        selectedStopId = selectedStopId,
-                        onSelectStop = { selectStopFramed(it) },
-                        departures = departures,
-                        departuresLoaded = departuresLoaded,
-                        error = departuresError,
-                        stopFavorite = favorites.any { it.id == selectedStopId },
-                        onDepartureAction = { departure, action -> departureAction(departure, action) },
-                        // All departures of the stop the card shows, under Departures.
-                        onAllDepartures = {
-                            settingsOpen = false
-                            tab = Tab.Departures
-                        },
-                        locationNote = locationNote,
-                        recentRoutes = recentRoutes,
-                        onOpenRoute = { openRoute(it) },
-                        time = journeyTime,
-                        onTime = { timeSheet = TimeTarget.Journey },
-                        now = now,
-                        fromName = fromName,
-                        onPickOrigin = { searchMode = SearchMode.Origin },
-                        onSwap = { swapOnStart() },
-                        tiles = tiles,
-                        trip = companion,
-                        onOpenTrip = { companionOpen = true },
-                        // The same sheet as the companion's "Change" button, from the ⋮ of the trip banner.
-                        tripActions = companion?.let { followed ->
-                            TripActions(
-                                onReplan = if (tripStep(followed, now).kind == StepKind.Arrived) {
-                                    null
-                                } else {
-                                    ({ replanFromHere(replanFallback(followed, now)) })
-                                },
-                                onChangeDestination = {
-                                    tripTargetAppend = false
-                                    searchMode = SearchMode.TripTarget
-                                },
-                                onContinueTo = {
-                                    tripTargetAppend = true
-                                    searchMode = SearchMode.TripTarget
-                                },
-                                onShare = { tripShareOpen = true },
-                                everyMinute = tripEveryMinute,
-                                onEveryMinute = {
-                                    everyMinuteHint(it)
-                                    setTripEveryMinute(it)
-                                },
-                                shortcutAlert = tripShortcutAlert,
-                                onShortcutAlert = { TripState.shortcutAlert.value = it },
-                                onEnd = { endTripWithUndo() },
-                            )
-                        },
-                        snackbar = snackbar,
-                        showAppointment = startCalendar && !calendarLater,
-                        onRemoveAppointment = {
-                            startCalendar = false
-                            prefs.startCalendar = false
-                        },
-                        onLaterAppointment = { calendarLater = true },
-                        appointment = AppointmentTileState(
-                            granted = calendarGranted,
-                            denied = calendarDenied,
-                            appointments = appointments,
-                            shown = shownAppointment,
-                            leaveAt = appointmentLeave
-                                ?.takeIf { it.key == shownAppointment?.key && it.fromId == startPlace?.id }
-                                ?.leaveAt,
-                            placeMissing = appointmentLeave
-                                ?.takeIf { it.key == shownAppointment?.key }
-                                ?.let { it.place == null } == true,
-                        ),
-                        onEnableCalendar = { calendarLauncher.launch(Manifest.permission.READ_CALENDAR) },
-                        onOpenAppointment = { openAppointment(it) },
-                        onPickAppointment = { appointmentPick = it.key },
-                        onSettings = { settingsOpen = true },
-                        onSearch = {
-                            searchOrigin = whereToY[0].takeIf { y -> !y.isNaN() }
-                            searchMode = SearchMode.Destination
-                        },
-                        onWhereToPlaced = { y -> whereToY[0] = y },
-                        place = startPinContent,
-                        onCoverTop = { y ->
-                            mapCover[0] = y
-                            startLogoCover.value = y
-                            if (!coverKnown) coverKnown = true
-                            if (startMap) followCover(y)
-                        },
-                    )
-
-                    Screen.Departures -> DeparturesScreen(
-                        stops = stops + foundStops.filter { found -> stops.none { it.id == found.id } },
-                        selectedStopId = selectedStopId,
-                        onSelectStop = { id ->
-                            // A stop tapped in the list is shown on its own again.
-                            extraStops = emptyList()
-                            extraAnchor = null
-                            selectStop(id)
-                        },
-                        addedStops = addedStops,
-                        onToggleAdded = { stop ->
-                            val anchor = selectedStopId
-                            if (anchor != null && stop.id != anchor) {
-                                // Several stops by choice instead of all stops nearby.
-                                if (nearbyOn) {
-                                    nearbyOn = false
-                                    prefs.nearbyDepartures = false
-                                }
-                                val current = if (extraAnchor == anchor) extraStops else emptyList()
-                                extraStops = if (current.any { it.id == stop.id }) {
-                                    current.filter { it.id != stop.id }
-                                } else {
-                                    current + stop
-                                }
-                                extraAnchor = anchor
-                            }
-                        },
-                        onStopAction = { stop, action -> stopAction(stop, action) },
-                        departures = if (nearbyShown) nearbyDepartures else shownBoard,
-                        loaded = if (nearbyOn && !usingFallback) nearbyLoaded else departuresLoaded,
-                        error = departuresError,
-                        now = now,
-                        time = departuresTime,
-                        onTime = { timeSheet = TimeTarget.Departures },
-                        // With stops added, the star is that of their combination.
-                        isFavorite = if (addedStops.isNotEmpty()) {
-                            findStopGroup(stopGroups, listOfNotNull(selectedForBoard) + addedStops) != null
-                        } else {
-                            favorites.any { it.id == selectedStopId }
-                        },
-                        onToggleFavorite = { toggleFavorite() },
-                        onDepartureAction = { departure, action -> departureAction(departure, action) },
-                        stopFavorite = favorites.any { it.id == selectedStopId },
-                        onSearchStop = {
-                            searchOrigin = null
-                            searchMode = SearchMode.DepartureStop
-                        },
-                        nearby = nearbyOn && !usingFallback,
-                        onNearby = { value ->
-                            nearbyOn = value
-                            prefs.nearbyDepartures = value
-                        },
-                        nearbyRadius = nearbyRadius,
-                        // Later departures for one stop; the lists of several stops have none.
-                        more = if (nearbyShown || addedStops.isNotEmpty()) null else moreState,
-                        onLoadMore = { loadMoreDepartures() },
-                        onShowStation = { showStationOnMap() },
-                        view = departuresView,
-                        refreshing = departuresRefreshing,
-                        onRefresh = {
-                            departuresRefreshing = true
-                            departuresPull++
-                        },
-                        here = if (usingFallback) null else center,
-                        leaveOrder = leaveOrderOn,
-                        onLeaveOrder = { value ->
-                            leaveOrderOn = value
-                            prefs.leaveOrder = value
-                        },
-                    )
-
-                    Screen.MapSheet -> MapStopSheet(
-                        stop = if (stopMarked) selectedStop else null,
-                        // The card's close and a swipe down let go of the stop, as a tap on the bare map does.
-                        onClose = { stopMarked = false },
-                        departures = departures,
-                        now = now,
-                        isFavorite = favorites.any { it.id == selectedStopId },
-                        onDepartureAction = { departure, action -> departureAction(departure, action) },
-                        onRouteHere = { tab = Tab.Route },
-                        onDepartures = { tab = Tab.Departures },
-                        lines = stopLines,
-                        lineDirections = lineDirections,
-                        onLine = { line ->
-                            lineJob?.cancel()
-                            val stopId = selectedStopId
-                            if (lineDirections?.line == line || stopId == null) {
-                                lineDirections = null
-                            } else {
-                                lineDirections = LineDirections(line, null)
-                                lineJob = scope.launch {
-                                    val found = try {
-                                        source.lineDepartures(stopId, line.line, line.product)
-                                    } catch (e: CancellationException) {
-                                        throw e
-                                    } catch (e: Exception) {
-                                        emptyList()
-                                    }
-                                    if (lineDirections?.line == line) lineDirections = LineDirections(line, found)
-                                }
-                            }
-                        },
-                        onDirection = { departure ->
-                            openCourse(
-                                departure.tripId, departure.line, departure.product, departure.direction, selectedStop?.name,
-                                color = departure.providerColor, textColor = departure.providerTextColor,
-                                at = departure.ridePlace ?: selectedStop?.position,
-                            )
-                        },
-                        onCardTop = { y ->
-                            mapCover[2] = y
-                            if (stopMarked && selectedStop != null) followCover(y)
-                        },
-                        position = pickedPosition,
-                        positionDepartures = remember(departures, pickedPosition) {
-                            pickedPosition?.let { pick -> positionDepartures(departures, pick.pos, pick.lines) }.orEmpty()
-                        },
-                        onPositionClose = { pickedPosition = null },
-                        onPositionLine = { line -> openPositionLine(line) },
-                        onWalkHere = { walkToPosition() },
-                    )
-
-                    Screen.Favorites -> FavoritesScreen(
-                        tiles = tiles,
-                        routes = savedRoutes,
-                        favorites = favorites,
-                        onOpenRoute = { openRoute(it) },
-                        onRemoveRoute = { removeRoute(it) },
-                        onOpen = { openFavorite(it) },
-                        stopGroups = stopGroups,
-                        onOpenGroup = { openStopGroup(it) },
-                        savedPlaces = savedPlaces,
-                        onOpenSaved = { saved -> pickDestination(saved.place) },
-                        onSavedChange = { updateSaved(it) },
-                        places = favoritePlaces,
-                        onPlaceChange = { index, changed ->
-                            updatePlaces(favoritePlaces.mapIndexed { at, favorite -> if (at == index) changed else favorite })
-                        },
-                        onPlaceChoose = { index ->
-                            editingPlace = index
-                            searchMode = SearchMode.Place
-                        },
-                        onPlaceRemove = { index -> updatePlaces(favoritePlaces.filterIndexed { at, _ -> at != index }) },
-                        onPlaceAdd = {
-                            // The first icon that no favourite place has yet.
-                            val icon = PlaceIcon.entries.firstOrNull { icon -> favoritePlaces.none { it.icon == icon } }
-                                ?: PlaceIcon.Star
-                            if (favoritePlaces.size < MAX_FAVORITE_PLACES) updatePlaces(favoritePlaces + FavoritePlace(icon))
-                        },
-                        patterns = savedPatterns,
-                        onOpenPattern = { openPattern(it) },
-                        onRemovePattern = { removePattern(it) },
-                        disruptions = disruptionAccess,
-                        page = favoritesPages.lastOrNull(),
-                        onPage = { favoritesPages.add(it) },
-                        onPageBack = { if (favoritesPages.isNotEmpty()) favoritesPages.removeAt(favoritesPages.lastIndex) },
-                        // A disruption's "Map": the stop it is about on the main map.
-                        onShowStopOnMap = { stop -> showStop(stop, Tab.Map) },
-                        // The map at the top: where the user is, and only where the map is wanted.
-                        here = if (usingFallback) null else center,
-                        showMap = startMap,
-                        onShowArea = { points -> showAreaOnMap(points) },
-                        // The bell's "Set times": the settings of the start, at the disruption watch.
-                        onWatchSettings = {
-                            settingsFocusWatch = true
-                            tab = Tab.Route
-                            settingsOpen = true
-                        },
-                    )
+                    Screen.Course -> coursePage(shownRequest)
+                    Screen.Search -> searchPage(shownMode, placeLabel)
+                    Screen.Settings -> settingsPage()
+                    Screen.Trip -> tripPage(shownCompanion)
+                    Screen.Plan -> planPage(pageLists)
+                    Screen.Connections -> connectionsPage(pageLists)
+                    Screen.Start -> startPage(fromName)
+                    Screen.Departures -> departuresPage()
+                    Screen.MapSheet -> mapSheetPage()
+                    Screen.Favorites -> favoritesPage()
                 }
-                } // The Box of the page; the pages inside keep their old indent.
+                } // The page in front.
+                } // Its content.
+                } // The Box of the page.
             }
 
-            // A walk on the big map: "Back" on top, where it leads at the bottom (see WalkFocus).
-            val shownWalk = lastNonNull(walkFocus)
-            AnimatedVisibility(
-                visible = walkView,
-                enter = fadeIn(tween(220)),
-                exit = fadeOut(tween(160)),
-            ) {
-                if (shownWalk != null) {
-                    WalkFocusOverlay(
-                        focus = shownWalk,
-                        following = !walkFrameHeld,
-                        hasPosition = (ownLocation ?: devicePosition) != null,
-                        rerouteMinutes = walkDetour?.takeIf { it.leg == shownWalk.walk }?.remaining()?.first,
-                        onBack = { closeWalk() },
-                        onFollow = { walkFrameHeld = false },
-                    )
-                }
-            }
-
-            // The search of the map tab: a glass pill on top, over the "my location" button.
-            // It names the place it found while that is marked; its ✕ lets go of it.
-            val mapSearchShown = mapSearchPick?.takeIf { pick ->
-                if (pick.kind == PlaceKind.Stop) stopMarked && selectedStopId == pick.id else pinned != null && pinned == pick.position
-            }
-            AnimatedVisibility(
-                visible = mapShown && onMapTab && !walkView,
-                enter = fadeIn(tween(200)) + slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) { -it / 2 },
-                exit = fadeOut(tween(140)) + slideOutVertically(tween(160)) { -it / 2 },
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .fillMaxWidth()
-                    .padding(start = SEARCH_FIELD_INSET, top = MAP_SEARCH_TOP, end = SEARCH_FIELD_INSET),
-            ) {
-                MapSearchPill(
-                    label = mapSearchShown?.let { pick -> if (pick.kind == PlaceKind.Stop) pick.name.shortStopName() else pick.name },
-                    onOpen = {
-                        searchOrigin = mapSearchY[0].takeIf { y -> !y.isNaN() }
-                        searchMode = SearchMode.MapPlace
-                    },
-                    onClear = {
-                        if (mapSearchShown?.kind == PlaceKind.Stop) stopMarked = false else pinned = null
-                        mapSearchPick = null
-                    },
-                    onPlaced = { y -> mapSearchY[0] = y },
-                )
-            }
-
-            // The start page says on its own what is known of the position; the map tab has no page on top that could.
-            if (mapShown && onMapTab && locationNote != null) {
-                LocationNote(
-                    text = locationNote,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        // Below the search pill, beside the "my location" button.
-                        .padding(start = SEARCH_FIELD_INSET, top = MAP_BUTTONS_TOP, end = 72.dp),
-                )
-            }
-
-            if (mapShown && (onStart || onMapTab)) {
-                MapButtons(
-                    locating = locating,
-                    onLocate = {
-                        // The view follows the user again. The known place shows at once, with
-                        // the stops around it; the position is asked for anew, and one that
-                        // lies elsewhere moves the map again.
-                        viewHeld = false
-                        if (!usingFallback) {
-                            // Back to the user, facing north and seen from straight above.
-                            map?.animateCamera(
-                                CameraUpdateFactory.newCameraPosition(
-                                    CameraPosition.Builder()
-                                        .target(visibleTarget(center, 15.0))
-                                        .zoom(15.0)
-                                        .bearing(0.0)
-                                        .tilt(0.0)
-                                        .build(),
-                                ),
-                                LOCATE_MILLIS,
-                            )
-                            pinStart()
-                            if (queryCenter == center) {
-                                // The stops around the user are on show: the nearest of them is the selected one again.
-                                stops.filter { it.distanceMeters != null }
-                                    .minByOrNull { it.distanceMeters ?: 0 }
-                                    ?.let { nearest -> selectedStopId = nearest.id }
-                            } else {
-                                if (distanceMeters(center, queryCenter) > RELOAD_DISTANCE_METERS) selectedStopId = null
-                                queryCenter = center
-                            }
-                        }
-                        requestPosition()
-                    },
-                    // Right under the settings button at the top right (8 dp from the top, 48 high).
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        // On the map tab below the search field, which is as tall as "Where to?".
-                        .padding(top = if (onMapTab) MAP_BUTTONS_TOP else 64.dp, end = 12.dp),
-                )
-            }
-
-            // A pinned place on the map tab: a card at the bottom, like the card of a stop, with
-            // its name, address and way on foot, and what to do with it. It springs in and out.
-            // On the start page the sheet itself shows the place instead (see StartScreen).
-            PlaceCard(
-                position = if (mapShown && onMapTab) pinned else null,
-                title = pinTitle,
-                address = pinnedDetails?.address,
-                own = devicePosition,
-                onFrom = placeFrom,
-                onTo = placeTo,
-                onSave = placeSave,
-                onClose = { pinned = null },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(start = 12.dp, end = 12.dp, bottom = navInset),
-                loading = pinLookup && pinnedPoi == null,
-            )
-            retarget?.let { state ->
-                RetargetDialog(
-                    state = state,
-                    onApply = { applyRetarget(it) },
-                    onOthers = { retargetOthers(state) },
-                    onDismiss = {
-                        retargetJob?.cancel()
-                        retarget = null
-                    },
-                )
-            }
-            patternToSave?.let { pattern ->
-                key(pattern.id) {
-                    RememberPatternDialog(
-                        pattern = pattern,
-                        onSave = { name -> savePattern(pattern.copy(name = name)) },
-                        onDismiss = { patternToSave = null },
-                    )
-                }
-            }
-            placeToSave?.let { place ->
-                key(place.id) {
-                    SavePlaceDialog(
-                        initialName = (pinnedPoi ?: pinnedDetails?.title).orEmpty(),
-                        placeName = place.name.shortStopName(),
-                        canFavorite = favoritePlaces.size < MAX_FAVORITE_PLACES,
-                        onSave = { name, icon -> saveAsSaved(place, name, icon) },
-                        onFavorite = { name, icon -> saveAsFavorite(place, name, icon) },
-                        onDismiss = { placeToSave = null },
-                    )
-                }
-            }
-            groupToSave?.let { group ->
-                key(group.id) {
-                    val defaultName = stopGroupDefaultName(group)
-                    SaveStopGroupDialog(
-                        initialName = defaultName,
-                        stopNames = group.stops.joinToString(" · ") { it.name.shortStopName() },
-                        // The name as offered is no name of its own: the list then names it by its stops.
-                        onSave = { name -> saveStopGroup(group.copy(name = if (name == defaultName) "" else name)) },
-                        onDismiss = { groupToSave = null },
-                    )
-                }
-            }
-            // The snackbar lives on the start page; on the departures tab its "Undo" (a removed
-            // stop combination) shows here, above the tab bar.
-            if (tab == Tab.Departures && searchMode == null) {
-                SnackbarHost(
-                    hostState = snackbar,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(start = 12.dp, end = 12.dp, bottom = navInset + 12.dp),
-                )
-            }
-            // A walk on the big map has its own "Back"; the tabs come back with the page.
-            if (searchMode == null && !walkView) {
-                FloatingNav(
-                    current = tab,
-                    // Tapping the tab that is already open leads back to its first page.
-                    onSelect = { picked ->
-                        // An open line course makes room first; the same tab then just shows its page again.
-                        val hadCourse = courseView
-                        if (picked != tab) {
-                            // Another tab: what this tab has open (its course, its pages, the
-                            // settings of the start) stays with it and is there again when it
-                            // is picked again; the other tab shows what it had open.
-                            courseRequest?.let { open -> courseByTab[tab] = open }
-                            closeCourse()
-                            tab = picked
-                            courseByTab.remove(picked)?.let { kept ->
-                                openCourse(
-                                    kept.tripId, kept.line, kept.product, kept.direction, kept.fromStop,
-                                    color = kept.color, textColor = kept.textColor, at = kept.at,
-                                )
-                            }
-                        } else if (hadCourse) {
-                            closeCourse()
-                        } else if (picked == Tab.Favorites) {
-                            favoritesPages.clear()
-                        } else if (picked == Tab.Route) {
-                            // A followed trip goes on; its card on the start page leads back to it.
-                            settingsOpen = false
-                            companionOpen = false
-                            closeConnections()
-                        }
-                    },
-
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = NAV_BAR_BOTTOM)
-                        // The bar, the gap below it and the gap that keeps sheets clear of it.
-                        .onSizeChanged { size -> navInset = (size.height / density).dp + NAV_BAR_BOTTOM + SHEET_NAV_GAP }
-                        // Its entrance at the start: drawn only, so its room is known at once.
-                        .graphicsLayer {
-                            val shown = navIntro.value
-                            translationY = (1f - shown) * NAV_INTRO_RISE.toPx()
-                            alpha = shown.coerceIn(0f, 1f)
-                        },
-                )
-            }
-
-            // Which backend answers while the first choice fails ("Daten: Transitous"); nothing otherwise.
-            SourceHint(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = navInset),
-            )
-
-            val sheetFor = timeSheet
-            if (sheetFor != null) {
-                TimeSheet(
-                    current = if (sheetFor == TimeTarget.Journey) journeyTime else departuresTime,
-                    // Departures have no arrival: only the journey search can ask to be there by a time.
-                    allowArrival = sheetFor == TimeTarget.Journey,
-                    onApply = { applyTime(it) },
-                    onDismiss = { timeSheet = null },
-                )
-            }
-            val sharedTrip = companion
-            if (tripShareOpen && sharedTrip != null) {
-                ShareSheet(
-                    journey = sharedTrip,
-                    fromName = sharedTrip.legs.first().from.plainStopName(),
-                    toName = sharedTrip.legs.last().to.plainStopName(),
-                    now = now,
-                    following = true,
-                    onDismiss = { tripShareOpen = false },
-                )
-            }
-            if (searchOptionsOpen) {
-                SearchOptionsSheet(
-                    options = options,
-                    onProducts = { products ->
-                        updateOptions(options.copy(products = products))
-                        searchJourneys(keepView = true)
-                    },
-                    onLocalOnly = { on ->
-                        // A shorthand for the long-distance products: stored as they are.
-                        updateOptions(options.withLocalOnly(on))
-                        searchJourneys(keepView = true)
-                    },
-                    onBike = { searchWithTickets(options.copy(bike = it)) },
-                    onBikeCombo = { searchWithTickets(options.copy(bikeCombo = it)) },
-                    onDismiss = { searchOptionsOpen = false },
-                )
-            }
-            firstHint?.let { hint -> FirstHintDialog(hint = hint, onDismiss = { firstHint = null }) }
-            val viaAsked = viaPending
-            if (viaAsked != null) {
-                ViaStayDialog(
-                    via = viaAsked,
-                    onApply = { applyVia(it) },
-                    onDismiss = { viaPending = null },
-                )
-            }
+            pageOverlays()
+            pageControls(fromName, toName)
         }
     }
     }
 }
 
-// Closer than this to a favourite place, the user is there already.
-private const val HERE_METERS = 150
 
-/** True when [start] is the place [place] itself or lies within [HERE_METERS] of it. */
-private fun atPlace(start: Stop, place: Stop): Boolean {
-    if (start.id == place.id) return true
-    val a = start.latitude?.let { lat -> start.longitude?.let { lat to it } } ?: return false
-    val b = place.latitude?.let { lat -> place.longitude?.let { lat to it } } ?: return false
-    return distanceMeters(a, b) < HERE_METERS
+/**
+ * The tiles of the start page: with more than two places saved, the tile of the place the user
+ * is at is left out (see hideHereTile), so the row shows where one can go; with one or two it
+ * stays and says "You are here". The favourites page always shows every place.
+ */
+private fun startPageTiles(tiles: List<PlaceTile>, places: List<FavoritePlace>): List<PlaceTile> {
+    if (!hideHereTile(places.count { it.place != null })) return tiles
+    return tiles.filter { tile -> !(tile.here && tile.key.startsWith("place")) }
 }
 
 private fun distanceMeters(from: Pair<Double, Double>, to: Pair<Double, Double>): Int {
@@ -6421,22 +7741,27 @@ private suspend fun currentLocation(context: Context): Location? {
     return null
 }
 
-/** Asks for position updates, one every [intervalMillis] at most and only after [minMeters] of way. */
+/**
+ * Asks for position updates, one every [intervalMillis] at most and only after [minMeters] of
+ * way. With [precise] the fused source is asked for its most exact positions (satellites
+ * included), as needed to follow a moving user; else for balanced ones, which spare the
+ * battery but may come from the mobile network and stay put for a while.
+ */
 private fun startLocationUpdates(
     manager: LocationManager,
     listener: LocationListener,
     intervalMillis: Long,
     minMeters: Float,
+    precise: Boolean,
+    executor: Executor,
 ) {
+    val request = LocationRequest.Builder(intervalMillis)
+        .setMinUpdateDistanceMeters(minMeters)
+        .setQuality(if (precise) LocationRequest.QUALITY_HIGH_ACCURACY else LocationRequest.QUALITY_BALANCED_POWER_ACCURACY)
+        .build()
     updateProviders(manager).forEach { provider ->
         try {
-            manager.requestLocationUpdates(
-                provider,
-                intervalMillis,
-                minMeters,
-                listener,
-                Looper.getMainLooper(),
-            )
+            manager.requestLocationUpdates(provider, request, executor, listener)
         } catch (e: SecurityException) {
             // With the approximate permission only, the precise source refuses; the others still report.
         } catch (e: IllegalArgumentException) {
@@ -6609,35 +7934,6 @@ private fun pointAtShare(path: List<Pair<Double, Double>>, share: Float): Pair<D
         left -= step
     }
     return path.last()
-}
-
-/** The traveller on the map: a blue dot with a white rim inside a soft halo. */
-@Composable
-private fun PositionDot(map: MapLibreMap?, cameraTick: () -> Int, position: Pair<Double, Double>?) {
-    val shown by rememberMapInAlpha()
-    if (map == null || position == null) return
-    Box(
-        modifier = Modifier
-            .graphicsLayer { alpha = shown }
-            .offset {
-                cameraTick()
-                val point = map.projection.toScreenLocation(LatLng(position.first, position.second))
-                IntOffset(point.x.roundToInt(), point.y.roundToInt())
-            }
-            .graphicsLayer {
-                translationX = -size.width / 2f
-                translationY = -size.height / 2f
-            }
-            .size(34.dp)
-            .clip(CircleShape)
-            .background(AppColors.Blue.copy(alpha = 0.2f))
-            .padding(8.dp)
-            .clip(CircleShape)
-            .background(AppColors.Card)
-            .padding(3.dp)
-            .clip(CircleShape)
-            .background(AppColors.Blue),
-    )
 }
 
 /**
@@ -6841,7 +8137,10 @@ private fun MapSearchPill(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClickLabel = hint, onClick = onOpen)
-                .defaultMinSize(minHeight = SEARCH_FIELD_HEIGHT)
+                // Always as tall as the "Where to?" field (a Material 3 search bar and a little
+                // more): heightIn holds in every layout, defaultMinSize only where the parent
+                // sets no minimum of its own.
+                .heightIn(min = SEARCH_FIELD_HEIGHT)
                 .padding(start = 18.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -6856,8 +8155,9 @@ private fun MapSearchPill(
                 Text(
                     text = shown ?: hint,
                     color = if (shown == null) AppColors.Muted else AppColors.Ink,
-                    fontWeight = if (shown == null) FontWeight.Normal else FontWeight.SemiBold,
-                    fontSize = 16.sp,
+                    // The idle hint as firm as the hint of "Where to?", only smaller.
+                    fontWeight = if (shown == null) FontWeight.Medium else FontWeight.SemiBold,
+                    fontSize = 17.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -6923,7 +8223,9 @@ private fun journeyLabels(journey: Journey): List<MapLabel> {
  * The stations of a journey on the map: a small dot on the way for each, and its name next
  * to it in plain text with a halo, so the map stays readable. Start, changes and destination
  * always carry their names and have a sign of their own; the stops on the way are named only
- * where a name finds room beside its dot without covering another one. Each name tries the
+ * where the route has room around them (see namedRouteStops: zoomed out the important stations
+ * alone, zoomed in the stops between) and a name finds room beside its dot without covering
+ * another one. Each name tries the
  * right, the left, above and below its dot, in that order. The names fade in once.
  */
 @Composable
@@ -6945,11 +8247,17 @@ private fun JourneyLabels(map: MapLibreMap?, cameraTick: () -> Int, journey: Jou
         marks.map { mark -> mark.label?.let { measurer.measure(it, markStyle, maxLines = 1) } }
     }
     val markScreen = remember(marks) { FloatArray(marks.size * 2) }
+    // Where each pill of a stop position stands, moved off its position where pills crowd (see placeMarkPills).
+    val markShift = remember(marks) { FloatArray(marks.size * 2) }
     val appear = remember(journey) { Animatable(0f) }
     LaunchedEffect(appear) { appear.animateTo(1f, tween(ROUTE_DRAW_MILLIS, easing = FastOutSlowInEasing)) }
     // Places on the screen, x and y in turn, worked out again only when the map has moved.
     val screen = remember(labels) { FloatArray(labels.size * 2) }
     val projected = remember(labels) { intArrayOf(-1) }
+    // Which names show: start, changes and destination always, the stops between where there is
+    // room around them (see namedRouteStops), worked out with the places on the screen.
+    val keys = remember(labels) { BooleanArray(labels.size) { labels[it].kind != null } }
+    val named = remember(labels) { arrayOf(BooleanArray(labels.size) { true }) }
     Canvas(modifier = Modifier.fillMaxSize()) {
         val tick = cameraTick()
         if (tick != projected[0]) {
@@ -6959,11 +8267,21 @@ private fun JourneyLabels(map: MapLibreMap?, cameraTick: () -> Int, journey: Jou
                 screen[index * 2] = point.x
                 screen[index * 2 + 1] = point.y
             }
+            val xs = FloatArray(labels.size) { screen[it * 2] }
+            val ys = FloatArray(labels.size) { screen[it * 2 + 1] }
+            named[0] = namedRouteStops(xs, ys, keys, WAY_STOP_NAME_SPACING_DP.dp.toPx())
             marks.forEachIndexed { index, mark ->
                 val point = map.projection.toScreenLocation(LatLng(mark.position.first, mark.position.second))
                 markScreen[index * 2] = point.x
                 markScreen[index * 2 + 1] = point.y
             }
+            val markXs = FloatArray(marks.size) { markScreen[it * 2] }
+            val markYs = FloatArray(marks.size) { markScreen[it * 2 + 1] }
+            val pillHalfWidths = FloatArray(marks.size) { index ->
+                val layout = markLayouts[index]
+                if (marks[index].faint || layout == null) 0f else maxOf(layout.size.width / 2f + 5.dp.toPx(), 8.dp.toPx())
+            }
+            placeMarkPills(markXs, markYs, pillHalfWidths, 8.dp.toPx(), 6.dp.toPx(), 2.dp.toPx(), markShift)
         }
         val shown = appear.value
         val keyRadius = 7.dp.toPx()
@@ -6980,7 +8298,14 @@ private fun JourneyLabels(map: MapLibreMap?, cameraTick: () -> Int, journey: Jou
         val markHalfHeight = 8.dp.toPx()
         marks.indices.forEach { index ->
             if (marks[index].faint) return@forEach
-            taken.add(Rect(Offset(markScreen[index * 2], markScreen[index * 2 + 1]), markHalfHeight))
+            val center = Offset(markScreen[index * 2], markScreen[index * 2 + 1])
+            taken.add(Rect(center, 6.dp.toPx()))
+            val layout = markLayouts[index]
+            if (layout != null && !markShift[index * 2].isNaN()) {
+                val halfWidth = maxOf(layout.size.width / 2f + 5.dp.toPx(), markHalfHeight)
+                val at = center + Offset(markShift[index * 2], markShift[index * 2 + 1])
+                taken.add(Rect(at.x - halfWidth, at.y - markHalfHeight, at.x + halfWidth, at.y + markHalfHeight))
+            }
         }
         // Stops on the way below, start, changes and destination on top.
         labels.forEachIndexed { index, label ->
@@ -7015,25 +8340,36 @@ private fun JourneyLabels(map: MapLibreMap?, cameraTick: () -> Int, journey: Jou
         marks.forEachIndexed { index, mark ->
             val center = Offset(markScreen[index * 2], markScreen[index * 2 + 1])
             val layout = markLayouts[index]
+            val dx = markShift[index * 2]
+            val dy = markShift[index * 2 + 1]
             if (mark.faint) {
                 // Another stop position of the stop: a small pale dot, so the one to go to stands out.
                 drawCircle(halo, radius = 4.dp.toPx(), center = center, alpha = shown * 0.8f)
                 drawCircle(mark.color, radius = 2.8.dp.toPx(), center = center, alpha = shown * 0.6f)
-            } else if (layout == null) {
+            } else if (layout == null || dx.isNaN()) {
+                // No number, or no room for it beside the pills of the other positions: the dot alone.
                 drawCircle(halo, radius = 6.dp.toPx(), center = center, alpha = shown)
                 drawCircle(mark.color, radius = 4.5.dp.toPx(), center = center, alpha = shown)
             } else {
+                val pill = center + Offset(dx, dy)
+                if (dx != 0f || dy != 0f) {
+                    // Moved aside so it does not cover another pill: a leader from its dot.
+                    drawLine(halo, center, pill, strokeWidth = 3.5.dp.toPx(), alpha = shown)
+                    drawLine(mark.color, center, pill, strokeWidth = 1.5.dp.toPx(), alpha = shown)
+                    drawCircle(halo, radius = 6.dp.toPx(), center = center, alpha = shown)
+                    drawCircle(mark.color, radius = 4.5.dp.toPx(), center = center, alpha = shown)
+                }
                 val halfWidth = maxOf(layout.size.width / 2f + 5.dp.toPx(), markHalfHeight)
                 drawRoundRect(
                     halo,
-                    topLeft = Offset(center.x - halfWidth - markOutline, center.y - markHalfHeight - markOutline),
+                    topLeft = Offset(pill.x - halfWidth - markOutline, pill.y - markHalfHeight - markOutline),
                     size = Size(2f * (halfWidth + markOutline), 2f * (markHalfHeight + markOutline)),
                     cornerRadius = CornerRadius(markHalfHeight + markOutline),
                     alpha = shown,
                 )
                 drawRoundRect(
                     mark.color,
-                    topLeft = Offset(center.x - halfWidth, center.y - markHalfHeight),
+                    topLeft = Offset(pill.x - halfWidth, pill.y - markHalfHeight),
                     size = Size(2f * halfWidth, 2f * markHalfHeight),
                     cornerRadius = CornerRadius(markHalfHeight),
                     alpha = shown,
@@ -7041,7 +8377,7 @@ private fun JourneyLabels(map: MapLibreMap?, cameraTick: () -> Int, journey: Jou
                 drawText(
                     layout,
                     color = onLineColor(mark.color),
-                    topLeft = Offset(center.x - layout.size.width / 2f, center.y - layout.size.height / 2f),
+                    topLeft = Offset(pill.x - layout.size.width / 2f, pill.y - layout.size.height / 2f),
                     alpha = shown,
                 )
             }
@@ -7050,6 +8386,8 @@ private fun JourneyLabels(map: MapLibreMap?, cameraTick: () -> Int, journey: Jou
         val order = labels.indices.sortedBy { if (labels[it].kind != null) 0 else 1 }
         for (index in order) {
             val label = labels[index]
+            // A stop on the way where the route is crowded: its dot alone, its name once zoomed in.
+            if (!named[0][index]) continue
             val layout = layouts[index]
             val width = layout.size.width.toFloat()
             val height = layout.size.height.toFloat()
@@ -7367,7 +8705,6 @@ private fun StartScreen(
     trip: Journey?,
     onOpenTrip: () -> Unit,
     tripActions: TripActions?,
-    snackbar: SnackbarHostState,
     showAppointment: Boolean,
     onRemoveAppointment: () -> Unit,
     onLaterAppointment: () -> Unit,
@@ -7380,6 +8717,8 @@ private fun StartScreen(
     onWhereToPlaced: (Float) -> Unit,
     onCoverTop: (Float) -> Unit,
     place: (@Composable () -> Unit)? = null,
+    // A back gesture that lets go of the place: the content of the sheet shows under it.
+    placeBack: BackPreview? = null,
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         // A wide screen has the sheet as a panel at the side of the map; a small one (the cover
@@ -7453,16 +8792,23 @@ private fun StartScreen(
         // A sheet that was put away comes up for the place.
         LaunchedEffect(placeShown) { if (placeShown && stage == SheetStage.Away) stage = SheetStage.Half }
         // The content of the page, or the place in its stead, swapped with a short slide and fade.
+        // A back gesture seeks the swap as it goes: the place shrinks over the content.
         val swapped: @Composable (@Composable () -> Unit) -> Unit = { page ->
-            AnimatedContent(
-                targetState = placeShown,
+            rememberBackSeek(placeShown, placeBack, backTarget = false, label = "startSheetPlace").AnimatedContent(
                 transitionSpec = {
-                    (fadeIn(tween(220)) + slideInVertically(tween(260)) { it / 6 }) togetherWith
-                        (fadeOut(tween(160)) + slideOutVertically(tween(200)) { it / 6 })
+                    if (placeBack?.active == true) {
+                        backContentTransform(placeBack)
+                    } else {
+                        (fadeIn(tween(220)) + slideInVertically(tween(260)) { it / 6 }) togetherWith
+                            (fadeOut(tween(160)) + slideOutVertically(tween(200)) { it / 6 })
+                    }
                 },
-                label = "startSheetPlace",
             ) { showing ->
-                if (showing) heldPlace[0]?.invoke() else page()
+                if (showing) {
+                    Box(modifier = Modifier.backShrink(placeBack?.takeIf { it.active })) { heldPlace[0]?.invoke() }
+                } else {
+                    page()
+                }
             }
         }
 
@@ -7839,13 +9185,6 @@ private fun StartScreen(
                     ),
             )
         }
-        // "Trip ended" with its way back, above the tab bar.
-        SnackbarHost(
-            hostState = snackbar,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(start = 12.dp, end = 12.dp, bottom = LocalNavInset.current + 12.dp),
-        )
     }
 }
 

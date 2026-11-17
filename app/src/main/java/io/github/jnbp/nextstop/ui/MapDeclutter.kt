@@ -196,6 +196,12 @@ fun shiftedPillSize(pillWidthDp: Float, side: PillSide): Pair<Float, Float> = wh
  * right, left and below (with a leader line to its position); otherwise its pin alone. A pill
  * that covers only another pill tries those sides as well where its [PillBox.pillWidthDp] is
  * known (a bare position shows as its pin).
+ *
+ * With the sides placed before ([previous], one per pill) a pill switches only when it is
+ * clearly due, so it does not flicker while the map moves a little: a pill on its pin stays
+ * there until its box overlaps by more than [holdDp], and comes back onto its pin from the
+ * side only once that box is clear by [holdDp]; a pill aside keeps its side while that is
+ * free. It still switches as soon as that is clearly due (see PILL_HOLD_DP).
  */
 fun placePills(
     pills: List<PillBox>,
@@ -204,6 +210,8 @@ fun placePills(
     bearing: Double = 0.0,
     paddingDp: Float = 2f,
     signPaddingDp: Float = 3f,
+    previous: List<PillSide>? = null,
+    holdDp: Float = PILL_HOLD_DP,
 ): List<PillSide> {
     if (pills.isEmpty()) return emptyList()
     val latitude = pills.sumOf { it.latitude } / pills.size
@@ -237,8 +245,16 @@ fun placePills(
         val pill = pills[index]
         val (x, y) = screen(pill.latitude, pill.longitude)
         val above = doubleArrayOf(x - pill.widthDp / 2, y - pill.heightDp, x + pill.widthDp / 2, y)
-        val onSign = signRects.any { overlaps(above, it, 0f) }
-        val onPill = kept.any { overlaps(above, it, paddingDp) }
+        // A light hysteresis: on its pin it holds on a little longer, from aside or its pin
+        // alone it comes back a little later (see the doc above).
+        val before = previous?.getOrNull(index)
+        val hold = when {
+            before == null -> 0f
+            before == PillSide.Above -> -holdDp
+            else -> holdDp
+        }
+        val onSign = signRects.any { overlaps(above, it, hold) }
+        val onPill = kept.any { overlaps(above, it, paddingDp + hold) }
         if (!onSign && !onPill) {
             sides[index] = PillSide.Above
             kept.add(above)
@@ -249,7 +265,9 @@ fun placePills(
         // a bare position (no number, no lines) keeps to its pin.
         if (!onSign && pill.pillWidthDp <= 0f) continue
         val width = if (pill.pillWidthDp > 0f) pill.pillWidthDp else pill.widthDp
-        for (side in SIDE_CHOICES) {
+        // A pill aside keeps its side while that is free.
+        val choices = if (before != null && before in SIDE_CHOICES) listOf(before) + (SIDE_CHOICES - before) else SIDE_CHOICES
+        for (side in choices) {
             val (w, h) = shiftedPillSize(width, side)
             val box = when (side) {
                 PillSide.Right -> doubleArrayOf(x, y - h / 2, x + w, y + h / 2)
@@ -268,6 +286,19 @@ fun placePills(
 
 // The sides a pill that would cover a station sign tries, in this order.
 private val SIDE_CHOICES = listOf(PillSide.Right, PillSide.Left, PillSide.Below)
+
+/**
+ * How much clearer than needed, in dp, the room of a pill must be before it switches between
+ * its pin and a side (see placePills): a few dp, against flicker, not so much that it would
+ * keep a pill on a sign or aside where its pin is plainly free.
+ */
+const val PILL_HOLD_DP = 4f
+
+/** The indices of the pills whose side changed from [before] to [after]; none without [before] or for other pills (another stop). */
+fun switchedPills(before: List<PillSide>?, after: List<PillSide>): Set<Int> {
+    if (before == null || before.size != after.size) return emptySet()
+    return after.indices.filterTo(HashSet()) { before[it] != after[it] }
+}
 
 /** Metres per dp of the map at [zoom] and [latitude] (MapLibre's world is 512 dp wide at zoom 0). */
 fun metersPerDp(zoom: Double, latitude: Double): Double =

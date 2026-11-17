@@ -35,6 +35,7 @@ import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.Journey
 import io.github.jnbp.nextstop.data.plainStopName
 import io.github.jnbp.nextstop.ui.theme.AppColors
+import io.github.jnbp.nextstop.ui.theme.readableOn
 
 /**
  * How much room a page has: a small screen (the cover screen of a flip phone), a phone, or a
@@ -146,25 +147,41 @@ fun CompactTripCard(
         Spacer(modifier = Modifier.weight(1f))
         if (step.kind != StepKind.Arrived) {
             val minutes = minutesBetween(now, step.time).coerceAtLeast(0)
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    // Far ahead, the clock time says more than a large number of minutes.
-                    text = if (minutes < 100) minutes.toString() else step.time.clock(),
-                    color = AppColors.Lime,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 56.sp,
-                    lineHeight = 58.sp,
-                    maxLines = 1,
+            // The highlight on the main colour: with the colours of some wallpapers the two lie
+            // close, so it is moved until the big number reads (large text, 3:1).
+            val countColor = readableOn(AppColors.Blue, AppColors.Lime, minimum = 3f)
+            // From an hour on in hours and minutes ("1 h 37 min"), never one big number; far
+            // ahead, the clock time says more.
+            val (hours, rest) = durationSpan(minutes)
+            val parts = when {
+                minutes >= 100 -> listOf(step.time.clock() to null)
+                hours == null -> listOf(minutes.toString() to stringResource(R.string.minutes_unit))
+                else -> listOfNotNull(
+                    hours.toString() to stringResource(R.string.hours_unit),
+                    rest?.let { it.toString() to stringResource(R.string.minutes_unit) },
                 )
-                if (minutes < 100) {
+            }
+            Row(verticalAlignment = Alignment.Bottom) {
+                parts.forEachIndexed { index, (number, unit) ->
                     Text(
-                        text = stringResource(R.string.minutes_unit),
-                        color = AppColors.Lime,
+                        text = number,
+                        color = countColor,
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 20.sp,
+                        fontSize = 56.sp,
+                        lineHeight = 58.sp,
                         maxLines = 1,
-                        modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
+                        modifier = Modifier.padding(start = if (index > 0) 12.dp else 0.dp),
                     )
+                    if (unit != null) {
+                        Text(
+                            text = unit,
+                            color = countColor,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 20.sp,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
+                        )
+                    }
                 }
             }
         }

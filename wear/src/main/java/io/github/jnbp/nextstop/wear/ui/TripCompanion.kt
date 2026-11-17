@@ -44,6 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
@@ -114,6 +116,8 @@ import io.github.jnbp.nextstop.wear.data.changeMapFit
 import io.github.jnbp.nextstop.wear.data.currentPosition
 import io.github.jnbp.nextstop.wear.data.phonePosition
 import io.github.jnbp.nextstop.wear.data.hasLocationPermission
+import io.github.jnbp.nextstop.wear.data.getOffSoon
+import io.github.jnbp.nextstop.wear.data.hoursAndMinutes
 import io.github.jnbp.nextstop.wear.data.lineArgb
 import io.github.jnbp.nextstop.wear.data.rideProgress
 import io.github.jnbp.nextstop.wear.data.ridingStopsLeft
@@ -142,23 +146,34 @@ private data class TransferView(
     val atChange: Boolean,
     /** The phone says the change is across the same platform: no way to show. */
     val samePlatform: Boolean = false,
+    /** The way is ridden by bike (the bike combo of the phone), not walked. */
+    val cycling: Boolean = false,
 )
 
 private fun WalkSketch.toMap(): ChangeMap = ChangeMap(fromLatitude, fromLongitude, toLatitude, toLongitude)
 
 private fun transferOf(trip: TripSnapshot): TransferView? = when (trip.kind) {
     StepKind.GetOff -> trip.next?.let { next ->
-        TransferView(next, next.walkMinutes, next.rating, next.spare, next.gap, next.map ?: trip.walk?.toMap(), next.stop, ofThisStep = false, atChange = true, samePlatform = next.samePlatform)
+        TransferView(
+            next, next.walkMinutes, next.rating, next.spare, next.gap, next.map ?: trip.walk?.toMap(), next.stop,
+            ofThisStep = false, atChange = true, samePlatform = next.samePlatform, cycling = next.cycling || trip.walk?.cycling == true,
+        )
     }
     StepKind.Board -> {
         val walk = trip.walk
         val atChange = trip.rating != null || trip.planIndex > 0
         if (atChange || walk != null || trip.map != null) {
-            val ride = NextRide(trip.line, trip.product, trip.direction, trip.place, trip.platform, trip.time, walk?.minutes ?: 0, color = trip.color)
-            TransferView(ride, walk?.minutes ?: 0, trip.rating, trip.spare, trip.gap, trip.map ?: walk?.toMap(), trip.place, ofThisStep = true, atChange = atChange)
+            val ride = NextRide(trip.line, trip.product, trip.direction, trip.place, trip.platform, if (trip.leave) trip.departure else trip.time, walk?.minutes ?: 0, color = trip.color)
+            TransferView(
+                ride, walk?.minutes ?: 0, trip.rating, trip.spare, trip.gap, trip.map ?: walk?.toMap(), trip.place,
+                ofThisStep = true, atChange = atChange, cycling = walk?.cycling == true,
+            )
         } else {
             trip.next?.let { next ->
-                TransferView(next, next.walkMinutes, next.rating, next.spare, next.gap, next.map, next.stop, ofThisStep = false, atChange = true, samePlatform = next.samePlatform)
+                TransferView(
+                    next, next.walkMinutes, next.rating, next.spare, next.gap, next.map, next.stop,
+                    ofThisStep = false, atChange = true, samePlatform = next.samePlatform, cycling = next.cycling,
+                )
             }
         }
     }
@@ -168,7 +183,7 @@ private fun transferOf(trip: TripSnapshot): TransferView? = when (trip.kind) {
         if (walk == null && map == null) {
             null
         } else {
-            TransferView(null, walk?.minutes ?: 0, null, null, null, map, trip.destination, ofThisStep = true, atChange = false)
+            TransferView(null, walk?.minutes ?: 0, null, null, null, map, trip.destination, ofThisStep = true, atChange = false, cycling = walk?.cycling == true)
         }
     }
     StepKind.Arrived -> null
@@ -398,13 +413,13 @@ fun TripScreen(onEnded: () -> Unit, onReplan: (Place) -> Unit) {
             pagerState = pagerState,
             pageIndicator = if (ambient) null else ({ HorizontalPageIndicator(pagerState) }),
         ) {
-            // The crown scrolls the page (the overview, the change card), not the pager.
+            // The crown scrolls the page of now (its column or list, see crownScroll), not the pager.
             HorizontalPager(state = pagerState, rotaryScrollableBehavior = null) { index ->
                 val page = pages.getOrNull(index) ?: TripPage.Overview
                 val active = pagerState.currentPage == index
                 when (page) {
-                    TripPage.Depart -> DepartPage(trip, active, ambient, onOverview = ::toOverview)
-                    TripPage.Ride -> RidePage(trip, active, ambient, onOverview = ::toOverview)
+                    TripPage.Depart -> DepartPage(trip, active, ambient)
+                    TripPage.Ride -> RidePage(trip, active, ambient)
                     TripPage.Change -> transfer?.let { view ->
                         ChangePage(trip, view, own, active, ambient, onOverview = ::toOverview, onMap = {
                             hold()
@@ -446,11 +461,13 @@ fun TripScreen(onEnded: () -> Unit, onReplan: (Place) -> Unit) {
 /**
  * The column of a trip page: below the time of the watch at the top (the content padding of
  * the scaffold, at least [TOP_CLEARANCE]) and above the page indicator, centred in between
- * when it fits, else scrolled (crown or swipe).
+ * when it fits, else scrolled (crown or swipe). The crown scrolls the column of the [active]
+ * page only (the pager leaves the crown to its pages).
  */
 @Composable
 private fun PageColumn(
     scroll: ScrollState,
+    active: Boolean,
     contentPadding: PaddingValues,
     horizontal: Dp,
     spacing: Dp,
@@ -462,6 +479,7 @@ private fun PageColumn(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .crownScroll(scroll, active)
                 .verticalScroll(scroll)
                 .heightIn(min = maxHeight)
                 .padding(start = horizontal, end = horizontal, top = top, bottom = bottom),
@@ -482,10 +500,12 @@ private fun PageColumn(
 private fun WalkLine(view: TransferView) {
     val minutes = maxOf(view.walkMinutes, view.map?.minutes ?: 0)
     val meters = view.map?.let { walkMeters(it) }?.takeIf { it >= MIN_WALK_METRES }
+    // A way by bike (the bike combo of the phone) says so instead of "on foot".
+    val cycling = view.cycling
     val walk = when {
-        minutes > 0 && meters != null -> stringResource(R.string.walk_distance, meters, minutes)
-        minutes > 0 -> stringResource(R.string.walk_on_foot, minutes)
-        meters != null -> stringResource(R.string.walk_meters, meters)
+        minutes > 0 && meters != null -> stringResource(if (cycling) R.string.cycle_distance else R.string.walk_distance, meters, minutes)
+        minutes > 0 -> stringResource(if (cycling) R.string.cycle_minutes else R.string.walk_on_foot, minutes)
+        meters != null -> stringResource(if (cycling) R.string.cycle_meters else R.string.walk_meters, meters)
         else -> null
     }
     when {
@@ -520,7 +540,8 @@ private fun departText(time: Long, now: Long, seconds: Boolean): String {
         left <= 0 -> stringResource(R.string.depart_now)
         left < 60_000 && seconds -> stringResource(R.string.depart_in_seconds, ((left + 999) / 1000).toInt())
         left < 60_000 -> stringResource(R.string.depart_in, 1)
-        left >= FAR_MILLIS -> stringResource(R.string.depart_at, clock(time))
+        // From an hour on (also where the minutes round up to 60) the clock time.
+        left >= FAR_MILLIS - 30_000 -> stringResource(R.string.depart_at, clock(time))
         else -> stringResource(R.string.depart_in, ((left + 30_000) / 60_000).toInt())
     }
 }
@@ -546,7 +567,7 @@ private fun untilText(time: Long, now: Long): String {
     val left = time - now
     return when {
         left < 30_000 -> stringResource(R.string.now)
-        left >= FAR_MILLIS -> clock(time)
+        left >= FAR_MILLIS - 30_000 -> clock(time)
         else -> stringResource(R.string.in_min, ((left + 30_000) / 60_000).toInt())
     }
 }
@@ -557,7 +578,7 @@ private fun remainingText(time: Long, now: Long): String {
     val left = time - now
     return when {
         left < 30_000 -> stringResource(R.string.now)
-        left >= FAR_MILLIS -> ""
+        left >= FAR_MILLIS - 30_000 -> ""
         else -> stringResource(R.string.remaining_min, ((left + 30_000) / 60_000).toInt())
     }
 }
@@ -568,7 +589,7 @@ private fun remainingText(time: Long, now: Long): String {
  * and direction, and where to board as a small train.
  */
 @Composable
-private fun DepartPage(trip: TripSnapshot, active: Boolean, ambient: Boolean, onOverview: () -> Unit) {
+private fun DepartPage(trip: TripSnapshot, active: Boolean, ambient: Boolean) {
     val now = rememberNow(if (ambient) 60_000 else 1_000, active)
     val lineColor = Color(lineArgb(trip.line, trip.product, trip.color))
     val track = MaterialTheme.colorScheme.surfaceContainer
@@ -580,7 +601,9 @@ private fun DepartPage(trip: TripSnapshot, active: Boolean, ambient: Boolean, on
         label = "departRing",
     )
     val scroll = rememberScrollState()
-    ScreenScaffold(scrollState = scroll) { contentPadding ->
+    // The ring runs along the edge: no scroll indicator over it. The page fits the screen; only
+    // with very large text does its column still scroll (crown or swipe).
+    ScreenScaffold(scrollState = scroll, scrollIndicator = null) { contentPadding ->
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (!ambient) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
@@ -604,7 +627,7 @@ private fun DepartPage(trip: TripSnapshot, active: Boolean, ambient: Boolean, on
                     }
                 }
             }
-            PageColumn(scroll, contentPadding, horizontal = 24.dp, spacing = 2.dp) {
+            PageColumn(scroll, active, contentPadding, horizontal = 24.dp, spacing = 2.dp) {
                 Text(
                     trip.place,
                     style = MaterialTheme.typography.labelSmall,
@@ -615,15 +638,19 @@ private fun DepartPage(trip: TripSnapshot, active: Boolean, ambient: Boolean, on
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
                 LineBadge(trip.line, trip.product, color = trip.color)
+                // Before the walk to the first ride the countdown runs to leaving, and says so.
+                if (trip.leave) {
+                    Text(stringResource(R.string.step_leave, clock(trip.time)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                }
                 CountdownText(trip.time, now, seconds = !ambient)
-                val where = listOfNotNull(
-                    platformText(trip.platform),
-                    trip.direction?.let { stringResource(R.string.towards, it) },
-                ).joinToString(" · ")
+                // An arrow before the destination saves room; read out as "towards …".
+                val platform = platformText(trip.platform, trip.line)
+                val where = listOfNotNull(platform, trip.direction?.let { stringResource(R.string.towards_arrow, it) }).joinToString(" · ")
+                val spokenWhere = listOfNotNull(platform, trip.direction?.let { stringResource(R.string.towards, it) }).joinToString(" · ")
                 if (where.isNotEmpty() || trip.delayMinutes > 0) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (where.isNotEmpty()) {
-                            Text(where, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                            Text(where, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { contentDescription = spokenWhere })
                         }
                         if (trip.delayMinutes > 0) {
                             Text(" +${trip.delayMinutes}", style = MaterialTheme.typography.bodySmall, color = AMBER)
@@ -643,8 +670,6 @@ private fun DepartPage(trip: TripSnapshot, active: Boolean, ambient: Boolean, on
                 } else {
                     trip.hint?.let { Note(it) }
                 }
-                Spacer(Modifier.height(2.dp))
-                OverviewChip(onOverview)
             }
         }
     }
@@ -752,13 +777,13 @@ private fun TrainSketch(part: Int, estimated: Boolean, product: String, lineColo
  * at the foot of a square one, see [drawRideWay]) in the colour of the line, a dot for each
  * stop; in the middle the line and its direction, the stops left as a big number (or "next
  * stop: get off / change"), where to get off, the arrival with its delay and the next stop by
- * name; below, as before, the line of stops around the train ([StopLine]) and the overview.
+ * name; below, as before, the line of stops around the train ([StopLine]); the overview is the last page of the pager (a swipe away).
  * Only thin outlines in ambient mode. The buzz before getting off comes from alertGetOff
  * (WatchDataService for a trip of the phone, LocalFollow for one of the watch), not from this
  * page, so it never comes twice.
  */
 @Composable
-private fun RidePage(trip: TripSnapshot, active: Boolean, ambient: Boolean, onOverview: () -> Unit) {
+private fun RidePage(trip: TripSnapshot, active: Boolean, ambient: Boolean) {
     val now = rememberNow(if (ambient) 60_000 else 10_000, active)
     val lineColor = Color(lineArgb(trip.line, trip.product, trip.color))
     val stops = trip.stops
@@ -779,7 +804,9 @@ private fun RidePage(trip: TripSnapshot, active: Boolean, ambient: Boolean, onOv
     val ground = MaterialTheme.colorScheme.background
     val tick = MaterialTheme.colorScheme.onSurfaceVariant
     val scroll = rememberScrollState()
-    ScreenScaffold(scrollState = scroll) { contentPadding ->
+    // The ring runs along the edge: no scroll indicator over it. The page fits the screen; only
+    // with very large text does its column still scroll (crown or swipe).
+    ScreenScaffold(scrollState = scroll, scrollIndicator = null) { contentPadding ->
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (progress != null) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
@@ -789,12 +816,13 @@ private fun RidePage(trip: TripSnapshot, active: Boolean, ambient: Boolean, onOv
                     drawRideWay(shown, stops.size, lineColor, track, ground, tick, stroke, inset, round, ambient)
                 }
             }
-            PageColumn(scroll, contentPadding, horizontal = 26.dp, spacing = 2.dp) {
+            PageColumn(scroll, active, contentPadding, horizontal = 26.dp, spacing = 2.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp)) {
                     LineBadge(trip.line, trip.product, color = trip.color)
                     trip.direction?.let {
                         Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.towards, it), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val spoken = stringResource(R.string.towards, it)
+                        Text(stringResource(R.string.towards_arrow, it), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = spoken })
                     }
                 }
                 if (left > 1) {
@@ -806,6 +834,17 @@ private fun RidePage(trip: TripSnapshot, active: Boolean, ambient: Boolean, onOv
                         stringResource(R.string.ride_stops_to_go),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (left == 1 && !getOffSoon(trip.time, now.value)) {
+                    // A long last hop: the time left, "next stop" only in the last minutes.
+                    Text(
+                        stringResource(
+                            if (trip.change) R.string.change_in_at else R.string.get_off_in_at,
+                            minutesLabel(trip.time),
+                            clock(trip.time),
+                        ),
+                        style = MaterialTheme.typography.titleSmall,
+                        textAlign = TextAlign.Center,
                     )
                 } else if (left == 1) {
                     Text(
@@ -852,7 +891,6 @@ private fun RidePage(trip: TripSnapshot, active: Boolean, ambient: Boolean, onOv
                 if (dots.size >= 2) {
                     StopLine(dots, now, lineColor, ambient, modifier = Modifier.fillMaxWidth().height(22.dp))
                 }
-                OverviewChip(onOverview)
             }
         }
     }
@@ -962,7 +1000,7 @@ private fun ChangePage(
     val ride = view.ride
     val lineColor = ride?.let { Color(lineArgb(it.line, it.product, it.color)) } ?: MaterialTheme.colorScheme.primary
     ScreenScaffold(scrollState = scroll) { contentPadding ->
-        PageColumn(scroll, contentPadding, horizontal = 22.dp, spacing = 3.dp) {
+        PageColumn(scroll, active, contentPadding, horizontal = 22.dp, spacing = 3.dp) {
             Text(
                 stringResource(
                     when {
@@ -988,7 +1026,7 @@ private fun ChangePage(
                         )
                     }
                 }
-                val platform = platformText(ride.platform)
+                val platform = platformText(ride.platform, ride.line)
                 Text(
                     platform ?: ride.stop,
                     style = if (platform != null) MaterialTheme.typography.displaySmall else MaterialTheme.typography.titleMedium,
@@ -1056,7 +1094,15 @@ private fun ratingText(rating: ChangeRating, spare: Int?, gap: Int? = null): Str
             ChangeRating.VeryRisky -> R.string.comfort_very_risky
         },
     )
-    if (gap != null) return stringResource(R.string.rating_gap, name, gap)
+    if (gap != null) {
+        // From an hour on in hours and minutes ("1 h 5 min"), as every duration of the app.
+        val (hours, rest) = hoursAndMinutes(gap.toLong())
+        return when {
+            hours == null -> stringResource(R.string.rating_gap, name, gap)
+            rest == null -> stringResource(R.string.rating_gap_span, name, stringResource(R.string.in_whole_hours, hours.toInt()))
+            else -> stringResource(R.string.rating_gap_span, name, stringResource(R.string.in_hours, hours.toInt(), rest.toInt()))
+        }
+    }
     if (spare == null) return name
     val signed = if (spare >= 0) "+$spare" else "−${-spare}"
     return stringResource(R.string.rating_spare, name, signed)
@@ -1248,14 +1294,18 @@ private fun FullMap(view: TransferView, own: Position?, lineColor: Color, ambien
         ChangeMapView(map, own, lineColor, ambient, modifier = Modifier.fillMaxSize(), large = true)
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 18.dp)) {
             Text(
-                view.ride?.let { platformText(it.platform) } ?: view.toName,
+                view.ride?.let { platformText(it.platform, it.line) } ?: view.toName,
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 40.dp),
             )
             Text(
-                if (minutes > 0) stringResource(R.string.walk_distance, distance, minutes) else stringResource(R.string.distance_m, distance),
+                if (minutes > 0) {
+                    stringResource(if (view.cycling) R.string.cycle_distance else R.string.walk_distance, distance, minutes)
+                } else {
+                    stringResource(R.string.distance_m, distance)
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1292,7 +1342,7 @@ private fun OverviewPage(
         else -> plan.indexOfFirst { it.arrival > now.value }.takeIf { it >= 0 } ?: plan.size
     }
     ScreenScaffold(scrollState = listState) { contentPadding ->
-        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus(active)) {
             item { ListHeader { Text(stringResource(R.string.overview)) } }
             if (plan.isEmpty()) {
                 // An older phone app sends no plan: the step and the next ride.
@@ -1313,6 +1363,7 @@ private fun OverviewPage(
                         item {
                             Connector(
                                 minutes = ride.walkBefore,
+                                cycling = ride.bikeBefore,
                                 rating = ride.rating,
                                 spare = ride.spare,
                                 gap = ride.gap,
@@ -1324,7 +1375,7 @@ private fun OverviewPage(
                     item { PlanRideRow(ride, current = index == current, past = index < current) }
                 }
                 if (trip.planWalkEnd > 0) {
-                    item { Connector(trip.planWalkEnd, null, null, null, current = current >= plan.size, ambient = ambient) }
+                    item { Connector(trip.planWalkEnd, null, null, null, current = current >= plan.size, ambient = ambient, cycling = trip.planBikeEnd) }
                 }
             }
             item {
@@ -1352,11 +1403,19 @@ private fun OverviewPage(
     }
 }
 
-/** A walk or change between two rides: its minutes on foot and its rating in colour. */
+/** A walk or change between two rides: its minutes on foot (or [cycling], by bike) and its rating in colour. */
 @Composable
-private fun Connector(minutes: Int, rating: ChangeRating?, spare: Int?, gap: Int?, current: Boolean, ambient: Boolean) {
+private fun Connector(
+    minutes: Int,
+    rating: ChangeRating?,
+    spare: Int?,
+    gap: Int?,
+    current: Boolean,
+    ambient: Boolean,
+    cycling: Boolean = false,
+) {
     val parts = listOfNotNull(
-        if (minutes > 0) stringResource(R.string.walk_on_foot, minutes) else null,
+        if (minutes > 0) stringResource(if (cycling) R.string.cycle_minutes else R.string.walk_on_foot, minutes) else null,
     )
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
@@ -1413,12 +1472,12 @@ private fun PlanRideRow(ride: PlanRide, current: Boolean, past: Boolean) {
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        val where = listOfNotNull(
-            platformText(ride.departurePlatform),
-            ride.direction?.let { stringResource(R.string.towards, it) },
-        ).joinToString(" · ")
+        // An arrow before the destination saves room; read out as "towards …".
+        val platform = platformText(ride.departurePlatform, ride.line)
+        val where = listOfNotNull(platform, ride.direction?.let { stringResource(R.string.towards_arrow, it) }).joinToString(" · ")
+        val spokenWhere = listOfNotNull(platform, ride.direction?.let { stringResource(R.string.towards, it) }).joinToString(" · ")
         if (where.isNotEmpty()) {
-            Text(where, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(where, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = spokenWhere })
         }
         if (ride.cancelled) {
             Text(stringResource(R.string.cancelled), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)

@@ -1,6 +1,6 @@
 package io.github.jnbp.nextstop.wear.ui
 
-import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.StartOffsetType
@@ -36,23 +36,33 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 
-// One run of the little train across its track, in milliseconds, as on the phone (Delight.kt there).
-private const val TRAIN_RUN_MILLIS = 2_400
+// One run of the little train across its track, in milliseconds, as on the phone (Delight.kt
+// there): a calm pass, slower than a quick dash (2.0 s at an even speed went by too fast).
+private const val TRAIN_RUN_MILLIS = 3_400
 
-// Gentle at both ends, like a train pulling out and braking in: cubic-bezier(.45,.05,.55,.95).
-private val TRAIN_EASING = CubicBezierEasing(0.45f, 0.05f, 0.55f, 0.95f)
+// As on the phone: quick while hidden, slowing as it comes in so its front is in sight for a
+// good moment, a calm steady middle, then speeding up as it leaves. A cubic around the middle:
+// speed 1 - GLIDE_CALM there and 1 + 2 * GLIDE_CALM at both ends.
+private const val GLIDE_CALM = 0.5f
+private val TRAIN_EASING = Easing { time ->
+    val s = time.coerceIn(0f, 1f) - 0.5f
+    0.5f + (1f - GLIDE_CALM) * s + 4f * GLIDE_CALM * s * s * s
+}
+
+// The widest share of its track the train may take, so it is always seen whole for a while.
+private const val TRAIN_MAX_TRACK_SHARE = 0.5f
 
 // Dp per unit of the drawing (a car is 30 x 18 units): smaller than on the phone, for the round watch.
 private const val TRAIN_SCALE = 0.45f
 
 /**
  * The phone's loader on the watch: three plain rounded cars gliding over a dashed track from
- * the left to the right, eased in and out, again and again, fading in at the left edge and
+ * the left to the right, slowing down while it is in sight, again and again, fading in at the left edge and
  * out at the right one. No wheels, no couplings, nothing bobs. Standing in the middle when
  * the system has animations switched off.
  */
 @Composable
-fun TrainLoader(modifier: Modifier = Modifier, width: Dp = 64.dp, color: Color = MaterialTheme.colorScheme.primary) {
+fun TrainLoader(modifier: Modifier = Modifier, width: Dp = 80.dp, color: Color = MaterialTheme.colorScheme.primary) {
     // The system's setting and the app's own "Animations" (see rememberWatchAnimationsOn).
     val on = rememberWatchAnimationsOn()
     val transition = rememberInfiniteTransition(label = "train")
@@ -75,7 +85,7 @@ fun TrainLoader(modifier: Modifier = Modifier, width: Dp = 64.dp, color: Color =
             // A layer of its own, so the fade at both edges takes away only the train and the track.
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
     ) {
-        val unit = TRAIN_SCALE.dp.toPx()
+        val unit = minOf(TRAIN_SCALE.dp.toPx(), size.width * TRAIN_MAX_TRACK_SHARE / TRAIN_LENGTH_UNITS)
         val trainWidth = TRAIN_LENGTH_UNITS * unit
         val left = if (on) -trainWidth + run * (size.width + trainWidth) else (size.width - trainWidth) / 2
         drawMinimalTrain(left, unit, color, TRACK_GREY)

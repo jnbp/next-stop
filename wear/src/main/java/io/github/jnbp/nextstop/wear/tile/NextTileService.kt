@@ -23,7 +23,10 @@ import io.github.jnbp.nextstop.wear.data.Departure
 import io.github.jnbp.nextstop.wear.data.StepKind
 import io.github.jnbp.nextstop.wear.data.TripSnapshot
 import io.github.jnbp.nextstop.wear.data.WatchStore
+import io.github.jnbp.nextstop.wear.data.getOffSoon
 import io.github.jnbp.nextstop.wear.data.minutesUntil
+import io.github.jnbp.nextstop.wear.ui.clock
+import io.github.jnbp.nextstop.wear.ui.spanText
 import io.github.jnbp.nextstop.wear.ui.MainActivity
 import io.github.jnbp.nextstop.wear.ui.ageText
 
@@ -131,15 +134,22 @@ private fun departureLine(departure: Departure): String {
 /** The trip in a few short lines: minutes and line, what to do, and the hint or the stops left. */
 internal fun tripLines(context: Context, trip: TripSnapshot): List<String> {
     val minutes = minutesUntil(trip.time)
-    val head = listOfNotNull(trip.line?.takeIf { trip.kind == StepKind.Board || trip.kind == StepKind.GetOff }, "$minutes'")
+    val head = listOfNotNull(trip.line?.takeIf { (trip.kind == StepKind.Board && !trip.leave) || trip.kind == StepKind.GetOff }, "$minutes'")
         .joinToString(" · ")
     val step = when (trip.kind) {
-        StepKind.Board -> context.getString(R.string.step_board, trip.line ?: "", trip.place)
+        StepKind.Board -> if (trip.leave) context.getString(R.string.step_leave, clock(trip.time)) else context.getString(R.string.step_board, trip.line ?: "", trip.place)
         StepKind.GetOff -> context.getString(R.string.step_get_off, trip.place)
-        StepKind.WalkToEnd -> context.getString(R.string.step_walk, trip.place)
+        StepKind.WalkToEnd -> context.getString(if (trip.walk?.cycling == true) R.string.step_cycle else R.string.step_walk, trip.place)
         StepKind.Arrived -> context.getString(R.string.arrived)
     }
     val extra = when {
+        trip.kind == StepKind.GetOff && trip.stopsLeft == 1 && !getOffSoon(trip.time, System.currentTimeMillis()) ->
+            context.getString(
+                // A change says so, as on the trip screen.
+                if (trip.change) R.string.change_in_at else R.string.get_off_in_at,
+                spanText(context, minutesUntil(trip.time)),
+                clock(trip.time),
+            )
         trip.kind == StepKind.GetOff && trip.stopsLeft == 1 -> context.getString(R.string.next_stop_get_off)
         trip.kind == StepKind.GetOff && trip.stopsLeft > 1 -> context.getString(R.string.stops_left, trip.stopsLeft)
         else -> trip.hint ?: trip.platform?.let { context.getString(R.string.platform, it) }

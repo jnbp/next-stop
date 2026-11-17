@@ -14,7 +14,7 @@ package io.github.jnbp.nextstop.wear.data
  * "suburban" and is "S1" here, so it gets the name and colour of the S1. Other names stay.
  */
 fun rapidLineName(name: String?, product: String): String? {
-    val plain = name?.trim() ?: return null
+    val plain = flixLineName(name?.trim() ?: return null, product)
     val letter = when (product) {
         "suburban" -> "S"
         "subway" -> "U"

@@ -3,7 +3,7 @@ package io.github.jnbp.nextstop.data
 import android.content.Context
 import android.util.JsonReader
 import android.util.JsonToken
-import android.util.Log
+import io.github.jnbp.nextstop.ui.AllocProbe
 import java.io.File
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -136,7 +136,10 @@ class OsmStopArea(
     val position: Pair<Double, Double> get() = latitude to longitude
 }
 
-/** Where a walk leads in the end: a stop position with its number, or an entrance of a station. */
+/**
+ * Where a walk leads in the end: a stop position with its number, or an entrance of a station;
+ * or the access point a walk leaves its station by (an entrance, or an elevator up to the street).
+ */
 data class WalkTarget(
     val kind: WalkTargetKind,
     /** The number of the stop position ("3"), or the name or letter of the entrance; null for an entrance without one. */
@@ -147,13 +150,26 @@ data class WalkTarget(
     val lines: List<OsmLine> = emptyList(),
     /** For an entrance: true when it is an access through a building ([OsmEntrance.throughBuilding]). */
     val throughBuilding: Boolean = false,
-    /** For an entrance: its level as tagged ("0", "-1"), where known. */
+    /** For an entrance: its level as tagged ("0", "-1"); for an elevator the levels it links ("-1;0"), where known. */
     val level: String? = null,
+    /**
+     * For an exit ([Leg.walkExit]): how the walk gets from the platform to it, by stairs, an
+     * escalator or the elevator ([PassageKind]), and [climb] 1 up, -1 down; null where the
+     * levels do not tell (see WalkAccess.withWayUp).
+     */
+    val climbBy: PassageKind? = null,
+    val climb: Int = 0,
 ) {
     val position: Pair<Double, Double> get() = latitude to longitude
 }
 
-enum class WalkTargetKind { StopPosition, Entrance }
+enum class WalkTargetKind {
+    StopPosition,
+    Entrance,
+
+    /** An elevator a walk leaves its station by (only as [Leg.walkExit]): no label, no letter. */
+    Elevator,
+}
 
 /** The OpenStreetMap data of the stations, read once on demand and then kept in memory. */
 object OsmStations {
@@ -245,6 +261,9 @@ object OsmStations {
 
     @Volatile
     private var data: Loaded? = null
+
+    /** The data as it is now, as an object that is another one whenever it changed (for kept ratings, see ChangeRatings). */
+    internal val ratingData: Any? get() = data
 
     // The stop position at the end of a ride's way is the nearest one within this distance;
     // one with the platform number the provider names may lie this far away.
@@ -446,6 +465,26 @@ object OsmStations {
         return if (out.size <= limit) out else out.take(limit)
     }
 
+    /**
+     * Reads the change walks of the data now (they are read on the first change asked, else):
+     * call off the main thread when ratings of changes will be asked for soon (journeys shown),
+     * so the first rating on the main thread does not read and join them there.
+     */
+    suspend fun warmWalks() {
+        if (data?.walksLazy?.isInitialized() != false) return
+        withContext(Dispatchers.Default) { warmWalksNow() }
+    }
+
+    private fun warmWalksNow() {
+        val loaded = data ?: return
+        if (loaded.walksLazy.isInitialized()) return
+        try {
+            AllocProbe.measureAny(AllocProbe.OSM_PACKS) { loaded.walks }
+        } catch (e: OutOfMemoryError) {
+            DiagLog.e(LOG_TAG, e) { "change walks: out of memory" }
+        }
+    }
+
     /** Reads the asset unless it is in memory already. An unreadable asset counts as empty. */
     suspend fun load(context: Context) {
         appContext = context.applicationContext
@@ -453,7 +492,7 @@ object OsmStations {
         withContext(Dispatchers.Default) {
             lock.withLock {
                 if (data == null) {
-                    data = read(context.applicationContext)
+                    data = AllocProbe.measureAny(AllocProbe.OSM_BASE) { read(context.applicationContext) }
                     triedRegions.add(BUILT_IN_REGION)
                 }
             }
@@ -483,6 +522,9 @@ object OsmStations {
                 for (region in regionsAt(point, index)) wanted.getOrPut(region) { LinkedHashSet() }.addAll(tilesAt(point))
             }
             if (wanted.isEmpty()) return@withContext false
+            // Whether the change walks were read already (a change was rated): then those of the
+            // new data are read here too, off the main thread, before anyone asks for them.
+            val walksInUse = data?.walksLazy?.isInitialized() == true
             var tilesAdded = 0
             val added = lock.withLock {
                 val names = ArrayList<String>()
@@ -493,27 +535,26 @@ object OsmStations {
                     // The walks and colours of a state come with its first tiles.
                     val first = triedRegions.add(region)
                     val more = try {
-                        readRegion(context, region, fresh, first)
+                        AllocProbe.measureAny(AllocProbe.OSM_PACKS) { readRegion(context, region, fresh, first) }
                     } catch (e: OutOfMemoryError) {
-                        Log.e(LOG_TAG, "pack $region: out of memory reading tiles $fresh", e)
+                        DiagLog.e(LOG_TAG, e) { "pack $region: out of memory reading tiles $fresh" }
                         null
                     } catch (e: Exception) {
-                        Log.w(LOG_TAG, "pack $region not readable", e)
+                        DiagLog.w(LOG_TAG, e) { "pack $region not readable" }
                         null
                     } ?: continue
                     data = try {
                         merge(data ?: Loaded(emptyList(), emptyList()), more)
                     } catch (e: OutOfMemoryError) {
-                        Log.e(LOG_TAG, "pack $region: out of memory joining tiles $fresh", e)
+                        DiagLog.e(LOG_TAG, e) { "pack $region: out of memory joining tiles $fresh" }
                         continue
                     }
                     // Berlin's lines keep the app's own colours (a pack around it may hold them).
                     LineColors.addOsm(more.colors.filter { !LineColors.inBerlin(it.latitude, it.longitude) })
-                    Log.d(
-                        LOG_TAG,
+                    DiagLog.i(LOG_TAG) {
                         "added $region tiles $fresh: ${more.stations.size} stations, ${more.stops.size} stop positions, " +
-                            "${more.areas.size} stop areas; heap ${heapMegabytes()} MB used",
-                    )
+                            "${more.areas.size} stop areas; heap ${heapMegabytes()} MB used"
+                    }
                     if (first) names += region
                     tilesAdded++
                 }
@@ -530,9 +571,10 @@ object OsmStations {
                     try {
                         ChangePositions.loadRegions(context, added)
                     } catch (e: OutOfMemoryError) {
-                        Log.e(LOG_TAG, "change positions of $added: out of memory", e)
+                        DiagLog.e(LOG_TAG, e) { "change positions of $added: out of memory" }
                     }
                 }
+                if (walksInUse) warmWalksNow()
                 lock.withLock {
                     generation++
                     generationFlow.value = generation
@@ -628,7 +670,7 @@ object OsmStations {
             }
         }
     } catch (e: Exception) {
-        Log.w(LOG_TAG, "pack index not readable", e)
+        DiagLog.w(LOG_TAG, e) { "pack index not readable" }
         emptyMap()
     }
 
@@ -786,21 +828,18 @@ object OsmStations {
 
     /**
      * The platforms of the station where the train, S-Bahn or U-Bahn [ride] is boarded ([boarding]) or
-     * left: those OpenStreetMap lists its line at, else those with its platform number. Empty
-     * for other rides and where the station or such a platform is not known.
+     * left (see [changePlatforms]): those OpenStreetMap lists its line at, else those with its
+     * platform number, but never one of another kind of line. Empty for other rides and where
+     * the station or such a platform is not known. (Before, the platform number alone matched
+     * across kinds: at S+U Rathaus Steglitz, where OpenStreetMap only knows the S-Bahn platform
+     * "1;2", a U9 on track 2 was measured from the S-Bahn platform, some 200 m from the bus.)
      */
     fun ridePlatforms(ride: Leg, boarding: Boolean): List<OsmPlatform> {
         if (data == null || ride.walking || ride.product !in RAIL_PRODUCTS) return emptyList()
         val place = if (boarding) ride.fromPlace else ride.toPlace
         val near = (if (boarding) ride.path.firstOrNull() else ride.path.lastOrNull()) ?: place?.position
         val station = station(place?.id, place?.name ?: if (boarding) ride.from else ride.to, near) ?: return emptyList()
-        val line = ride.line?.let { lineKey(it) }?.takeIf { it.isNotEmpty() }
-        val byLine = line?.let { wanted -> station.platforms.filter { platform -> platform.lines.any { lineKey(it) == wanted } } }.orEmpty()
-        if (byLine.isNotEmpty()) return byLine
-        val number = platformNumber(if (boarding) ride.departurePlatform else ride.arrivalPlatform) ?: return emptyList()
-        return station.platforms.filter { platform ->
-            platform.ref?.split(';')?.any { platformNumber(it) == number } == true
-        }
+        return changePlatforms(ride, boarding, station)
     }
 
     /**
@@ -909,19 +948,8 @@ object OsmStations {
      * line at, narrowed by the platform number the provider names; else those with that
      * number, but not one of another kind of line (an S-Bahn platform "1" for a U-Bahn).
      */
-    private fun changePlatforms(ride: Leg, boarding: Boolean, station: OsmStation): List<OsmPlatform> {
-        val line = ride.line?.let { lineKey(it) }?.takeIf { it.isNotEmpty() }
-        val number = platformNumber(if (boarding) ride.departurePlatform else ride.arrivalPlatform)
-        fun numbered(platform: OsmPlatform) = number != null && platform.ref?.split(';')?.any { platformNumber(it) == number } == true
-        val byLine = line?.let { wanted -> station.platforms.filter { p -> p.lines.any { lineKey(it) == wanted } } }.orEmpty()
-        val both = byLine.filter { numbered(it) }
-        if (both.isNotEmpty()) return both
-        if (byLine.isNotEmpty()) return byLine
-        val letter = line?.firstOrNull()?.takeIf { it == 'S' || it == 'U' }
-        return station.platforms.filter { p ->
-            numbered(p) && (letter == null || p.lines.isEmpty() || p.lines.any { it.startsWith(letter) })
-        }
-    }
+    private fun changePlatforms(ride: Leg, boarding: Boolean, station: OsmStation): List<OsmPlatform> =
+        platformsOfLine(ride.line, if (boarding) ride.departurePlatform else ride.arrivalPlatform, station.platforms)
 
     /**
      * Where the walk [walk] before the ride [ride] should lead: the stop position of a bus or
@@ -956,11 +984,13 @@ object OsmStations {
 
     /**
      * Where the walk [walk] after the ride [ride] of the U-Bahn, S-Bahn or a train leaves its
-     * station: the exit on the shortest way from the platform where the ride ends to where the
-     * walk ends ([to], else the end of its way). Null for a walk that ends inside the station
-     * itself (a change on the spot), and where no exit is known.
+     * station: the access point its own way goes through where the provider gave a way (an
+     * entrance or an elevator, see [WalkAccess.usedBy]), else the exit on the shortest way from
+     * the platform where the ride ends to where the walk ends ([to], else the end of its way).
+     * Null for a walk that ends inside the station itself (a change on the spot), and where no
+     * exit is known.
      */
-    fun walkExit(walk: Leg, ride: Leg, to: Pair<Double, Double>? = null): WalkTarget? {
+    fun walkExit(walk: Leg, ride: Leg, to: Pair<Double, Double>? = null, stepFree: Boolean = stepFreeWalks): WalkTarget? {
         if (data == null || !walk.walking || ride.walking || ride.product !in RAIL_PRODUCTS) return null
         val end = to ?: walk.walkTarget?.position ?: walk.path.lastOrNull() ?: walk.toPlace?.position ?: return null
         val rideEnd = ride.path.lastOrNull() ?: ride.toPlace?.position
@@ -968,8 +998,33 @@ object OsmStations {
         val station = station(ride.toPlace?.id, ride.toPlace?.name ?: ride.to, near) ?: return null
         if (meters(end, station.position) <= INSIDE_METERS) return null
         val platform = ridePlatforms(ride, boarding = false).takeIf { it.isNotEmpty() }
-        return stationEntrance(station, end, platform, rideEnd, signOf(ride.product))
+        // The level of the platform, where tagged: from it the walk goes up or down to the exit.
+        val platformLevel = platform.orEmpty().firstNotNullOfOrNull { levelNumbers(it.level).firstOrNull() }
+        val escalators = station.lifts.filter { it.escalator }.map { it.latitude to it.longitude }
+        // Elevators only for a traveller who needs them (the accessibility setting): others take
+        // the stairs or an escalator, even where the provider's way went by the elevator.
+        val accesses = accessesOf(station).filter { stepFree || it.kind != WalkTargetKind.Elevator }
+        val chosen = WalkAccess.usedBy(walk.path, accesses)
+            ?: (if (stepFree) WalkAccess.nearestElevator(accesses, end, platform.orEmpty().map { it.a to it.b }, rideEnd) else null)
+            ?: stationEntrance(station, end, platform, rideEnd, signOf(ride.product))
+            ?: return null
+        return WalkAccess.withWayUp(chosen, platformLevel, escalators)
     }
+
+    /** The ways out of [station] as walk ends: its entrances (with their letters) and its elevators. */
+    private fun accessesOf(station: OsmStation): List<WalkTarget> =
+        station.entrances.map { entrance ->
+            WalkTarget(
+                WalkTargetKind.Entrance,
+                entrance.ref ?: entrance.name?.takeIf { osmNameKey(it) != station.key },
+                entrance.latitude,
+                entrance.longitude,
+                throughBuilding = entrance.throughBuilding,
+                level = entrance.level,
+            )
+        } + station.lifts.filter { !it.escalator }.map { lift ->
+            WalkTarget(WalkTargetKind.Elevator, null, lift.latitude, lift.longitude, level = lift.level)
+        }
 
     // The sign of the entrances of a product: "U" for the U-Bahn, "S" for the S-Bahn, any for trains.
     private fun signOf(product: String): String? = when (product) {
@@ -1063,7 +1118,7 @@ object OsmStations {
             val spotted = try {
                 withSpots(legs[index])
             } catch (e: RuntimeException) {
-                Log.w(LOG_TAG, "stop spots", e)
+                DiagLog.w(LOG_TAG, e) { "stop spots" }
                 legs[index]
             }
             if (spotted !== legs[index]) {
@@ -1084,7 +1139,7 @@ object OsmStations {
                     platformEnds(ride, boarding = false)?.platforms.orEmpty(),
                 )
             } catch (e: RuntimeException) {
-                Log.w(LOG_TAG, "platform clip", e)
+                DiagLog.w(LOG_TAG, e) { "platform clip" }
                 ride
             }
             if (clipped !== ride) {
@@ -1102,7 +1157,7 @@ object OsmStations {
             val target = try {
                 walkTarget(walk, ride, from)
             } catch (e: RuntimeException) {
-                Log.w(LOG_TAG, "walk target", e)
+                DiagLog.w(LOG_TAG, e) { "walk target" }
                 null
             } ?: continue
             val path = walk.path
@@ -1140,16 +1195,11 @@ object OsmStations {
             val exit = try {
                 walkExit(walk, ride, to)
             } catch (e: RuntimeException) {
-                Log.w(LOG_TAG, "walk exit", e)
+                DiagLog.w(LOG_TAG, e) { "walk exit" }
                 null
             } ?: continue
-            val path = walk.path
-            val newPath = when {
-                path.size > 2 -> PathJoin.attachStart(path.drop(1), exit.position, always = true)
-                path.size == 2 -> listOf(exit.position, path.last())
-                else -> listOfNotNull(exit.position, walk.walkTarget?.position ?: walk.toPlace?.position)
-                    .takeIf { it.size == 2 } ?: path
-            }
+            // Led through the exit: a way of the provider that goes through it stays as it is.
+            val newPath = WalkAccess.pathOut(walk.path, exit, walk.walkTarget?.position ?: walk.toPlace?.position)
             out[index] = walk.copy(path = newPath, walkExit = exit)
             changed = true
         }
@@ -1163,7 +1213,7 @@ object OsmStations {
                 { arriving, next -> io.github.jnbp.nextstop.data.transferWalkSeconds(arriving, next) },
             )
         } catch (e: RuntimeException) {
-            Log.w(LOG_TAG, "platform walks", e)
+            DiagLog.w(LOG_TAG, e) { "platform walks" }
             out
         }
         if (walked !== out) changed = true
@@ -1175,10 +1225,10 @@ object OsmStations {
             parse(reader, keep = null, colors = false) { readWalks(context) }
         }
     } catch (e: OutOfMemoryError) {
-        Log.e(LOG_TAG, "asset: out of memory", e)
+        DiagLog.e(LOG_TAG, e) { "asset: out of memory" }
         Loaded(emptyList(), emptyList())
     } catch (e: Exception) {
-        Log.w(LOG_TAG, "asset not readable", e)
+        DiagLog.w(LOG_TAG, e) { "asset not readable" }
         Loaded(emptyList(), emptyList())
     }
 
@@ -1218,7 +1268,7 @@ object OsmStations {
         stations.trimToSize()
         stops.trimToSize()
         areas.trimToSize()
-        Log.d(LOG_TAG, "loaded ${stations.size} stations, ${stops.size} stop positions, ${areas.size} stop areas, ${lineColors.size} line colours")
+        DiagLog.i(LOG_TAG) { "loaded ${stations.size} stations, ${stops.size} stop positions, ${areas.size} stop areas, ${lineColors.size} line colours" }
         return Loaded(stations, stops, areas, lineColors, walks)
     }
 
@@ -1278,9 +1328,9 @@ object OsmStations {
 
     private fun readWalks(context: Context): TransferWalkIndex = try {
         val text = context.assets.open(WALKS_ASSET).bufferedReader().use { it.readText() }
-        TransferWalkIndex.parse(text).also { Log.d(LOG_TAG, "loaded the change walks of ${it.stations.size} complexes") }
+        TransferWalkIndex.parse(text).also { DiagLog.i(LOG_TAG) { "loaded the change walks of ${it.stations.size} complexes" } }
     } catch (e: Exception) {
-        Log.w(LOG_TAG, "change walks not readable", e)
+        DiagLog.w(LOG_TAG, e) { "change walks not readable" }
         TransferWalkIndex.EMPTY
     }
 
@@ -1288,13 +1338,13 @@ object OsmStations {
     // where it has none or they are not readable.
     private fun readRegionWalks(context: Context, region: String): TransferWalkIndex = try {
         regionFile(context, "transfer-walks-$region.json")?.let { text ->
-            TransferWalkIndex.parse(text).also { Log.d(LOG_TAG, "loaded the change walks of $region: ${it.stations.size} complexes") }
+            TransferWalkIndex.parse(text).also { DiagLog.i(LOG_TAG) { "loaded the change walks of $region: ${it.stations.size} complexes" } }
         } ?: TransferWalkIndex.EMPTY
     } catch (e: OutOfMemoryError) {
-        Log.e(LOG_TAG, "change walks of $region: out of memory", e)
+        DiagLog.e(LOG_TAG, e) { "change walks of $region: out of memory" }
         TransferWalkIndex.EMPTY
     } catch (e: Exception) {
-        Log.w(LOG_TAG, "change walks of $region not readable", e)
+        DiagLog.w(LOG_TAG, e) { "change walks of $region not readable" }
         TransferWalkIndex.EMPTY
     }
 
@@ -1630,6 +1680,27 @@ internal fun nameFits(provider: String, osm: String): Boolean {
     if (provider == osm) return true
     val (short, long) = if (provider.length <= osm.length) provider to osm else osm to provider
     return short.length >= MIN_PART_KEY && (long.startsWith(short) || long.endsWith(short))
+}
+
+
+/**
+ * Of the [platforms] of a station, those a ride of [rideLine] on its track [track] may use:
+ * those OpenStreetMap lists its line at, narrowed by the track where that leaves any; else
+ * those with that track number, but not one of another kind of line (an S-Bahn platform "1"
+ * for a U-Bahn).
+ */
+internal fun platformsOfLine(rideLine: String?, track: String?, platforms: List<OsmPlatform>): List<OsmPlatform> {
+    val line = rideLine?.let { lineKey(it) }?.takeIf { it.isNotEmpty() }
+    val number = platformNumber(track)
+    fun numbered(platform: OsmPlatform) = number != null && platform.ref?.split(';')?.any { platformNumber(it) == number } == true
+    val byLine = line?.let { wanted -> platforms.filter { p -> p.lines.any { lineKey(it) == wanted } } }.orEmpty()
+    val both = byLine.filter { numbered(it) }
+    if (both.isNotEmpty()) return both
+    if (byLine.isNotEmpty()) return byLine
+    val letter = line?.firstOrNull()?.takeIf { it == 'S' || it == 'U' }
+    return platforms.filter { p ->
+        numbered(p) && (letter == null || p.lines.isEmpty() || p.lines.any { it.startsWith(letter) })
+    }
 }
 
 /**

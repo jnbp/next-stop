@@ -38,7 +38,9 @@ class NextComplicationService : SuspendingComplicationDataSourceService() {
         if (trip.active && trip.kind != StepKind.Arrived) {
             val minutes = minutesUntil(trip.time)
             val title = when (trip.kind) {
-                StepKind.Board, StepKind.GetOff -> trip.line ?: "–"
+                // Before the walk to the first ride: leaving, not the ride.
+                StepKind.Board -> if (trip.leave) "🚶" else trip.line ?: "–"
+                StepKind.GetOff -> trip.line ?: "–"
                 else -> "🚶"
             }
             return shortText("$minutes'", title, "$title $minutes min ${trip.place}")

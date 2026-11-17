@@ -19,6 +19,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +32,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.jnbp.nextstop.R
+import io.github.jnbp.nextstop.data.ChartTotalTime
+import io.github.jnbp.nextstop.data.ChartShortLegs
+import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.data.PRODUCT_KEYS
 import io.github.jnbp.nextstop.data.SearchOptions
 import io.github.jnbp.nextstop.data.TicketFilter
@@ -61,6 +66,8 @@ fun SearchOptionsSheet(
     onBike: (Boolean) -> Unit,
     onBikeCombo: (Boolean) -> Unit,
     onDismiss: () -> Unit,
+    totalTime: ChartTotalTime? = null,
+    onTotalTime: (ChartTotalTime) -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -136,9 +143,116 @@ fun SearchOptionsSheet(
                     checked = options.bikeCombo,
                     onChange = onBikeCombo,
                 )
+                // How the chart looks: not part of the search, nothing is searched again.
+                if (totalTime != null) {
+                    Column(
+                        modifier = Modifier
+                            .padding(top = 10.dp)
+                            .fillMaxWidth()
+                            .clip(groupShape(0, 0))
+                            .background(AppColors.Card)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(text = stringResource(R.string.chart_total_time_title), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text(
+                                text = stringResource(R.string.chart_total_time_text),
+                                color = AppColors.Muted,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
+                        ChartTotalTimeToggle(selected = totalTime, onSelect = onTotalTime)
+                        PreviewExpander(key = "chart_total_time") { ChartTotalTimePreview(totalTime) }
+                        Column(modifier = Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(text = stringResource(R.string.chart_short_legs_title), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text(
+                                text = stringResource(R.string.chart_short_legs_text),
+                                color = AppColors.Muted,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
+                        ChartShortLegsToggle()
+                        PreviewExpander(key = "chart_short_legs") {
+                            ChartShortLegsPreview(ChartShortLegsSetting.load(androidx.compose.ui.platform.LocalContext.current))
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/** The choice where the chart shows the total time of each journey: off, above or below its column, or pinned to an edge (see ChartTotalTime). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun ChartTotalTimeToggle(selected: ChartTotalTime, onSelect: (ChartTotalTime) -> Unit) {
+    // Five choices as chips that wrap onto a second line where the row is too narrow: a
+    // segmented toggle of five does not fit, and in a row that scrolls sideways it got no width.
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        ChartTotalTime.entries.forEach { setting ->
+            ChoiceChip(
+                text = stringResource(chartTotalTimeLabel(setting)),
+                active = setting == selected,
+                strong = true,
+                minHeight = 40.dp,
+                onClick = { onSelect(setting) },
+            )
+        }
+    }
+}
+
+/**
+ * The setting how the chart draws short rides (see ChartShortLegs), read once per process and
+ * changed from the settings and the options of the chart; no search follows it.
+ */
+object ChartShortLegsSetting {
+    // The stored setting, read once per process in a plain field: reading it in composition writes no state.
+    @Volatile
+    private var stored: ChartShortLegs? = null
+
+    // A setting changed in this process; snapshot state, so what shows it follows. Written only by update.
+    private var changed by androidx.compose.runtime.mutableStateOf<ChartShortLegs?>(null)
+
+    /** The setting now: a change of this process, else the stored one (read once per process). */
+    fun load(context: android.content.Context): ChartShortLegs =
+        changed ?: stored ?: AppPrefs(context).chartShortLegs.also { stored = it }
+
+    fun update(context: android.content.Context, setting: ChartShortLegs) {
+        changed = setting
+        AppPrefs(context).chartShortLegs = setting
+    }
+}
+
+/** The choice how the chart draws short rides: each by itself, or a run of them combined (see ChartShortLegs). */
+@Composable
+fun ChartShortLegsToggle() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val selected = ChartShortLegsSetting.load(context)
+    SegmentedToggle(
+        labels = listOf(stringResource(R.string.chart_short_legs_separate), stringResource(R.string.chart_short_legs_combine)),
+        selected = selected.ordinal,
+        onSelect = { index -> ChartShortLegsSetting.update(context, ChartShortLegs.entries[index]) },
+        modifier = Modifier.fillMaxWidth(),
+        minHeight = 40.dp,
+        ground = AppColors.Chip,
+        fill = true,
+    )
+}
+
+/** The name of a place of the total time in the chart, for its choice. */
+fun chartTotalTimeLabel(setting: ChartTotalTime): Int = when (setting) {
+    ChartTotalTime.Off -> R.string.chart_total_time_off
+    ChartTotalTime.Above -> R.string.chart_total_time_above
+    ChartTotalTime.Below -> R.string.chart_total_time_below
+    ChartTotalTime.PinnedTop -> R.string.chart_total_time_pinned_top
+    ChartTotalTime.PinnedBottom -> R.string.chart_total_time_pinned_bottom
 }
 
 @Composable

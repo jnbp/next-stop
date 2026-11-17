@@ -65,7 +65,7 @@ object TransitousClient {
                     Departure(
                         line = lineName(item, product) ?: "?",
                         product = product,
-                        direction = item.text("headsign") ?: item.optJSONObject("tripTo")?.text("name") ?: "",
+                        direction = localStopTerms(item.text("headsign") ?: item.optJSONObject("tripTo")?.text("name") ?: ""),
                         time = current,
                         delayMinutes = if (item.optBoolean("realTime", false) && current != null && planned != null) {
                             ((current - planned) / 60_000).toInt()
@@ -94,7 +94,8 @@ object TransitousClient {
                 val name = item.text("name") ?: return@mapNotNull null
                 val id = item.text("id")
                 if (item.text("type") == "STOP" && id != null) {
-                    Place(bvgIdOf(id) ?: PREFIX + id, name, latitude, longitude, PlaceKind.Stop)
+                    // Stop names of Europe-wide feeds in the watch's language (see localStopTerms).
+                    Place(bvgIdOf(id) ?: PREFIX + id, localStopTerms(name, latitude = latitude, longitude = longitude), latitude, longitude, PlaceKind.Stop)
                 } else {
                     // Addresses and points of interest go by their position.
                     Place("address:${coordinates(latitude, longitude)}", name, latitude, longitude, PlaceKind.Address)
@@ -155,7 +156,7 @@ object TransitousClient {
             departureDelayMinutes = if (realtime && plannedDeparture != null) ((departure - plannedDeparture) / 60_000).toInt() else 0,
             arrivalDelayMinutes = if (realtime && plannedArrival != null) ((arrival - plannedArrival) / 60_000).toInt() else 0,
             platform = fromJson.text("track"),
-            direction = item.text("headsign"),
+            direction = item.text("headsign")?.let { localStopTerms(it) },
             cancelled = item.optBoolean("cancelled", false),
             stopTimes = times,
             arrivalPlatform = toJson.text("track"),
@@ -168,7 +169,7 @@ object TransitousClient {
     private fun endName(place: JSONObject, asked: Place?): String {
         val name = place.text("name")
         if (asked != null && (name == null || place.text("vertexType") != "TRANSIT")) return asked.name
-        return name ?: asked?.name ?: ""
+        return name?.let { localStopTerms(it, latitude = place.number("lat"), longitude = place.number("lon")) } ?: asked?.name ?: ""
     }
 
     private fun positionOf(place: JSONObject): Pair<Double, Double>? {
@@ -184,8 +185,14 @@ object TransitousClient {
     private fun lineName(item: JSONObject, product: String): String? {
         val route = item.text("routeShortName")?.trim()
         val category = item.optJSONObject("category")?.text("shortName")?.trim()
+        val trip = item.text("tripShortName")?.trim()?.takeIf { it.isNotEmpty() && it.all { char -> char.isDigit() } }
+        val train = product == "express" || product == "regional"
         val name = when {
             route != null && category != null && route.all { it.isDigit() } -> "$category $route"
+            // A train whose route names only its kind ("RJ", "Railjet"): kind and number, "RJ 174".
+            // Only a known kind: "Flughafen-Express", "REX" or "CJX" stay as they are, as on the phone.
+            route != null && train && trip != null && route.none { it.isDigit() } && trainKindCode(route) != null ->
+                "${trainKindCode(route)} $trip"
             route != null -> route
             else -> item.text("displayName") ?: item.text("tripShortName")
         }
@@ -262,3 +269,24 @@ private fun JSONObject.number(key: String): Double? = if (!has(key) || isNull(ke
 
 private fun JSONObject.millis(key: String): Long? =
     text(key)?.let { runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() }
+
+// Kinds of trains in words, by their code (twin of the phone's data/Products.kt TRAIN_KIND_WORDS:
+// change both together).
+private val TRAIN_KIND_WORDS = mapOf(
+    "railjet" to "RJ", "railjet xpress" to "RJX", "railjetxpress" to "RJX",
+    "eurocity" to "EC", "eurocity-express" to "ECE", "eurocity express" to "ECE", "eurocityexpress" to "ECE",
+    "intercity" to "IC", "intercity-express" to "ICE", "intercity express" to "ICE", "intercityexpress" to "ICE",
+    "euronight" to "EN", "nightjet" to "NJ", "flixtrain" to "FLX",
+    "regional-express" to "RE", "regionalexpress" to "RE", "regionalbahn" to "RB",
+)
+
+// Kinds of trains named by their number behind them (twin of the phone's data/Products.kt
+// NUMBERED_TRAIN_KINDS, with its LONG_DISTANCE_TRAIN_KINDS: change both together).
+private val NUMBERED_TRAIN_KINDS = setOf(
+    "ICE", "IC", "EC", "ECE", "EN", "NJ", "RJ", "RJX", "FLX", "TGV", "ES", "EST", "THA", "EUR", "D",
+    "IRE", "RE", "RB", "IR", "MEX", "FEX",
+)
+
+/** The code of the kind of train [route] names ("RJ" of "RJ" or "Railjet"); null where it names no known kind. */
+private fun trainKindCode(route: String): String? =
+    TRAIN_KIND_WORDS[route.lowercase()] ?: route.uppercase().takeIf { it in NUMBERED_TRAIN_KINDS }

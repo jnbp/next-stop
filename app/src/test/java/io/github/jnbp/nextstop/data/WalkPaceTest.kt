@@ -72,8 +72,9 @@ class WalkPaceTest {
         assertEquals(Tightness.Risky, rated(292, 4))
         // 3 minutes do not work even at a brisk pace: Sprint.
         assertEquals(Tightness.VeryRisky, rated(292, 3))
-        // 2 to spare beyond the 6 needed: normal; 5: relaxed.
-        assertEquals(Tightness.Risky, rated(292, 7))
+        // Nothing to spare beyond the 6 needed: knapp; 1: normal; 5: relaxed.
+        assertEquals(Tightness.Risky, rated(292, 6))
+        assertEquals(Tightness.Tight, rated(292, 7))
         assertEquals(Tightness.Tight, rated(292, 8))
         assertEquals(Tightness.Comfortable, rated(292, 11))
     }
@@ -81,18 +82,18 @@ class WalkPaceTest {
     @Test
     fun levelBoundariesWithTheU7ToTheS1() {
         // 184 s: 4 minutes at the usual pace, 3 at a brisk one.
-        assertEquals(Tightness.Risky, rated(184, 5))
-        assertEquals(Tightness.Tight, rated(184, 6))
+        assertEquals(Tightness.Risky, rated(184, 4))
+        assertEquals(Tightness.Tight, rated(184, 5))
         assertEquals(Tightness.Risky, rated(184, 3))
         assertEquals(Tightness.VeryRisky, rated(184, 2))
     }
 
     @Test
     fun noChangeOfOneMinuteIsKnapp() {
-        // The same platform: 1 minute needed, but 0 or 1 minute is a sprint.
+        // The same platform: 1 minute needed, but 0 or 1 minute is a sprint; 2 leave 1: normal.
         assertEquals(Tightness.VeryRisky, rated(0, 1))
         assertEquals(Tightness.VeryRisky, rated(0, 0))
-        assertEquals(Tightness.Risky, rated(0, 2))
+        assertEquals(Tightness.Tight, rated(0, 2))
         assertEquals(Tightness.Tight, rated(0, 3))
     }
 

@@ -1,5 +1,7 @@
 package io.github.jnbp.nextstop.wear
 
+import io.github.jnbp.nextstop.data.getOffSoon
+import io.github.jnbp.nextstop.data.plausible
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -72,10 +74,11 @@ import io.github.jnbp.nextstop.ui.ACTION_OPEN_TRIP
 import io.github.jnbp.nextstop.ui.StepKind
 import io.github.jnbp.nextstop.ui.TripState
 import io.github.jnbp.nextstop.ui.boardingHint
+import io.github.jnbp.nextstop.ui.inStation
 import io.github.jnbp.nextstop.ui.boardingPositionOf
 import io.github.jnbp.nextstop.ui.rideAfter
 import io.github.jnbp.nextstop.ui.lineColor
-import io.github.jnbp.nextstop.ui.shortLine
+import io.github.jnbp.nextstop.ui.badgeLine
 import io.github.jnbp.nextstop.ui.startTripService
 import io.github.jnbp.nextstop.ui.stepDelay
 import io.github.jnbp.nextstop.ui.tripStep
@@ -406,7 +409,8 @@ object PhoneBridge {
             val ahead = leg.stopovers.drop(1).count { (it.arrival ?: it.departure)?.isAfter(now) == true }
             if (leg.stopovers.size >= 2) {
                 stopsLeft = ahead.coerceAtLeast(1)
-                alert = stopsLeft <= 1
+                // On a long last hop the watch buzzes only within the last minutes, not hours ahead.
+                alert = stopsLeft <= 1 && getOffSoon(leg.arrival, now)
             } else {
                 alert = Duration.between(now, leg.arrival).toMinutes() < ALERT_FALLBACK_MINUTES
             }
@@ -427,15 +431,24 @@ object PhoneBridge {
                     StepKind.Arrived -> "Arrived"
                 },
             )
-            put("line", shortLine(leg?.line) ?: JSONObject.NULL)
+            put("line", badgeLine(leg?.line) ?: JSONObject.NULL)
             put("product", leg?.product ?: "")
             // The colour of the very ride (its provider's, where it runs): the watch knows no places.
             leg?.takeIf { !it.walking }?.let { put("color", lineColor(it).toArgb()) }
             put("direction", leg?.direction ?: JSONObject.NULL)
             put("place", step.place.plainStopName())
             put("platform", (if (step.kind == StepKind.Board) leg?.departurePlatform else leg?.arrivalPlatform) ?: JSONObject.NULL)
-            put("time", step.time.toInstant().toEpochMilli())
-            put("delay", stepDelay(step))
+            // Before the walk to the first ride: "time" stays the ride's departure (as older watches
+            // read it), "leaveAt" is when to set off; the delay is the ride's.
+            val rideStep = if (step.leave && leg != null) {
+                val ride = journey.plausible().legs.getOrNull(journey.legs.indexOfFirst { it === leg }) ?: leg
+                step.copy(time = ride.departure, leave = false)
+            } else {
+                step
+            }
+            put("time", rideStep.time.toInstant().toEpochMilli())
+            if (rideStep !== step) put("leaveAt", step.time.toInstant().toEpochMilli())
+            put("delay", stepDelay(rideStep))
             put("hint", hint ?: JSONObject.NULL)
             put("progress", progress)
             put("arrival", journey.arrival.toInstant().toEpochMilli())
@@ -492,6 +505,7 @@ object PhoneBridge {
             val rides = legs.indices.filter { !legs[it].walking }
             put("plan", planJson(legs, changes))
             put("planWalkEnd", walkMinutes(walkingBefore(legs, legs.size)))
+            if (walkingBefore(legs, legs.size).any { it.cycling }) put("planBikeEnd", true)
             put("planIndex", if (index >= 0 && !legs[index].walking) rides.indexOf(index) else rides.size)
             if (step.kind == StepKind.Board && index >= 0) {
                 changes.firstOrNull { it.nextIndex == index }?.let {
@@ -532,15 +546,17 @@ object PhoneBridge {
     private fun planJson(legs: List<Leg>, changes: List<JourneyChange>): JSONArray {
         val plan = JSONArray()
         var walk = 0L
+        var bike = false
         legs.forEachIndexed { index, leg ->
             if (leg.walking) {
                 walk += Duration.between(leg.departure, leg.arrival).toMinutes().coerceAtLeast(0)
+                bike = bike || leg.cycling
                 return@forEachIndexed
             }
             val change = changes.firstOrNull { it.nextIndex == index }
             plan.put(
                 JSONObject()
-                    .put("line", shortLine(leg.line) ?: JSONObject.NULL)
+                    .put("line", badgeLine(leg.line) ?: JSONObject.NULL)
                     .put("product", leg.product)
                     .put("color", lineColor(leg).toArgb())
                     .put("direction", leg.direction ?: JSONObject.NULL)
@@ -558,9 +574,11 @@ object PhoneBridge {
                             put("gap", it.time.minutes)
                         }
                         if (leg.cancelled) put("cancelled", true)
+                        if (bike) put("bikeBefore", true)
                     },
             )
             walk = 0
+            bike = false
         }
         return plan
     }
@@ -641,7 +659,7 @@ object PhoneBridge {
         val walk = legs.subList(index + 1, nextIndex)
             .sumOf { changeWalkMinutes(it, legs[index].takeIf { ride -> !ride.walking }, next) }
         return JSONObject()
-            .put("line", shortLine(next.line) ?: JSONObject.NULL)
+            .put("line", badgeLine(next.line) ?: JSONObject.NULL)
             .put("product", next.product)
             .put("color", lineColor(next).toArgb())
             .put("direction", next.direction ?: JSONObject.NULL)
@@ -649,6 +667,7 @@ object PhoneBridge {
             .put("platform", next.departurePlatform ?: JSONObject.NULL)
             .put("time", next.departure.toInstant().toEpochMilli())
             .put("walkMinutes", walk)
+            .apply { if (legs.subList(index + 1, nextIndex).any { it.cycling }) put("bike", true) }
             // Both rides at one platform of one stop (a change across, no walk at all): only then true.
             .put("samePlatform", nextIndex == index + 1 && !legs[index].walking && OsmStations.samePlatform(legs[index], next))
             .apply {
@@ -677,6 +696,7 @@ object PhoneBridge {
             .put("toLat", to.first)
             .put("toLon", to.second)
             .put("minutes", minutes)
+            .apply { if (legs.any { it.cycling }) put("bike", true) }
     }
 
     /**
@@ -1040,9 +1060,12 @@ internal object WatchQueries {
     }
 
     private fun legJson(leg: Leg): JSONObject = JSONObject().apply {
-        put("line", shortLine(leg.line) ?: JSONObject.NULL)
+        put("line", badgeLine(leg.line) ?: JSONObject.NULL)
         put("product", leg.product)
         put("walk", leg.walking)
+        if (leg.walking && leg.cycling) put("bike", true)
+        // A walk of 0 m within a station: the watch does not count down to leaving for it.
+        if (leg.inStation) put("inStation", true)
         put("from", leg.from)
         put("to", leg.to)
         put("dep", leg.departure.toInstant().toEpochMilli())
@@ -1069,7 +1092,7 @@ internal object WatchQueries {
     }
 
     private fun departureJson(departure: Departure): JSONObject = JSONObject().apply {
-        put("line", shortLine(departure.line) ?: departure.line)
+        put("line", badgeLine(departure.line) ?: departure.line)
         put("product", departure.product)
         put("dir", departure.direction)
         departure.time?.let { put("time", it.toInstant().toEpochMilli()) }

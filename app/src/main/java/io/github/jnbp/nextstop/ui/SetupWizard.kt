@@ -4,16 +4,17 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import io.github.jnbp.nextstop.ui.theme.MapStyleChoice
+import io.github.jnbp.nextstop.ui.theme.MapVehiclesChoice
 import io.github.jnbp.nextstop.data.LineColors
 import io.github.jnbp.nextstop.data.Tightness
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -47,6 +48,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -81,6 +83,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -88,6 +91,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -108,12 +115,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import java.time.OffsetDateTime
-import kotlin.math.PI
 import kotlin.math.absoluteValue
-import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.roundToInt
-import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import io.github.jnbp.nextstop.R
@@ -179,8 +183,32 @@ fun SetupWizard(onDone: () -> Unit) {
         onDone()
     }
 
-    BackHandler(enabled = pager.currentPage > 0) {
-        scope.launch { pager.animateScrollToPage(pager.currentPage - 1) }
+    // Back to the step before is predictive: the pager follows the gesture, the step before
+    // comes in from the side as far as the finger went; let go it snaps there, called off it
+    // springs back. [backFrom] is the step the gesture started on (-1: none), [backMoved] how
+    // far it has scrolled the pager so far, in pixels.
+    val backFrom = remember { intArrayOf(-1) }
+    val backMoved = remember { floatArrayOf(0f) }
+    PredictiveNestedBackHandler(
+        enabled = pager.currentPage > 0,
+        onSeek = { progress ->
+            if (backFrom[0] < 0) {
+                backFrom[0] = pager.currentPage
+                backMoved[0] = 0f
+            }
+            val pageWidth = (pager.layoutInfo.pageSize + pager.layoutInfo.pageSpacing).toFloat()
+            val wanted = -progress * pageWidth
+            pager.scroll { backMoved[0] += scrollBy(wanted - backMoved[0]) }
+        },
+        onCancel = {
+            val from = backFrom[0]
+            backFrom[0] = -1
+            if (from >= 0) scope.launch { pager.animateScrollToPage(from) }
+        },
+    ) {
+        val from = backFrom[0].takeIf { it >= 0 } ?: pager.currentPage
+        backFrom[0] = -1
+        scope.launch { pager.animateScrollToPage((from - 1).coerceAtLeast(0)) }
     }
 
     Box(
@@ -954,19 +982,29 @@ private fun LiveNamePage(prefs: AppPrefs) {
  */
 @Composable
 private fun VehiclesPage() {
+    val context = LocalContext.current
     val compact = LocalSetupPage.current.compact
     SetupCard(
         title = stringResource(R.string.setup_vehicles_title),
         text = stringResource(R.string.setup_vehicles_short),
         more = stringResource(R.string.vehicle_hint_text),
     ) {
-        // Two vehicles that drive round a little track, one way, as on the map: the one with
-        // the live dot from live data, the other one from the timetable.
+        // Which vehicles on the map: preselected only close up (the default), all, or none
+        // (less powerful phones).
+        val levels = MapVehiclesChoice.entries
+        SetupChoice(
+            title = stringResource(R.string.map_vehicles_title),
+            text = stringResource(mapVehiclesTextRes(Appearance.mapVehicles)),
+            labels = levels.map { stringResource(mapVehiclesLabelRes(it)) },
+            selected = levels.indexOf(Appearance.mapVehicles),
+            onSelect = { index -> Appearance.changeMapVehicles(context, levels[index]) },
+        )
+        // A little map with vehicles on it, live, as on the real map: zoomed out and close up as the choice shows them.
         if (compact) {
             MapStyleChoiceGrid(previewHeight = 48.dp)
-            VehicleTrack(trackHeight = 88.dp)
+            VehicleMapSketch(Appearance.mapVehicles, sketchHeight = 92.dp)
         } else {
-            VehicleTrack()
+            VehicleMapSketch(Appearance.mapVehicles)
             MapStyleChoiceGrid(previewHeight = 64.dp)
         }
     }
@@ -1009,150 +1047,300 @@ private fun MapStyleChoiceGrid(previewHeight: Dp) {
 }
 
 /**
- * A little track (a loop with rounded ends) on which two vehicles drive round, clockwise:
- * the tram M10 with the live dot and the U7 by the timetable; below, what each means.
- * Without animations (system setting) they stand still.
+ * What the choice of map vehicles [level] means, as a small map in the look of the chosen map
+ * style: the city zoomed out, with vehicles as dots on its lines for "all" and none for the
+ * others; and for "all" and "dynamic" a close-up beside a magnifier with the vehicles as badges
+ * (see [CloseVehicleSketch]). "Off" shows the city without any vehicle. A change of the choice
+ * cross-fades. No real places. Also the preview of the setting in the map settings, lower there.
  */
 @Composable
-private fun VehicleTrack(trackHeight: Dp = TRACK_HEIGHT) {
+internal fun VehicleMapSketch(level: MapVehiclesChoice, sketchHeight: Dp = MAP_SKETCH_HEIGHT) {
     val animate = rememberAnimationsOn()
-    val lap = if (animate) {
-        rememberInfiniteTransition(label = "track").animateFloat(
+    val drive = if (animate) {
+        rememberInfiniteTransition(label = "wideSketch").animateFloat(
             initialValue = 0f,
             targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(TRACK_LAP_MILLIS, easing = LinearEasing), RepeatMode.Restart),
-            label = "trackLap",
+            animationSpec = infiniteRepeatable(tween(WIDE_SKETCH_LOOP_MILLIS, easing = LinearEasing), RepeatMode.Restart),
+            label = "wideSketchDrive",
         )
     } else {
         null
     }
-    val road = AppColors.Chip
-    val marking = AppColors.Muted.copy(alpha = 0.45f)
-    Column(
+    val dark = AppColors.palette.dark
+    val style = when (Appearance.mapStyle) {
+        MapStyleChoice.Auto -> if (dark) MapStyleChoice.Dark else MapStyleChoice.Light
+        else -> Appearance.mapStyle
+    }
+    val colors = mapStyleColors(style)
+    Crossfade(
+        targetState = level,
+        animationSpec = tween(if (animate) 350 else 0),
+        label = "vehicleSketch",
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(AppColors.Card)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(trackHeight),
-        ) {
-            val density = LocalDensity.current
-            val width = with(density) { maxWidth.toPx() }
-            val height = with(density) { maxHeight.toPx() }
-            // The middle of the road runs this far inside the box, so the badges stay inside it.
-            val inset = with(density) { TRACK_INSET.toPx() }
+            .height(sketchHeight)
+            .clip(RoundedCornerShape(20.dp)),
+    ) { shown ->
+        Box(modifier = Modifier.fillMaxSize()) {
+            // The city zoomed out: its lines, with every vehicle a dot on them only for "all".
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val radius = (height - inset * 2) / 2f
-                drawRoundRect(
-                    color = road,
-                    topLeft = Offset(inset, inset),
-                    size = Size(width - inset * 2, height - inset * 2),
-                    cornerRadius = CornerRadius(radius, radius),
-                    style = Stroke(width = 14.dp.toPx()),
-                )
-                drawRoundRect(
-                    color = marking,
-                    topLeft = Offset(inset, inset),
-                    size = Size(width - inset * 2, height - inset * 2),
-                    cornerRadius = CornerRadius(radius, radius),
-                    style = Stroke(
-                        width = 1.5.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 6.dp.toPx())),
-                    ),
-                )
+                drawWideSketch(colors, dots = shown == MapVehiclesChoice.All, phase = drive?.value ?: MAP_SKETCH_REST)
             }
-            // Half a lap apart; at rest one stands on the top and one on the bottom straight.
-            TrackVehicle(
-                line = "M10",
-                product = "tram",
-                live = true,
-                at = { lap?.value ?: TRACK_REST },
-                width = width,
-                height = height,
-                inset = inset,
-            )
-            TrackVehicle(
-                line = "U7",
-                product = "subway",
-                live = false,
-                at = { ((lap?.value ?: TRACK_REST) + 0.5f) % 1f },
-                width = width,
-                height = height,
-                inset = inset,
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                LiveDot(pulse = false)
-                Text(text = stringResource(R.string.setup_vehicles_live), color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            if (shown != MapVehiclesChoice.Off) {
+                // Close up: the vehicles as badges, as the map shows them for "all" and "dynamic".
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 10.dp, top = 10.dp, bottom = 10.dp)
+                        .fillMaxWidth(WIDE_SKETCH_INSET_WIDTH)
+                        .fillMaxHeight(),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .shadow(4.dp, RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(14.dp))
+                            .border(2.dp, Color.White, RoundedCornerShape(14.dp)),
+                    ) {
+                        CloseVehicleSketch()
+                    }
+                    MagnifierSign(modifier = Modifier.align(Alignment.TopStart).offset(x = (-8).dp, y = (-6).dp))
+                }
             }
-            Text(
-                text = stringResource(R.string.setup_vehicles_timetable_legend),
-                color = AppColors.Muted,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
         }
     }
 }
 
-// One lap of the track takes this long; the track is this tall, its middle line this far inside.
-private const val TRACK_LAP_MILLIS = 9_000
-private val TRACK_HEIGHT = 112.dp
-private val TRACK_INSET = 22.dp
-// Where the first vehicle stands without animations, as a fraction of a lap.
-private const val TRACK_REST = 0.12f
+/** The city of the sketch zoomed out: water, parks, a grid of streets and three lines; vehicles as dots on them where [dots]. */
+private fun DrawScope.drawWideSketch(colors: List<Color>, dots: Boolean, phase: Float) {
+    val w = size.width
+    val h = size.height
+    drawRect(colors[0])
+    // A river across the bottom left and two parks.
+    drawRect(colors[1], topLeft = Offset(0f, h * 0.84f), size = Size(w * 0.55f, h * 0.16f))
+    drawRoundRect(colors[2], topLeft = Offset(w * 0.06f, h * 0.1f), size = Size(w * 0.14f, h * 0.22f), cornerRadius = CornerRadius(4.dp.toPx()))
+    drawRoundRect(colors[2], topLeft = Offset(w * 0.36f, h * 0.56f), size = Size(w * 0.1f, h * 0.18f), cornerRadius = CornerRadius(4.dp.toPx()))
+    // Many small streets: far off, they are thin.
+    val street = 1.5.dp.toPx()
+    for (index in 1 until 9) drawLine(colors[3], Offset(w * index / 9f, 0f), Offset(w * index / 9f, h), strokeWidth = street)
+    for (index in 1 until 5) drawLine(colors[3], Offset(0f, h * index / 5f), Offset(w, h * index / 5f), strokeWidth = street)
+    // Three lines, and their vehicles as dots going along them.
+    val lineWidth = 2.5.dp.toPx()
+    WIDE_SKETCH_LINES.forEachIndexed { index, line ->
+        val path = Path().apply {
+            moveTo(line[0] * w, line[1] * h)
+            quadraticBezierTo(line[2] * w, line[3] * h, line[4] * w, line[5] * h)
+        }
+        drawPath(path, WIDE_SKETCH_COLORS[index], style = Stroke(width = lineWidth, cap = StrokeCap.Round))
+    }
+    if (!dots) return
+    val outer = 3.5.dp.toPx()
+    val inner = 2.3.dp.toPx()
+    WIDE_SKETCH_LINES.forEachIndexed { index, line ->
+        for (dot in 0 until WIDE_SKETCH_DOTS) {
+            val along = (dot.toFloat() / WIDE_SKETCH_DOTS + phase * (if (index % 2 == 0) 1f else -1f) + index * 0.13f).let { it - floor(it) }
+            val u = 1f - along
+            val x = (u * u * line[0] + 2f * u * along * line[2] + along * along * line[4]) * w
+            val y = (u * u * line[1] + 2f * u * along * line[3] + along * along * line[5]) * h
+            drawCircle(Color.White, radius = outer, center = Offset(x, y))
+            drawCircle(WIDE_SKETCH_COLORS[index], radius = inner, center = Offset(x, y))
+        }
+    }
+}
+
+/** A small round sign with a magnifying glass: the inset beside it is the map close up. */
+@Composable
+private fun MagnifierSign(modifier: Modifier = Modifier) {
+    Canvas(
+        modifier = modifier
+            .size(24.dp)
+            .shadow(3.dp, CircleShape)
+            .clip(CircleShape)
+            .background(AppColors.Card),
+    ) {
+        val lens = Offset(size.width * 0.44f, size.height * 0.44f)
+        val radius = size.width * 0.2f
+        val stroke = 2.dp.toPx()
+        drawCircle(AppColors.Ink, radius = radius, center = lens, style = Stroke(width = stroke))
+        drawLine(
+            AppColors.Ink,
+            Offset(lens.x + radius * 0.72f, lens.y + radius * 0.72f),
+            Offset(size.width * 0.76f, size.height * 0.76f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+// One loop of the dots on the zoomed-out sketch; the inset close up takes this share of its width.
+private const val WIDE_SKETCH_LOOP_MILLIS = 16_000
+private const val WIDE_SKETCH_INSET_WIDTH = 0.5f
+// The dots on each line of the zoomed-out sketch.
+private const val WIDE_SKETCH_DOTS = 4
+// The lines of the zoomed-out sketch: start, control point and end (shares of width and height).
+private val WIDE_SKETCH_LINES = listOf(
+    floatArrayOf(0f, 0.72f, 0.5f, 0.8f, 1f, 0.18f),
+    floatArrayOf(0.12f, 0f, 0.25f, 0.6f, 0.62f, 1f),
+    floatArrayOf(0f, 0.4f, 0.55f, 0.3f, 1f, 0.55f),
+)
+private val WIDE_SKETCH_COLORS = listOf(Color(0xFF3A7BD5), Color(0xFF3F9C35), Color(0xFFBE1414))
 
 /**
- * Where on the loop of a [width] by [height] box, [inset] inside, a vehicle is at [fraction]
- * of a lap, clockwise from the left end of the top straight.
+ * A small piece of map close up in the look of the chosen map style: a few streets, a park, a
+ * river, one U-Bahn line with its station sign, and vehicles on it as on the real map. The train
+ * stands live (with the live dot) in its row right of the sign, a bus drives down a street by
+ * the timetable, and further off a tram shows as a dot in its line colour. Without animations
+ * (system setting) the bus and the tram stand still. Fills what it is given.
  */
-private fun trackPoint(fraction: Float, width: Float, height: Float, inset: Float): Offset {
-    val radius = (height - inset * 2) / 2f
-    val straight = (width - inset * 2 - radius * 2).coerceAtLeast(0f)
-    val arc = (PI * radius).toFloat()
-    val lap = straight * 2 + arc * 2
-    var s = (fraction - floor(fraction)) * lap
-    val left = inset + radius
-    val right = left + straight
-    val top = inset
-    val middle = inset + radius
-    if (s < straight) return Offset(left + s, top)
-    s -= straight
-    if (s < arc) {
-        val angle = -PI / 2 + s / radius
-        return Offset(right + radius * cos(angle).toFloat(), middle + radius * sin(angle).toFloat())
+@Composable
+private fun CloseVehicleSketch() {
+    val animate = rememberAnimationsOn()
+    val drive = if (animate) {
+        rememberInfiniteTransition(label = "mapSketch").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(MAP_SKETCH_LOOP_MILLIS, easing = LinearEasing), RepeatMode.Restart),
+            label = "mapSketchDrive",
+        )
+    } else {
+        null
     }
-    s -= arc
-    if (s < straight) return Offset(right - s, top + radius * 2)
-    s -= straight
-    val angle = PI / 2 + s / radius
-    return Offset(left + radius * cos(angle).toFloat(), middle + radius * sin(angle).toFloat())
+    // The map's own colours: those of the chosen style, light or dark as the app is for "automatic".
+    val dark = AppColors.palette.dark
+    val style = when (Appearance.mapStyle) {
+        MapStyleChoice.Auto -> if (dark) MapStyleChoice.Dark else MapStyleChoice.Light
+        else -> Appearance.mapStyle
+    }
+    val colors = mapStyleColors(style)
+    val measurer = rememberTextMeasurer()
+    val signLetter = remember(measurer) {
+        measurer.measure("U", TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold))
+    }
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val width = with(density) { maxWidth.toPx() }
+        val height = with(density) { maxHeight.toPx() }
+        val station = mapSketchLinePoint(MAP_SKETCH_STATION_AT, width, height)
+        val signHalf = with(density) { (MAP_SKETCH_SIGN / 2).toPx() }
+        val rowGap = with(density) { GROUP_SIGN_GAP_DP.dp.toPx() }
+        // A river along the bottom, and the U-Bahn line in a soft curve: made once per size, not every frame.
+        val river = remember(width, height) {
+            Path().apply {
+                moveTo(0f, height * 0.9f)
+                cubicTo(width * 0.3f, height * 0.78f, width * 0.6f, height * 1.02f, width, height * 0.86f)
+                lineTo(width, height)
+                lineTo(0f, height)
+                close()
+            }
+        }
+        val line = remember(width, height) {
+            Path().apply {
+                moveTo(0f, height * MAP_SKETCH_LINE_START)
+                quadraticBezierTo(width * 0.45f, height * MAP_SKETCH_LINE_START, width, height * MAP_SKETCH_LINE_END)
+            }
+        }
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawRect(colors[0])
+            // The river and a park at the top left.
+            drawPath(river, colors[1])
+            drawRoundRect(
+                colors[2],
+                topLeft = Offset(size.width * 0.04f, size.height * 0.08f),
+                size = Size(size.width * 0.22f, size.height * 0.34f),
+                cornerRadius = CornerRadius(8.dp.toPx()),
+            )
+            // The streets: two across, two down, one at a slant.
+            val street = 6.dp.toPx()
+            val minor = 3.5.dp.toPx()
+            drawLine(colors[3], Offset(0f, size.height * MAP_SKETCH_TRAM_STREET), Offset(size.width, size.height * MAP_SKETCH_TRAM_STREET), strokeWidth = street)
+            drawLine(colors[3], Offset(size.width * MAP_SKETCH_BUS_STREET, 0f), Offset(size.width * MAP_SKETCH_BUS_STREET, size.height), strokeWidth = street)
+            drawLine(colors[3], Offset(size.width * 0.3f, 0f), Offset(size.width * 0.3f, size.height), strokeWidth = minor)
+            drawLine(colors[3], Offset(0f, size.height * 0.62f), Offset(size.width, size.height * 0.66f), strokeWidth = minor)
+            drawLine(colors[3], Offset(size.width * 0.5f, 0f), Offset(size.width * 0.92f, size.height), strokeWidth = minor)
+            // The U-Bahn line in a soft curve, with a light casing as on the map.
+            drawPath(line, colors[0], style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(line, MAP_SKETCH_LINE_COLOR, style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
+            // The station sign on the line: a white edge, the blue square, its "U".
+            val half = MAP_SKETCH_SIGN.toPx() / 2
+            drawRoundRect(
+                Color.White,
+                topLeft = Offset(station.x - half - 1.5.dp.toPx(), station.y - half - 1.5.dp.toPx()),
+                size = Size(half * 2 + 3.dp.toPx(), half * 2 + 3.dp.toPx()),
+                cornerRadius = CornerRadius(5.dp.toPx()),
+            )
+            drawRoundRect(
+                MAP_SKETCH_SIGN_COLOR,
+                topLeft = Offset(station.x - half, station.y - half),
+                size = Size(half * 2, half * 2),
+                cornerRadius = CornerRadius(4.dp.toPx()),
+            )
+            drawText(
+                signLetter,
+                topLeft = Offset(station.x - signLetter.size.width / 2f, station.y - signLetter.size.height / 2f),
+            )
+            // Further off, where the map shows dots: a tram on the street across the top.
+            val tramX = mapSketchLoop((drive?.value ?: MAP_SKETCH_REST) + 0.35f, size.width, reverse = true)
+            val tram = Offset(tramX, size.height * MAP_SKETCH_TRAM_STREET)
+            drawCircle(Color.White, radius = 4.5.dp.toPx(), center = tram)
+            drawCircle(MAP_SKETCH_TRAM_COLOR, radius = 3.dp.toPx(), center = tram)
+        }
+        // The train live in its row right of the sign, as on the map.
+        SketchBadge(line = "U2", product = "subway", live = true) { badge ->
+            IntOffset((station.x + signHalf + rowGap).roundToInt(), (station.y - badge.height / 2f).roundToInt())
+        }
+        // A bus by the timetable, driving down its street.
+        SketchBadge(line = "100", product = "bus", live = false) { badge ->
+            val y = mapSketchLoop(drive?.value ?: MAP_SKETCH_REST, height, reverse = false)
+            IntOffset((width * MAP_SKETCH_BUS_STREET - badge.width / 2f).roundToInt(), (y - badge.height / 2f).roundToInt())
+        }
+    }
 }
 
-/** One vehicle on the track: its line badge, with the live dot when [live], centred on its place. */
+// The sketch is this tall; one loop of the bus and the tram takes this long.
+private val MAP_SKETCH_HEIGHT = 120.dp
+private const val MAP_SKETCH_LOOP_MILLIS = 7_000
+// Where the bus and the tram stand without animations, as a share of their loop.
+private const val MAP_SKETCH_REST = 0.3f
+// The streets of the bus (share of the width) and of the tram (share of the height).
+private const val MAP_SKETCH_BUS_STREET = 0.8f
+private const val MAP_SKETCH_TRAM_STREET = 0.24f
+// The U-Bahn line: its height at the left and right edge (shares), and where its station is on it.
+private const val MAP_SKETCH_LINE_START = 0.78f
+private const val MAP_SKETCH_LINE_END = 0.34f
+private const val MAP_SKETCH_STATION_AT = 0.3f
+private val MAP_SKETCH_SIGN = 16.dp
+private val MAP_SKETCH_LINE_COLOR = Color(0xFF3A7BD5)
+private val MAP_SKETCH_SIGN_COLOR = Color(0xFF115D91)
+private val MAP_SKETCH_TRAM_COLOR = Color(0xFFBE1414)
+
+/** The point at [t] (0 to 1) of the sketch's U-Bahn line in a [width] by [height] box. */
+private fun mapSketchLinePoint(t: Float, width: Float, height: Float): Offset {
+    val u = 1f - t
+    val x = 2f * u * t * width * 0.45f + t * t * width
+    val y = (u * u + 2f * u * t) * height * MAP_SKETCH_LINE_START + t * t * height * MAP_SKETCH_LINE_END
+    return Offset(x, y)
+}
+
+/** Where a vehicle that loops over a street [length] long is at [phase]: in at one end, out at the other. */
+private fun mapSketchLoop(phase: Float, length: Float, reverse: Boolean): Float {
+    val share = phase - floor(phase)
+    val along = -0.15f * length + share * 1.3f * length
+    return if (reverse) length - along else along
+}
+
+/**
+ * One vehicle of the sketch: its line badge, with the live dot when [live], placed by [place]
+ * from its measured size (read in the layout step, so driving costs no recomposition).
+ */
 @Composable
-private fun TrackVehicle(line: String, product: String, live: Boolean, at: () -> Float, width: Float, height: Float, inset: Float) {
+private fun SketchBadge(line: String, product: String, live: Boolean, place: (IntSize) -> IntOffset) {
     var badge by remember { mutableStateOf(IntSize.Zero) }
     Box(
         modifier = Modifier
             .onSizeChanged { badge = it }
-            // Read in the layout step, so driving costs no recomposition.
-            .offset {
-                val point = trackPoint(at(), width, height, inset)
-                IntOffset((point.x - badge.width / 2f).roundToInt(), (point.y - badge.height / 2f).roundToInt())
-            },
+            .offset { place(badge) },
     ) {
-        LineBadge(line = line, product = product, minWidth = 40.dp, at = LineColors.BERLIN_CENTRE)
+        LineBadge(line = line, product = product, minWidth = 34.dp, at = LineColors.BERLIN_CENTRE)
         if (live) {
             LiveDot(
                 // As on the map: only trains pulse, buses and trams carry a still dot.
@@ -1913,7 +2101,7 @@ private fun PalettePreview(label: Boolean = true) {
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = stringResource(R.string.setup_preview_stop), color = AppColors.Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1)
-                Text(text = stringResource(R.string.direction, "Wannsee"), color = AppColors.Muted, fontSize = 12.sp, maxLines = 1)
+                Text(text = stringResource(R.string.direction_arrow, "Wannsee"), color = AppColors.Muted, fontSize = 12.sp, maxLines = 1)
             }
             MinutesPill(minutes = 3L, live = true)
         }

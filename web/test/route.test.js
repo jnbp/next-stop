@@ -382,3 +382,22 @@ test('the line of the ride counts before the line the trip of the provider names
   const steps = route.computeSteps(r, { 1: trip });
   assert.equal(steps[1].line, 'S5');
 });
+
+test('a way by bike (the bike combo) is read, kept and says so', () => {
+  const r = route.parseRoute(fragment(FIXTURE));
+  assert.equal(r.legs[0].bike, false);
+  const bikeRoute = JSON.parse(FIXTURE);
+  bikeRoute.legs[0].bike = true;
+  // A ride cannot be ridden by bike: the flag counts on walks only.
+  bikeRoute.legs[1].bike = true;
+  const json = JSON.stringify(bikeRoute);
+  const parsed = route.parseRoute(fragment(json));
+  assert.equal(parsed.legs[0].bike, true);
+  assert.equal(parsed.legs[1].bike, false);
+  const steps = route.computeSteps(parsed, {});
+  assert.equal(steps[0].bike, true);
+  assert.equal(steps[1].bike, false);
+  assert.equal(route.TEXTS.de.bike, 'Mit dem Rad');
+  assert.equal(route.TEXTS.en.bike, 'By bike');
+  assert.match(route.googleWalkUrl([52.5, 13.4], [52.51, 13.41], true), /travelmode=bicycling$/);
+});

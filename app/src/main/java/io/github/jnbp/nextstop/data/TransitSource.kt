@@ -16,6 +16,16 @@ interface TransitSource {
     suspend fun searchStops(query: String, results: Int = 8): List<Stop>
 
     /**
+     * Stations of the town [query] names with regional or long-distance trains, wherever it
+     * lies: asked without the preference for places near the user (see longDistanceStations).
+     * None where the provider cannot tell.
+     */
+    suspend fun searchLongDistance(query: String, results: Int = 10): List<Stop> = emptyList()
+
+    /** The middle of the region the search for places prefers (see longDistanceBlocks); null where none is known. */
+    val searchCenter: Pair<Double, Double>? get() = null
+
+    /**
      * Vehicles inside the given box of coordinates, with their movement over the next half minute.
      * With [products] only vehicles of those products (see [PRODUCT_KEYS]; "regional" includes
      * long-distance trains), so a large box is not filled up with buses before any train.
@@ -131,10 +141,24 @@ suspend fun TransitSource.refreshed(journey: Journey, stopovers: Boolean, polyli
         ?.let { refreshJourney(it, stopovers, polylines) }
         ?.legs
     if (head == null && tail == null) return null
-    return Journey(
-        legs = (head ?: journey.legs.take(split.headLegs)) + (tail ?: journey.legs.drop(split.headLegs)),
-        split = split,
-        via = journey.via,
+    if (split.tailJoined) {
+        // One ride over the seam: the second part is needed to join it anew, else the known times
+        // stay. A first part that cannot be loaded (or has no handle, as after a swap on board)
+        // keeps its known legs; the joined ride among them is cut back at the seam below.
+        if (tail == null) return null
+        val h = head ?: journey.legs.take(split.headLegs)
+        val headLegs = split.headLegs
+        // A first part whose cut ride was kept as known holds the joined ride: cut back at the seam.
+        // As two parts the legs after the seam count one more (the ride there is two legs again).
+        val via = journey.via?.let { via -> via.copy(afterLegs = via.afterLegs?.let { if (it > headLegs) it + 1 else it }) }
+        return mergeThroughRuns(Journey(legs = withoutSeamOverlap(h, tail) + tail, split = split.copy(tailJoined = false), via = via))
+    }
+    return mergeThroughRuns(
+        Journey(
+            legs = (head ?: journey.legs.take(split.headLegs)) + (tail ?: journey.legs.drop(split.headLegs)),
+            split = split,
+            via = journey.via,
+        ),
     )
 }
 

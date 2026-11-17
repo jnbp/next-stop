@@ -128,3 +128,124 @@ fun sameSpot(a: Stop, b: Stop, meters: Double = 80.0): Boolean {
     val other = searchTokens(b.name.substringBefore(',')).joinToString(" ")
     return one.isNotEmpty() && (one == other || one.startsWith(other) || other.startsWith(one))
 }
+
+// The products of a station with regional or long-distance trains (see longDistanceStations).
+private val FAR_PRODUCTS = setOf("express", "regional")
+
+// Words after the name of the town that make a station its main one ("Hamburg Hbf").
+private val MAIN_STATION_WORDS = setOf("hbf", "hauptbahnhof", "central", "centraal")
+
+// Two hits this close are one station (two providers, or a station and its stop for trains).
+private const val SAME_FAR_STATION_METERS = 300.0
+
+/**
+ * The block "Long distance" below the local hits of a search: the stations among [candidates]
+ * whose name is the town [query] names or starts with it as a whole word ("Hamburg Hbf",
+ * "Hamburg-Altona" for "Hamburg"; never "Hamburger Str."), served by regional or long-distance
+ * trains and outside the region around [region] (those are local hits already). Each station
+ * once, none of [local] again. Ranked by importance: long-distance trains first, the main
+ * station of the town first, then the order of the providers; at most [limit].
+ */
+fun longDistanceStations(
+    query: String,
+    candidates: List<Stop>,
+    local: List<Stop>,
+    region: Pair<Double, Double>? = null,
+    limit: Int = 5,
+): List<Stop> {
+    val tokens = searchTokens(query)
+    if (tokens.isEmpty()) return emptyList()
+    class Far(val stop: Stop, val index: Int, val rank: Int)
+    fun same(a: Stop, b: Stop): Boolean = sameFarStation(a, b)
+    val ranked = candidates.mapIndexedNotNull { index, stop ->
+        if (stop.kind != PlaceKind.Stop || stop.products.none { it in FAR_PRODUCTS }) return@mapIndexedNotNull null
+        val words = searchTokens(stop.name.substringBefore('(').substringBefore('['))
+        if (words.size < tokens.size || words.subList(0, tokens.size) != tokens) return@mapIndexedNotNull null
+        val position = stop.position
+        if (region != null && position != null && groundDistance(region, position) <= REGION_METERS) return@mapIndexedNotNull null
+        if (local.any { same(it, stop) }) return@mapIndexedNotNull null
+        val rest = words.drop(tokens.size)
+        val main = rest.isEmpty() || rest.first() in MAIN_STATION_WORDS
+        Far(stop, index, (if ("express" in stop.products) 0 else 2) + (if (main) 0 else 1))
+    }.sortedWith(compareBy<Far>({ it.rank }, { it.index }))
+    val kept = ArrayList<Stop>()
+    for (far in ranked) {
+        if (kept.size >= limit) break
+        if (kept.none { same(it, far.stop) }) kept.add(far.stop)
+    }
+    return kept
+}
+
+// Two hits of one station: the same id or station, or this close (see SAME_FAR_STATION_METERS).
+private fun sameFarStation(a: Stop, b: Stop): Boolean {
+    if (a.id == b.id || sameStation(a, a.name, b, b.name)) return true
+    val first = a.position ?: return false
+    val second = b.position ?: return false
+    return groundDistance(first, second) <= SAME_FAR_STATION_METERS
+}
+
+/** The list of a search in two blocks: the local hits and the block "Long distance" below them. */
+data class SearchBlocks(val local: List<Stop>, val far: List<Stop>)
+
+/**
+ * The local hits [local] of a search for [query] and the block "Long distance" (see
+ * [longDistanceStations]) from [far], the stations the sources found without the bias for the
+ * region. A long-distance station of the town that lies outside the region around [region] is
+ * in the block, also where it came among the local hits: there it moves into the block ("Stuttgart"
+ * in Berlin puts Stuttgart Hbf below, not at the end of the local list). Places of [fixed] (by
+ * id: the own position, history, favourites) stay where they are and are not repeated below.
+ * Without a known region the local hits stay as they are.
+ */
+fun longDistanceBlocks(
+    query: String,
+    local: List<Stop>,
+    far: List<Stop>,
+    region: Pair<Double, Double>?,
+    fixed: Set<String> = emptySet(),
+): SearchBlocks {
+    val staying = local.filter { it.id in fixed }
+    val fromLocal = if (region == null) emptyList() else local.filter { it.id !in fixed }
+    // Without a known region the local hits stay local: all of them count as local, not only the fixed ones.
+    val block = longDistanceStations(query, far + fromLocal, local = if (region == null) local else staying, region = region)
+    if (block.isEmpty()) return SearchBlocks(local, block)
+    val rest = local.filter { place ->
+        place.id in fixed || place.kind != PlaceKind.Stop || block.none { sameFarStation(it, place) }
+    }
+    return SearchBlocks(rest, block)
+}
+
+// Two places of one town (from two sources) within this distance are one.
+private const val SAME_TOWN_METERS = 30_000.0
+
+/**
+ * [places] with each town (or district) place once: "Stuttgart" with "Stuttgart" as its
+ * second line from two sources shows once, the first. A place counts as a town where its
+ * name is its second line or one of its areas; stops, addresses and points of interest with
+ * names of their own are never merged.
+ */
+fun withoutTwinTowns(places: List<Stop>): List<Stop> {
+    fun townKey(place: Stop): String? {
+        if (place.kind == PlaceKind.Stop) return null
+        val name = searchTokens(place.name.substringBefore(','))
+        if (name.isEmpty() || name.any { word -> word.any { it.isDigit() } }) return null
+        val others = listOfNotNull(place.detail) + place.areas
+        return name.joinToString(" ").takeIf { key -> others.any { searchTokens(it).joinToString(" ") == key } }
+    }
+    val kept = ArrayList<Stop>(places.size)
+    val keys = ArrayList<String?>(places.size)
+    for (place in places) {
+        val key = townKey(place)
+        val twin = key != null && kept.indices.any { index ->
+            keys[index] == key && run {
+                val a = kept[index].position
+                val b = place.position
+                a == null || b == null || groundDistance(a, b) <= SAME_TOWN_METERS
+            }
+        }
+        if (!twin) {
+            kept.add(place)
+            keys.add(key)
+        }
+    }
+    return if (kept.size == places.size) places else kept
+}

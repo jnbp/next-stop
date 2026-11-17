@@ -73,7 +73,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.jnbp.nextstop.R
-import io.github.jnbp.nextstop.data.AppPrefs
+import io.github.jnbp.nextstop.data.ChartShortLegs
+import io.github.jnbp.nextstop.data.ChartTotalTime
 import io.github.jnbp.nextstop.data.OsmLine
 import io.github.jnbp.nextstop.ui.theme.AppColors
 import io.github.jnbp.nextstop.ui.theme.Appearance
@@ -487,7 +488,8 @@ internal fun NextAppointmentPreview(on: Boolean) {
 /** The radius of "nearby": a circle around the own position, the stops inside it in colour. */
 @Composable
 internal fun NearbyRadiusPreview(radius: Int) {
-    val largest = AppPrefs.NEARBY_RADII.maxOrNull() ?: radius
+    // The sketch spans about a kilometre; a larger radius fills it (all its stops inside).
+    val largest = NEARBY_SKETCH_METERS
     val target = radius.toFloat() / largest.coerceAtLeast(1)
     val animate = rememberAnimationsOn()
     val shown by animateFloatAsState(
@@ -557,6 +559,25 @@ internal fun BoardingHintsPreview(on: Boolean) {
 @Composable
 internal fun AlightReminderPreview(on: Boolean) {
     SketchPane(key = on) { reveal -> alightReminderSketch(on, reveal) }
+}
+
+/**
+ * The total time of each connection in the chart: none, a line above or below each column
+ * (it moves with it), or small chips pinned to the top or bottom edge, as the chart draws them.
+ */
+@Composable
+internal fun ChartTotalTimePreview(selected: ChartTotalTime) {
+    val labels = TOTAL_TIME_SKETCH_MINUTES.map { durationLabel(it) }
+    SketchPane(key = selected) { reveal -> chartTotalTimeSketch(selected, labels, reveal) }
+}
+
+/** Short rides in the chart: each in a small block of its own, or a run of them as one block with the colours and names of their lines. */
+@Composable
+internal fun ChartShortLegsPreview(selected: ChartShortLegs) {
+    SketchOptions(
+        labels = listOf(stringResource(R.string.chart_short_legs_separate), stringResource(R.string.chart_short_legs_combine)),
+        selected = selected.ordinal,
+    ) { index, reveal -> chartShortLegsSketch(combine = ChartShortLegs.entries[index] == ChartShortLegs.Combine, reveal = reveal) }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1180,6 +1201,9 @@ private val NEARBY_STOPS = listOf(
     180f to 0.4f, 260f to 2.3f, 340f to 4.1f, 420f to 5.4f, 560f to 1.2f, 640f to 3.2f, 720f to 4.9f, 900f to 0.1f, 980f to 2.8f,
 )
 
+// The radius the sketch of "nearby" draws at its full size; its stops lie within it.
+private const val NEARBY_SKETCH_METERS = 1_000
+
 private fun DrawScope.nearbyRadiusSketch(fraction: Float, largest: Int) {
     previewMap()
     val center = Offset(size.width / 2, size.height / 2)
@@ -1433,4 +1457,120 @@ private fun DrawScope.alightReminderSketch(on: Boolean, reveal: Float) {
             )
         }
     }
+}
+
+// The total times of the three columns of the sketch of the total time, in minutes.
+private val TOTAL_TIME_SKETCH_MINUTES = listOf(38L, 52L, 65L)
+
+// The columns of that sketch: start and end of its rides (fractions of the plot) and their sketch line.
+private val TOTAL_TIME_SKETCH_COLUMNS = listOf(
+    listOf(SketchBlock(0.04f, 0.42f, 0), SketchBlock(0.52f, 0.78f, 1)),
+    listOf(SketchBlock(0.18f, 0.88f, 2)),
+    listOf(SketchBlock(0.30f, 0.56f, 1), SketchBlock(0.64f, 0.96f, 3)),
+)
+
+private fun DrawScope.chartTotalTimeSketch(setting: ChartTotalTime, labels: List<String>, reveal: Float) {
+    val alpha = reveal.coerceIn(0f, 1f)
+    val textSize = 9.sp.toPx()
+    val textColor = AppColors.Muted.toArgb()
+    // The margins at the edges stay the same in every setting, so only the labels move.
+    val margin = 20.dp.toPx()
+    val plotTop = margin
+    val plotHeight = size.height - margin * 2
+    for (line in 1..3) {
+        val y = plotTop + plotHeight * line / 4f
+        drawLine(AppColors.Grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+    }
+    val columns = TOTAL_TIME_SKETCH_COLUMNS.size
+    val columnWidth = minOf(size.width * 0.2f, 64.dp.toPx())
+    val gap = columnWidth * 0.35f
+    val left = (size.width - columns * columnWidth - (columns - 1) * gap) / 2f
+    val lift = (1f - alpha) * 4.dp.toPx()
+    TOTAL_TIME_SKETCH_COLUMNS.forEachIndexed { column, rides ->
+        val x = left + column * (columnWidth + gap)
+        for (ride in rides) {
+            block(SketchLines[ride.line], x, plotTop + plotHeight * ride.start, columnWidth, plotHeight * (ride.end - ride.start), radius = 5.dp.toPx())
+        }
+        val label = labels.getOrNull(column) ?: return@forEachIndexed
+        val centerX = x + columnWidth / 2f
+        val columnTop = plotTop + plotHeight * rides.first().start
+        val columnBottom = plotTop + plotHeight * rides.last().end
+        when (setting) {
+            ChartTotalTime.Off -> Unit
+            // A line right above or below the column, moving with it.
+            ChartTotalTime.Above -> mapText(label, Offset(centerX, columnTop - 7.dp.toPx() + lift), textSize, textColor, alpha = alpha)
+            ChartTotalTime.Below -> mapText(label, Offset(centerX, columnBottom + 7.dp.toPx() - lift), textSize, textColor, alpha = alpha)
+            // A small chip over the column at the edge, all of them on one line (see PinnedTotals).
+            ChartTotalTime.PinnedTop, ChartTotalTime.PinnedBottom -> {
+                val top = setting == ChartTotalTime.PinnedTop
+                val chipHeight = 14.dp.toPx()
+                val chipWidth = minOf(columnWidth, label.length * textSize * 0.6f + 12.dp.toPx())
+                val chipY = if (top) 3.dp.toPx() - lift else size.height - 3.dp.toPx() - chipHeight + lift
+                block(AppColors.Card, centerX - chipWidth / 2f, chipY, chipWidth, chipHeight, radius = chipHeight / 2f, alpha = alpha)
+                mapText(label, Offset(centerX, chipY + chipHeight / 2f), textSize, textColor, alpha = alpha)
+            }
+        }
+    }
+}
+
+// The names of the short rides of the sketch of short legs, and their sketch lines.
+private val SHORT_LEG_NAMES = listOf("M11", "S1")
+private val SHORT_LEG_LINES = listOf(3, 0)
+private val SHORT_LEG_TEXT = SHORT_LEG_NAMES.joinToString(" \u00B7 ")
+
+private fun DrawScope.chartShortLegsSketch(combine: Boolean, reveal: Float) {
+    val alpha = reveal.coerceIn(0f, 1f)
+    val inset = 6.dp.toPx()
+    val top = inset
+    val height = size.height - inset * 2
+    val gap = size.width * 0.08f
+    val columnWidth = (size.width - gap * 3) / 2
+    for (line in 1..3) {
+        val y = top + height * line / 4f
+        drawLine(AppColors.Grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+    }
+    val radius = 4.dp.toPx()
+    // The first column: a long ride, a run of two short ones, a long ride.
+    val x = gap
+    block(SketchLines[1], x, top + height * 0.04f, columnWidth, height * 0.34f, radius = radius)
+    block(SketchLines[2], x, top + height * 0.70f, columnWidth, height * 0.26f, radius = radius)
+    val runTop = top + height * 0.42f
+    val runBottom = top + height * 0.66f
+    // The short rides by the clock: where each starts and ends within the run.
+    val bands = floatArrayOf(0f, 0.42f, 0.56f, 1f)
+    val runHeight = runBottom - runTop
+    if (combine) {
+        // One block: a strip of the line colours at their times, a dot at the change, and their names.
+        val grow = 0.85f + 0.15f * alpha
+        val blockHeight = runHeight * grow
+        val blockTop = runTop + (runHeight - blockHeight) / 2f
+        block(AppColors.Card, x, blockTop, columnWidth, blockHeight, radius = radius)
+        val strip = 4.dp.toPx()
+        clipRect(x, blockTop, x + columnWidth, blockTop + blockHeight) {
+            for (k in SHORT_LEG_LINES.indices) {
+                val from = blockTop + blockHeight * bands[2 * k]
+                val to = blockTop + blockHeight * bands[2 * k + 1]
+                drawRect(SketchLines[SHORT_LEG_LINES[k]], topLeft = Offset(x, from), size = Size(strip, to - from))
+            }
+        }
+        drawCircle(AppColors.Muted, radius = 1.2.dp.toPx(), center = Offset(x + strip / 2f, blockTop + blockHeight * (bands[1] + bands[2]) / 2f))
+        val textSize = minOf(8.sp.toPx(), blockHeight * 0.7f)
+        val textLeft = x + strip + 3.dp.toPx()
+        val center = Offset(textLeft + (x + columnWidth - textLeft) / 2f, blockTop + blockHeight / 2f)
+        clipRect(textLeft, blockTop, x + columnWidth, blockTop + blockHeight) {
+            mapText(SHORT_LEG_TEXT, center, textSize, AppColors.Ink.toArgb(), alpha = 0.4f + 0.6f * alpha)
+        }
+    } else {
+        // Each short ride in a small block of its own, standing in a little from the column's sides.
+        val side = 2.dp.toPx() * alpha
+        for (k in SHORT_LEG_LINES.indices) {
+            val from = runTop + runHeight * bands[2 * k]
+            val to = runTop + runHeight * bands[2 * k + 1]
+            block(SketchLines[SHORT_LEG_LINES[k]], x + side, from, columnWidth - side * 2, to - from, radius = 2.dp.toPx())
+        }
+    }
+    // The second column: two long rides, the same in both.
+    val second = gap * 2 + columnWidth
+    block(SketchLines[0], second, top + height * 0.16f, columnWidth, height * 0.40f, radius = radius)
+    block(SketchLines[3], second, top + height * 0.62f, columnWidth, height * 0.30f, radius = radius)
 }

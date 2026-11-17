@@ -1,6 +1,7 @@
 package io.github.jnbp.nextstop.ui
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -23,6 +24,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -111,6 +113,42 @@ fun badgeImageId(hex: String, live: Boolean): String =
 /** Whether the hint about vehicle positions belongs on the map now. */
 fun vehicleHintWanted(hintOn: Boolean, vehiclesShown: Boolean, vehicleCount: Int): Boolean =
     hintOn && vehiclesShown && vehicleCount > 0
+
+/** How long the vehicles must have been there before the hint shows, in milliseconds. */
+const val HINT_SHOW_AFTER_MILLIS = 400L
+
+/** How long the vehicles must have been gone before the hint goes (a reload is quicker), in milliseconds. */
+const val HINT_HIDE_AFTER_MILLIS = 2_000L
+
+/** The least time the hint stays shown or hidden after a change, in milliseconds. */
+const val HINT_STEADY_MILLIS = 2_000L
+
+/**
+ * How long the hint waits before it follows [wanted], when its last change was
+ * [sinceChangeMillis] ago: it shows after a short moment and goes only after a longer one, and
+ * never changes again within [HINT_STEADY_MILLIS] of the last change.
+ */
+fun hintSwitchDelayMillis(wanted: Boolean, sinceChangeMillis: Long): Long {
+    val hold = if (wanted) HINT_SHOW_AFTER_MILLIS else HINT_HIDE_AFTER_MILLIS
+    return maxOf(hold, HINT_STEADY_MILLIS - sinceChangeMillis)
+}
+
+/**
+ * Whether the vehicle hint is shown, following [wanted] steadily (see [hintSwitchDelayMillis]):
+ * a short gap while the vehicles reload, or vehicles that come and go, do not make it flicker.
+ */
+@Composable
+fun rememberSteadyHint(wanted: Boolean): State<Boolean> {
+    val shown = remember { mutableStateOf(false) }
+    val changedAt = remember { longArrayOf(Long.MIN_VALUE / 2) }
+    LaunchedEffect(wanted) {
+        if (wanted == shown.value) return@LaunchedEffect
+        delay(hintSwitchDelayMillis(wanted, SystemClock.uptimeMillis() - changedAt[0]))
+        shown.value = wanted
+        changedAt[0] = SystemClock.uptimeMillis()
+    }
+    return shown
+}
 
 /**
  * The setting "Hinweis zu Fahrzeugpositionen" while the app runs; stored in

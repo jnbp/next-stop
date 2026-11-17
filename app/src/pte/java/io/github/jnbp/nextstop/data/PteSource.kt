@@ -124,7 +124,7 @@ class PteSource(private val authorization: String) : TransitSource {
                 val live = departure.predictedTime?.let { offsetOf(it) }
                 val product = classifyProduct(productOf(departure.line.product), departure.line.label, departure.line.network)
                 Departure(
-                    line = rapidLineName(departure.line.label, product) ?: departure.line.label ?: "?",
+                    line = rapidLineName(withTrainKind(departure.line.label, product, null, departure.line.name), product) ?: departure.line.label ?: "?",
                     product = product,
                     direction = departure.destination?.let { nameOf(it) } ?: "",
                     time = live ?: planned,
@@ -278,7 +278,7 @@ class PteSource(private val authorization: String) : TransitSource {
                 val departure = leg.departureStop
                 val arrival = leg.arrivalStop
                 Leg(
-                    line = rapidLineName(leg.line.label, product) ?: leg.line.label,
+                    line = rapidLineName(withTrainKind(leg.line.label, product, null, leg.line.name), product) ?: leg.line.label,
                     product = product,
                     walking = false,
                     from = nameOf(departure.location),

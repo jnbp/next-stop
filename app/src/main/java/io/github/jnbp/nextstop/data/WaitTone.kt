@@ -17,7 +17,7 @@ enum class WaitTone { Sprint, Tight, Comfortable, Neutral, LongWait }
 
 // The thresholds of [waitTone], all in minutes, in one place.
 /** A change is comfortable from this many minutes to spare (and at least as many as it needs). */
-const val TONE_MIN_SPARE = NORMAL_SPARE
+const val TONE_MIN_SPARE = 2L
 
 /** A comfortable change leaves at most this much from arrival to departure ... */
 const val TONE_COMFORT_MAX_GAP = 12L
