@@ -1,6 +1,6 @@
 /* Next Stop live page in the look of the app's companion, mobile first, dark mode by the system.
    Phones: a full-screen map, a top bar, and a sheet to swipe up: collapsed it shows the hero (the
-   lime counter, what comes next, the bar of the trip), open the cards of the timeline. Wide
+   lime counter until the arrival, what the traveller does now, the bar of the trip), open the cards of the timeline. Wide
    screens: the map on the left, the top bar, the blue hero and the cards on the right.
    The shared design (colours, cards, badges, live dot, counter, buttons) is in ../shared/base.css. */
 html, body { height: 100%; overflow: hidden; }
@@ -79,9 +79,12 @@ h1 { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.25; letter-spa
 .hero-text { min-width: 0; }
 .hero-title { margin: 0; font-size: 21px; font-weight: 800; line-height: 1.18; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .hero-meta { margin: 6px 0 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 15px; }
-.hero-time { font-weight: 800; font-variant-numeric: tabular-nums; }
-.hero-plat::before { content: "· "; }
-.hero-plat[hidden], .hero .delay[hidden] { display: none; }
+.hero-time { font-variant-numeric: tabular-nums; }
+/* The arrival by real-time data: late red, on time green; plain from the timetable alone. */
+.hero-time.late { color: var(--bad); }
+.hero-time.ok { color: var(--ok); }
+.hero-now { color: var(--muted); font-weight: 600; }
+.hero-now[hidden], .hero .delay[hidden] { display: none; }
 .countdown { display: inline-grid; overflow: hidden; }
 .countdown[hidden] { display: none; }
 .counter.done { min-width: 84px; }
@@ -107,7 +110,7 @@ h1 { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.25; letter-spa
 }
 .progress-labels span:nth-child(2) { color: var(--ink); }
 
-/* The line under the hero: "Im S9 · nächster Halt Adlershof". */
+/* The line under the hero: the next step, "Als Nächstes: Aussteigen in Adlershof · 14:21". */
 .state {
   margin: 4px 0 0; padding: 12px 16px; border-radius: 18px; background: var(--tint);
   color: var(--tint-ink); font-size: 15px; font-weight: 800; line-height: 1.35;
@@ -121,6 +124,9 @@ h1 { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.25; letter-spa
   }
   .hero .delay { background: rgba(255, 255, 255, 0.16); color: #fff; }
   .hero .delay.warn, .hero .delay.bad { color: #FFD58A; }
+  .hero-time.late { color: #FFB4A3; }
+  .hero-time.ok { color: #B8F5D9; }
+  .hero-now { color: rgba(255, 255, 255, 0.85); }
   .progress-segs i { border: 2px solid #fff; }
   .progress-segs i.walk { background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.55) 0 5px, transparent 5px 9px); }
   .progress-fill { background: #fff; opacity: 0.45; }

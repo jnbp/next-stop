@@ -342,6 +342,7 @@ function computeLegs(journey, live) {
       walk: leg.walk,
       line,
       color: leg.walk ? null : lineColor(line, product, data && data.color, leg.from.pos),
+      product,
       direction: (data && data.direction) || leg.direction,
       from: leg.from,
       to: leg.to,
@@ -542,7 +543,10 @@ function pollDelay(hidden, failures) {
   return Math.min(MAX_BACKOFF_MS, Math.max(base, POLL_MS.visible * Math.pow(2, failures)));
 }
 
-/** The one line under the arrival: "Im U8 · nächster Halt Hermannplatz", "Steigt um in …", … */
+/**
+ * A detailed line of the state: "Im U8 · nächster Halt Hermannplatz", "Steigt um in …", …
+ * Since #218 the page shows nowLine in the hero and nextStepLine under it instead.
+ */
 function stateLine(T, state) {
   const leg = state.leg;
   switch (state.phase) {
@@ -615,6 +619,108 @@ function heroModel(T, state, now) {
     default:
       return { kind: 'expired', counter: '', time: state.arr, title: T.endedHead, delay: 0, platform: null };
   }
+}
+
+/** From this many minutes to the arrival the big counter shows the clock time (the app's #148b rule). */
+const HERO_CLOCK_FROM_MINUTES = 60;
+
+/**
+ * Whether the counter shows the clock time with [minutes] to go, [showingClock] what it shows
+ * now: from [HERO_CLOCK_FROM_MINUTES] on; once shown, it stays down to one minute less (as
+ * heroShowsClock of the app), so it does not flip at the boundary.
+ */
+function heroShowsClock(minutes, showingClock) {
+  return minutes >= (showingClock ? HERO_CLOCK_FROM_MINUTES - 1 : HERO_CLOCK_FROM_MINUTES);
+}
+
+/** "im Bus M48", "in der U8", … for a ride of [leg]: by the product of its live data, else guessed. */
+function vehiclePhrase(T, leg) {
+  const line = leg.line || '?';
+  const kind = leg.product || guessProduct(leg.line, leg.from.pos);
+  const say = T.vehicle && T.vehicle[kind];
+  return say ? say(line) : T.vehicleAny(line);
+}
+
+/**
+ * What the traveller does right now, by plan and live times (never a position): "gerade: im Bus
+ * M48", "beim Umsteigen in Hermannplatz", "noch nicht losgefahren"; empty once arrived.
+ *
+ * This is an estimate from the plan: a link is a static fragment made once, and the app cannot
+ * update it later (there is no server, on purpose). So when a provider reports a wrong delay, or
+ * the traveller takes an earlier ride, the page cannot know; it may show a walk while they
+ * already sit in the bus. An optional hint of the ride the traveller was on when sharing
+ * (index and time, no position) would fit into the payload, but it is only true at the moment
+ * of sharing and would go stale with the next change, so the link does not carry one.
+ */
+function nowLine(T, state, legs) {
+  const leg = state.leg;
+  const rideBefore = (index) => legs.slice(0, index).some((l) => !l.walk);
+  const rideAfter = (index) => legs.slice(index + 1).find((l) => !l.walk) || null;
+  switch (state.phase) {
+    case 'before':
+      return T.notStarted;
+    case 'ride': {
+      const text = T.nowDoing(vehiclePhrase(T, leg));
+      return leg.cancelled ? text + ' · ' + T.cancelled : text;
+    }
+    case 'walk':
+    case 'wait': {
+      if (!leg.walk && state.phase === 'wait') {
+        // Waiting for the ride [leg]: a change when a ride came before, else at the first stop.
+        return rideBefore(leg.index) ? T.changing(leg.from.name) : T.nowDoing(T.atStop(leg.from.name));
+      }
+      const next = rideAfter(leg.index);
+      if (!next) return rideBefore(leg.index) ? T.nowDoing(T.lastWalk) : T.nowDoing(T.walking);
+      return rideBefore(leg.index) ? T.changing(next.from.name) : T.nowDoing(T.walking);
+    }
+    default:
+      return '';
+  }
+}
+
+/**
+ * The hero of the page for the recipient of the link (#218): when the traveller arrives.
+ * { kind: 'way'|'arrived'|'expired', counter ("27′", "22:09" from an hour on, "jetzt" or ''),
+ *   clock (whether the counter shows the clock time), title ("Ankunft 22:09"), label ("Ankunft"),
+ *   time (epoch ms of the arrival), delay (min), level ('late' red, 'ok' green: both with live or
+ *   shared real-time data; 'plan' without), doing (see nowLine) }.
+ * [showingClock]: whether the counter showed the clock time before (hysteresis).
+ *
+ * Delays always show as the new time with the delay beside it ("Ankunft 22:09", "+3 min"), the
+ * app's default (#227b): the app's setting "Verspätungen" is the sender's, the link does not
+ * carry it, and the recipient is someone else.
+ */
+function arrivalHero(T, state, legs, now, showingClock) {
+  const rides = legs.filter((l) => !l.walk);
+  const lastRide = rides[rides.length - 1] || null;
+  const realtime = !!lastRide && (lastRide.live || lastRide.to.delay !== 0);
+  const delay = state.delay || 0;
+  const level = !realtime ? 'plan' : delay > 0 ? 'late' : 'ok';
+  const base = { time: state.arr, delay, level, clock: false };
+  if (state.phase === 'expired') {
+    return Object.assign(base, { kind: 'expired', counter: '', label: T.endedHead, title: T.endedHead, doing: '' });
+  }
+  if (state.phase === 'arrived') {
+    return Object.assign(base, { kind: 'arrived', counter: '', label: T.heroArrived, title: T.heroArrived + ' ' + clock(state.arr), doing: '' });
+  }
+  const minutes = Math.ceil((state.arr - now) / 60000);
+  const showClock = state.arr - now >= 45000 && heroShowsClock(minutes, !!showingClock);
+  return Object.assign(base, {
+    kind: 'way',
+    counter: showClock ? clock(state.arr) : counterText(state.arr, now, T.now),
+    clock: showClock,
+    label: T.eta,
+    title: T.eta + ' ' + clock(state.arr),
+    doing: nowLine(T, state, legs),
+  });
+}
+
+/** The line under the hero: the next step, "Als Nächstes: Aussteigen in Hermannplatz · 22:01 · Gleis 2". */
+function nextStepLine(T, step) {
+  if (step.kind === 'arrived' || step.kind === 'expired') return '';
+  const parts = [step.title, clock(step.time)];
+  if (step.platform) parts.push(step.platform);
+  return T.nextStep(parts.join(' · '));
 }
 
 /**
@@ -729,6 +835,23 @@ const TEXTS = {
     heroWalkStart: 'Los geht\'s zu Fuß',
     heroBoard: (line, s) => 'Einsteigen in ' + line + ' · ' + s,
     heroArrived: 'Angekommen',
+    notStarted: 'noch nicht losgefahren',
+    nowDoing: (s) => 'gerade: ' + s,
+    changing: (s) => 'beim Umsteigen in ' + s,
+    atStop: (s) => 'an der Haltestelle ' + s,
+    walking: 'zu Fuß unterwegs',
+    lastWalk: 'zu Fuß auf dem letzten Stück',
+    vehicle: {
+      bus: (l) => 'im Bus ' + l,
+      tram: (l) => 'in der Tram ' + l,
+      subway: (l) => 'in der ' + l,
+      suburban: (l) => 'in der ' + l,
+      regional: (l) => 'im Zug ' + l,
+      express: (l) => 'im Zug ' + l,
+      ferry: (l) => 'auf der Fähre ' + l,
+    },
+    vehicleAny: (l) => 'unterwegs mit ' + l,
+    nextStep: (s) => 'Als Nächstes: ' + s,
     track: (p) => 'Gleis ' + p,
     bay: (p) => 'Steig ' + p,
     arrivesAt: (t) => 'an ' + t,
@@ -801,6 +924,23 @@ const TEXTS = {
     heroWalkStart: 'Off on foot',
     heroBoard: (line, s) => 'Board the ' + line + ' · ' + s,
     heroArrived: 'Arrived',
+    notStarted: 'not on the way yet',
+    nowDoing: (s) => 'now: ' + s,
+    changing: (s) => 'changing at ' + s,
+    atStop: (s) => 'at the stop ' + s,
+    walking: 'walking',
+    lastWalk: 'walking the last bit',
+    vehicle: {
+      bus: (l) => 'on the bus ' + l,
+      tram: (l) => 'on the tram ' + l,
+      subway: (l) => 'on the ' + l,
+      suburban: (l) => 'on the ' + l,
+      regional: (l) => 'on the train ' + l,
+      express: (l) => 'on the train ' + l,
+      ferry: (l) => 'on the ferry ' + l,
+    },
+    vehicleAny: (l) => 'on the ' + l,
+    nextStep: (s) => 'Next: ' + s,
     track: (p) => 'Platform ' + p,
     bay: (p) => 'Bay ' + p,
     arrivesAt: (t) => 'arr. ' + t,
@@ -836,7 +976,7 @@ if (typeof module !== 'undefined' && module.exports) {
     cutPath, along, clock, tripProgress, splitPathAt, easeToward, countdownText, ageText, freshness,
     freshnessText, pollDelay, timelineModel, lineColor, inkOn, guessProduct, distance, EXPIRY_MS, POLL_MS,
     textNumber, rollsUp, lineLength, snakeFeatures, easeOutCubic, confettiPieces, confettiAt, CONFETTI_SECONDS,
-    CONFETTI_COUNT, ROUTE_DRAW_MS, heroModel, platformLabel, progressSegments, counterText, sheetRest, sheetClamp,
+    CONFETTI_COUNT, ROUTE_DRAW_MS, heroModel, arrivalHero, nowLine, nextStepLine, heroShowsClock, HERO_CLOCK_FROM_MINUTES, platformLabel, progressSegments, counterText, sheetRest, sheetClamp,
     appIntentUrl, PLAY_URL,
   };
 }
@@ -916,6 +1056,7 @@ if (typeof document !== 'undefined') {
       let scrolledTo = -2;
       let paddingSig = '';
       let segsSig = '';
+      let heroClock = false; // whether the hero counter shows the clock time (hysteresis)
       // The swipe sheet of phones: open (all cards) or collapsed (the hero only); its offset in px.
       let sheetOpen = false;
       let sheetClosed = 0;
@@ -963,7 +1104,7 @@ if (typeof document !== 'undefined') {
 
       /**
        * The sheet of phones: it reaches from below the top bar to the bottom; collapsed, only its
-       * hero (counter, what comes next, the bar of the trip) shows above the bottom edge.
+       * hero (counter to the arrival, what the traveller does, the bar of the trip) shows above the bottom edge.
        */
       function sheetGeometry() {
         const sheet = $('sheet');
@@ -1312,27 +1453,28 @@ if (typeof document !== 'undefined') {
         const head = headline(T, phase, journey.name, journey.dest);
         $('headline').textContent = head;
         document.title = head + ' · Next Stop';
-        // The top bar: when the trip ends, coloured by the delay.
-        rollTo($('eta-time'), clock(state.arr));
-        const level = delayLevel(state.delay);
-        $('eta').className = 'eta ' + level;
+        // The top bar keeps the trip's name; the arrival is the hero now (#218).
+        $('eta').hidden = true;
 
-        // The hero: the next thing that happens, with the counter until then.
+        // The hero (#218): when the traveller arrives, with the counter until then and what they
+        // do right now; the next step goes into the line under the hero.
         const over = phase === 'arrived' || phase === 'expired';
-        const hero = heroModel(T, state, now);
+        const hero = arrivalHero(T, state, legs, now, heroClock);
+        heroClock = hero.clock;
         rollTo($('countdown'), hero.counter);
         $('countdown').hidden = over;
         $('counter').classList.toggle('long', hero.counter.length > 4);
         $('counter').classList.toggle('done', over);
-        $('hero-title').textContent = hero.title;
-        $('hero-time').textContent = phase === 'expired' ? T.linkExpired : clock(hero.time);
+        $('hero-label').textContent = hero.kind === 'expired' ? hero.title : hero.label;
+        const heroTime = $('hero-time');
+        heroTime.textContent = hero.kind === 'expired' ? '' : clock(hero.time);
+        heroTime.className = 'hero-time ' + hero.level;
         const d = $('eta-delay');
-        const showDelay = hero.kind === 'off' || hero.kind === 'board' || hero.kind === 'before' || hero.kind === 'arrived';
-        d.hidden = !showDelay;
+        d.hidden = hero.kind === 'expired' || hero.level === 'plan';
         d.textContent = delayText(T, hero.delay);
         d.className = 'delay ' + delayLevel(hero.delay);
-        $('hero-plat').textContent = hero.platform || '';
-        $('hero-plat').hidden = !hero.platform;
+        $('hero-now').textContent = hero.kind === 'expired' ? T.linkExpired : hero.doing;
+        $('hero-now').hidden = !$('hero-now').textContent;
 
         // The bar of the whole trip: a piece per leg in its line colour, the travelled part pale.
         const progress = tripProgress(legs, now);
@@ -1368,7 +1510,7 @@ if (typeof document !== 'undefined') {
         $('bar-now').textContent = over || phase === 'before' ? '' : T.barNow(clock(now));
         $('bar-end').textContent = clock(legs[legs.length - 1].arr) + ' ' + T.barEnd;
 
-        $('state').textContent = stateLine(T, state);
+        $('state').textContent = nextStepLine(T, heroModel(T, state, now));
         const f = over ? { kind: 'over' } : freshness(lastOk, lastFail, pollable, now);
         const live = $('live');
         live.className = 'live chip-live ' + f.kind;

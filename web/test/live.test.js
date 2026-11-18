@@ -741,3 +741,70 @@ test('the app: opens by an intent link, else its store page', () => {
   assert.match(url, /;end$/);
   assert.equal(live.appIntentUrl('route', 'toName=X', null), 'intent://open/route?toName=X#Intent;scheme=nextstop;package=io.github.jnbp.nextstop;end');
 });
+
+test('the hero is the arrival (#218): counter, "Ankunft", delay colour and what the traveller does', () => {
+  const j = live.parseFragment(fragment(sample));
+  const legs = live.computeLegs(j, { 1: live.parseBvgTrip(bvgTrip) });
+  const T = live.pickTexts('de');
+  const at = (s, showing) => live.arrivalHero(T, live.tripState(legs, (T0 + s) * 1000), legs, (T0 + s) * 1000, showing);
+  // Arrival at +1260 (14:21, 3 min late by live data).
+  const before = at(-60);
+  assert.equal(before.kind, 'way');
+  assert.equal(before.counter, '22′');
+  assert.equal(before.title, 'Ankunft 14:21');
+  assert.equal(before.level, 'late');
+  assert.equal(before.delay, 3);
+  assert.equal(before.doing, 'noch nicht losgefahren');
+  assert.equal(at(100).doing, 'gerade: zu Fuß unterwegs');
+  assert.equal(at(400).doing, 'gerade: an der Haltestelle U Alexanderplatz');
+  assert.equal(at(945).doing, 'gerade: in der U8');
+  assert.equal(at(945).counter, '6′');
+  assert.equal(at(1240).counter, 'jetzt');
+  const arrived = at(1300);
+  assert.equal(arrived.kind, 'arrived');
+  assert.equal(arrived.counter, '');
+  assert.equal(arrived.doing, '');
+  assert.equal(live.arrivalHero(T, live.tripState(legs, (T0 + 1300) * 1000 + live.EXPIRY_MS), legs, (T0 + 1300) * 1000 + live.EXPIRY_MS).kind, 'expired');
+  // From an hour on the clock time, with a minute of hysteresis.
+  const early = at(-3600);
+  assert.equal(early.counter, '14:21');
+  assert.equal(early.clock, true);
+  assert.equal(at(1260 - 59 * 60, true).counter, '14:21');
+  assert.equal(at(1260 - 59 * 60, false).counter, '59′');
+  assert.equal(live.heroShowsClock(60, false), true);
+  assert.equal(live.heroShowsClock(59, true), true);
+  assert.equal(live.heroShowsClock(58, true), false);
+  // Without any real-time data the time is plain; with the delays known when shared it is coloured.
+  const plain = live.parseFragment(fragment(Object.assign({}, sample, { legs: [sample.legs[0],
+    Object.assign({}, sample.legs[1], { from: Object.assign({}, sample.legs[1].from, { dd: 0 }), to: Object.assign({}, sample.legs[1].to, { ad: 0 }) })] })));
+  const plainLegs = live.computeLegs(plain, {});
+  assert.equal(live.arrivalHero(T, live.tripState(plainLegs, (T0 + 700) * 1000), plainLegs, (T0 + 700) * 1000).level, 'plan');
+  const sharedLegs = live.computeLegs(j, {});
+  assert.equal(live.arrivalHero(T, live.tripState(sharedLegs, (T0 + 700) * 1000), sharedLegs, (T0 + 700) * 1000).level, 'late');
+  // The next step moves into the line under the hero.
+  const step = live.heroModel(T, live.tripState(legs, (T0 + 945) * 1000), (T0 + 945) * 1000);
+  assert.equal(live.nextStepLine(T, step), 'Als Nächstes: Aussteigen in U Hermannplatz · 14:21');
+  assert.equal(live.nextStepLine(T, live.heroModel(T, live.tripState(legs, (T0 + 1300) * 1000), (T0 + 1300) * 1000)), '');
+  assert.equal(live.arrivalHero(live.pickTexts('en'), live.tripState(legs, (T0 + 945) * 1000), legs, (T0 + 945) * 1000).title, 'Arrival 14:21');
+});
+
+test('what the traveller does: changing between rides, the bus by its product, the last walk', () => {
+  const T = live.pickTexts('de');
+  const p = (name, lat, lon, key, t) => ({ name, lat, lon, [key]: t });
+  const trip = {
+    legs: [
+      { p: 'bvg', trip: 'a', line: 'M48', from: p('A', 52.522, 13.402, 'dep', T0), to: p('B', 52.524, 13.405, 'arr', T0 + 600) },
+      { walk: true, from: p('B', 52.524, 13.405, 'dep', T0 + 600), to: p('C', 52.5245, 13.4055, 'arr', T0 + 780) },
+      { p: 'bvg', trip: 'b', line: 'S41', from: p('C', 52.5245, 13.4055, 'dep', T0 + 900), to: p('D', 52.53, 13.42, 'arr', T0 + 1500) },
+      { walk: true, from: p('D', 52.53, 13.42, 'dep', T0 + 1500), to: p('Ziel', 52.531, 13.421, 'arr', T0 + 1800) },
+    ],
+  };
+  const legs = live.computeLegs(live.parseFragment(fragment(trip)), {});
+  const doing = (s) => live.nowLine(T, live.tripState(legs, (T0 + s) * 1000), legs);
+  assert.equal(doing(300), 'gerade: im Bus M48');
+  assert.equal(doing(700), 'beim Umsteigen in C');
+  assert.equal(doing(850), 'beim Umsteigen in C');
+  assert.equal(doing(1200), 'gerade: in der S41');
+  assert.equal(doing(1600), 'gerade: zu Fuß auf dem letzten Stück');
+  assert.equal(doing(1900), '');
+});
