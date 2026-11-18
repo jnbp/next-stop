@@ -1,45 +1,57 @@
-/* Next Stop route page: a connection step by step, mobile first, dark mode by the system.
-   The shared design (colours, glass, badges, live dot, motion) is in ../shared/base.css. */
+/* Next Stop route page in the look of the app's companion: mobile first, dark mode by the system.
+   Phones: the map on top, the blue hero card over its lower edge, the steps in one white card,
+   the app buttons at the bottom. Wide screens: the map on the left, the column on the right.
+   The shared design (colours, cards, badges, live dot, counter, buttons) is in ../shared/base.css. */
 html, body { min-height: 100%; }
-body { padding: calc(10px + env(safe-area-inset-top)) 10px calc(24px + env(safe-area-inset-bottom)); }
+body { padding: 0 0 env(safe-area-inset-bottom); }
 
-/* ----- Layout: one column on phones (the map sticks above the steps); map on the right on wide screens ----- */
-.col { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
-.map-wrap {
-  position: sticky; top: calc(6px + env(safe-area-inset-top)); z-index: 3;
-  height: 34vh; min-height: 200px; max-height: 360px;
+/* ----- Layout ----- */
+.map-wrap { position: relative; height: 42vh; min-height: 240px; max-height: 380px; }
+.map { width: 100%; height: 100%; background: var(--page); }
+.col {
+  position: relative; z-index: 2; max-width: 580px; margin: -72px auto 0; padding: 0 12px;
+  display: flex; flex-direction: column; gap: 12px;
 }
-.map { width: 100%; height: 100%; border-radius: 22px; overflow: hidden; }
 body.no-map .map-wrap { display: none; }
+body.no-map .col { margin-top: calc(12px + env(safe-area-inset-top)); }
 @media (min-width: 900px) {
-  body { padding: 16px; }
-  .col { margin: 0; width: 440px; max-width: none; }
-  .map-wrap { position: fixed; top: 16px; right: 16px; bottom: 16px; left: 472px; height: auto; max-height: none; }
-  .map { border-radius: var(--radius); }
+  .map-wrap { position: fixed; top: 16px; left: 16px; bottom: 16px; right: 488px; height: auto; max-height: none; }
+  .map { border-radius: var(--radius); overflow: hidden; }
+  .col { width: 472px; max-width: none; margin: 0 0 0 auto; padding: 16px 16px 0; }
+  body.no-map .col { margin: 0 auto; }
 }
 
-/* ----- Header ----- */
-.top { border-radius: var(--radius); padding: 14px 18px 16px; animation: hero-in 0.75s var(--spring) both; }
+/* ----- Hero: the blue card with the lime duration ----- */
+.top {
+  border-radius: 30px; padding: 16px 18px 18px; color: #fff; background: var(--hero);
+  box-shadow: 0 12px 30px rgba(27, 79, 216, 0.28); animation: hero-in 0.75s var(--spring) both;
+}
 .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.top .brand { color: rgba(255, 255, 255, 0.85); }
+.top .chip-live { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.top .live #fresh { color: #fff; }
+.top .live.fresh .pulse { background: #7CF0A8; }
+.top .live.stale, .top .live.none { color: #FFD58A; }
 h1 { margin: 8px 0 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
-.dest { margin: 2px 0 0; font-size: 17px; font-weight: 600; color: var(--muted); }
-.when { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-top: 12px; }
-.day { font-size: 13px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--blue); }
-.times { font-size: 34px; line-height: 1.05; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-.lead { margin: 4px 0 0; min-height: 20px; font-size: 15px; font-weight: 700; color: var(--blue); }
+.origin { margin: 2px 0 0; font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.85); }
+.origin[hidden] { display: none; }
+.hero-row { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+.hero-row .counter { height: 72px; min-width: 84px; font-size: 32px; border-radius: 20px; }
+.hero-row .counter.long { font-size: 24px; }
+.when { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.times { font-size: 28px; line-height: 1.05; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.when-sub { font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, 0.85); }
+.day { font-weight: 800; }
+.lead { margin: 12px 0 0; min-height: 20px; font-size: 15px; font-weight: 800; color: var(--lime); }
+.lead:has(.countdown:empty) { display: none; }
 .countdown, .step-time { display: inline-grid; overflow: hidden; vertical-align: bottom; }
-.summary { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
-
-@media (prefers-color-scheme: dark) {
-  .day, .lead { color: var(--lime); }
-}
 
 /* ----- Banner: cancelled, missed, a change that breaks ----- */
 .banner {
-  border-radius: 20px; padding: 12px 16px; border-left: 5px solid var(--warn);
+  border-radius: 22px; padding: 14px 18px; box-shadow: inset 5px 0 0 var(--warn), var(--card-shadow);
   animation: hero-in 0.6s var(--spring) both;
 }
-.banner.bad { border-left-color: var(--bad); }
+.banner.bad { box-shadow: inset 5px 0 0 var(--bad), var(--card-shadow); }
 .banner[hidden] { display: none; }
 .banner p { margin: 0; font-size: 14px; line-height: 1.45; }
 .banner p span { display: block; }
@@ -47,22 +59,10 @@ h1 { margin: 8px 0 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em
 .banner.warn p span:first-child { color: var(--warn); }
 .banner.bad p span:first-child { color: var(--bad); }
 
-/* ----- Buttons ----- */
+/* ----- Buttons (the pill of ../shared/base.css) ----- */
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .actions:empty { display: none; }
-.button {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 16px;
-  border-radius: 20px; font-size: 14px; font-weight: 700; color: var(--blue); background: var(--chip);
-  text-decoration: none; transition: transform 0.2s var(--spring);
-}
-.button:hover { text-decoration: none; }
-.button:active { transform: scale(0.96); }
-.button svg { width: 16px; height: 16px; flex: none; }
-.button.primary { background: var(--blue); color: #fff; }
-@media (prefers-color-scheme: dark) {
-  .button { color: var(--lime); }
-  .button.primary { background: var(--lime); color: #16130A; }
-}
+.actions .button { min-height: 44px; font-size: 14px; }
 .more-btn { font-size: 13px; font-weight: 700; color: var(--blue); padding: 2px 0; }
 @media (prefers-color-scheme: dark) { .more-btn { color: var(--lime); } }
 
@@ -76,10 +76,10 @@ h1 { margin: 8px 0 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em
   --content-x: 48px; /* where the text of a step starts */
   --node-y: 22px;   /* the middle of the first row of a step */
   --node-fill: #fff;
-  list-style: none; margin: 0; padding: 8px 0; display: flex; flex-direction: column; gap: 0;
-  border-radius: 22px; background: var(--glass-strong); border: 1px solid var(--glass-line); box-shadow: var(--shadow);
+  --node-fill: var(--card);
+  list-style: none; margin: 0; padding: 10px 0; display: flex; flex-direction: column; gap: 0;
+  border-radius: var(--radius); background: var(--card); box-shadow: var(--card-shadow);
 }
-@media (prefers-color-scheme: dark) { .steps { --node-fill: #1a2133; } }
 .step {
   position: relative; margin: 0 6px; padding: 0 0 12px; border-radius: 16px;
   transition: opacity 0.3s, background-color 0.3s, box-shadow 0.3s;
@@ -135,7 +135,7 @@ h1 { margin: 8px 0 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em
   padding: 9px 12px 3px var(--content-x); text-align: left; border-radius: 16px;
 }
 .step-head:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
-.step-time { flex: none; min-width: 52px; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.step-time { flex: none; min-width: 54px; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .step-time.late { color: var(--warn); }
 .rolling > span { grid-area: 1 / 1; }
 .step-title {
@@ -156,14 +156,20 @@ h1 { margin: 8px 0 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em
 .step-body > p { margin: 4px 0 0; }
 .step-body > p[hidden] { display: none; }
 .where b, .off b { font-weight: 700; }
-.plat { font-weight: 700; white-space: nowrap; }
+.plat { font-weight: 800; white-space: nowrap; padding: 1px 8px; border-radius: 999px; background: var(--page); }
 .plat.changed { color: var(--warn); background: var(--warn-bg); padding: 1px 8px; border-radius: 999px; }
+/* Where to board: a tinted box with the text and the part of the train, as in the app. */
 .hint {
-  display: inline-flex !important; align-items: center; gap: 6px; padding: 4px 11px 4px 9px;
-  border-radius: 999px; background: var(--chip); font-size: 13px; font-weight: 700;
+  display: flex !important; align-items: center; gap: 8px; margin-top: 8px !important; padding: 10px 12px;
+  border-radius: 16px; background: var(--tint); color: var(--tint-ink); font-size: 14px; font-weight: 800;
 }
+.hint .hint-text { flex: 1 1 auto; min-width: 0; }
+.hint .cars i { background: rgba(27, 79, 216, 0.18); }
+.hint .cars i.on { background: var(--blue); }
+@media (prefers-color-scheme: dark) { .hint .cars i { background: rgba(255, 255, 255, 0.14); } .hint .cars i.on { background: var(--lime); } }
+.hint.estimated .hint-text { font-weight: 700; }
 .hint[hidden] { display: none !important; }
-.hint svg { width: 16px; height: 16px; flex: none; color: var(--blue); }
+.hint svg { width: 18px; height: 18px; flex: none; color: var(--blue); }
 @media (prefers-color-scheme: dark) { .hint svg { color: var(--lime); } }
 .info { color: var(--muted); font-size: 13px; }
 .between { list-style: none; margin: 6px 0 0; padding: 2px 0; font-size: 13px; }
@@ -192,15 +198,25 @@ h1 { margin: 8px 0 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em
 }
 .off .time { font-weight: 800; margin-right: 8px; font-variant-numeric: tabular-nums; }
 .off .time.late { color: var(--warn); }
-.mini { height: 150px; margin-top: 10px; border-radius: 16px; overflow: hidden; background: var(--track); }
+.mini { height: 150px; margin-top: 10px; border-radius: 18px; overflow: hidden; background: var(--page); }
 .mini .maplibregl-ctrl-attrib { font-size: 9px; }
 
 /* ----- Later connection ----- */
-.later { border-radius: 22px; padding: 14px 18px 16px; transition: box-shadow 0.4s; }
+.later { padding: 16px 18px 18px; transition: box-shadow 0.4s; }
 .later h2 { margin: 0; font-size: 15px; font-weight: 700; }
 .later-route { margin: 4px 0 0; font-size: 14px; color: var(--muted); }
-.later.flash { box-shadow: 0 0 0 3px var(--blue), var(--shadow); }
-@media (prefers-color-scheme: dark) { .later.flash { box-shadow: 0 0 0 3px var(--lime), var(--shadow); } }
+.later.flash { box-shadow: 0 0 0 3px var(--blue), var(--card-shadow); }
+@media (prefers-color-scheme: dark) { .later.flash { box-shadow: 0 0 0 3px var(--lime), var(--card-shadow); } }
+
+/* ----- The app: open this connection in it, or get it; stays at the bottom while scrolling ----- */
+.cta {
+  position: sticky; bottom: 0; z-index: 4; margin: 0 -12px; padding: 12px 12px calc(14px + env(safe-area-inset-bottom));
+  display: flex; gap: 8px; background: linear-gradient(rgba(242, 243, 245, 0), var(--page) 28%);
+}
+.cta .button { flex: 1 1 0; min-height: 54px; font-size: 16px; }
+.cta .button.store { background: var(--card); }
+@media (prefers-color-scheme: dark) { .cta { background: linear-gradient(rgba(14, 17, 23, 0), var(--page) 28%); } }
+@media (min-width: 900px) { .cta { margin: 0 -16px; padding: 12px 16px 16px; } }
 
 /* ----- Demo bar ----- */
 .demo-bar {
@@ -209,7 +225,8 @@ h1 { margin: 8px 0 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em
   font-size: 12px; color: var(--muted); white-space: nowrap;
 }
 .demo-bar[hidden] { display: none; }
-body.demo { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+body.demo .cta { bottom: calc(64px + env(safe-area-inset-bottom)); }
+body.demo { padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
 .demo-bar .button { min-height: 34px; }
 
 /* ----- Map markers ----- */
@@ -223,6 +240,6 @@ body.demo { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
 }
 
 /* ----- A broken link ----- */
-body.broken .map-wrap, body.broken .steps, body.broken .later, body.broken .when, body.broken .lead,
-body.broken .summary, body.broken .live { display: none; }
-body.broken .top { margin-top: 25vh; }
+body.broken .map-wrap, body.broken .steps, body.broken .later, body.broken .hero-row, body.broken .lead,
+body.broken .origin, body.broken .live { display: none; }
+body.broken .col { margin-top: 25vh; }

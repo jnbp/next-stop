@@ -141,3 +141,71 @@ a:hover { text-decoration: underline; }
   .live.fresh .pulse::after, .live.loading .pulse { animation: none; }
   .roll-in, .roll-out, .check.pop svg, .check.pop path { animation: none; }
 }
+
+/* ----- The look of the app's companion (both pages): white cards on a calm grey, a blue hero,
+   the lime counter, line badges in the colours of the operators ----- */
+:root {
+  --page: #F2F3F5;
+  --card: #FFFFFF;
+  --card-line: #EEF0F3;
+  --tint: #E8EEFC;
+  --tint-ink: #123A9E;
+  --hero: #1B4FD8;
+  --on-lime: #0E1A3A;
+  --card-shadow: 0 1px 2px rgba(15, 22, 38, 0.06), 0 6px 20px rgba(15, 22, 38, 0.07);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #0E1117;
+    --card: #1A1F2A;
+    --card-line: #262C38;
+    --tint: rgba(61, 106, 242, 0.18);
+    --tint-ink: #B4C6FF;
+    --hero: #1E46C2;
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+}
+html, body { background: var(--page); }
+.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--card-shadow); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* The live chip: a soft pill with the pulsing dot, "Live · vor 25 s". */
+.chip-live { height: 26px; padding: 0 10px; border-radius: 999px; background: var(--page); font-weight: 600; color: var(--ink); }
+.chip-live.stale, .chip-live.none { background: var(--warn-bg); }
+.live[hidden] { display: none; }
+
+/* The counter: lime, big digits, as in the app ("19′", "1:05 h"). */
+.counter {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 92px; height: 84px; padding: 0 14px; border-radius: 22px;
+  background: var(--lime); color: var(--on-lime);
+  font-size: 38px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1;
+}
+.counter.long { font-size: 26px; }
+.counter .check { width: 44px; height: 44px; margin: 0; }
+.counter .check circle { fill: var(--on-lime); }
+.counter .check path { stroke: var(--lime); }
+
+/* Buttons: a pill; primary blue, the store button outlined. No artwork of Google. */
+.button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 20px;
+  border-radius: 999px; font-size: 15px; font-weight: 800; color: var(--tint-ink); background: var(--tint);
+  text-decoration: none; transition: transform 0.2s var(--spring);
+}
+.button:hover { text-decoration: none; }
+.button:active { transform: scale(0.97); }
+.button[hidden] { display: none; }
+.button svg { width: 18px; height: 18px; flex: none; }
+.button.primary { background: var(--blue); color: #fff; }
+.button.store { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--card-line); }
+@media (prefers-color-scheme: dark) {
+  .button.primary { background: var(--lime); color: var(--on-lime); }
+}
+@media (prefers-reduced-motion: reduce) { .button { transition: none; } }
+
+/* Where to board: three parts of a train, the one to board in blue (front, middle, rear). */
+.cars { display: inline-flex; gap: 3px; flex: none; }
+.cars i { width: 18px; height: 10px; border-radius: 3px; background: var(--card-line); }
+.cars i:first-child { border-radius: 6px 3px 3px 6px; }
+.cars i.on { background: var(--blue); }
+@media (prefers-color-scheme: dark) { .cars i { background: #3a4252; } .cars i.on { background: var(--lime); } }

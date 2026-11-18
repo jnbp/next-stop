@@ -76,5 +76,42 @@
     return { el, icon, walkIcon, badge, rollTo };
   }
 
-  root.NextStopUi = { create };
+  // The map library, served by the site itself (shared/vendor, BSD-3-Clause, see
+  // shared/vendor/LICENSE-maplibre-gl.txt): no third party sees who opens a link.
+  const MAPLIBRE_SRC = '../shared/vendor/maplibre-gl.js';
+  let mapLibrary = null;
+
+  /**
+   * Loads MapLibre GL JS once, after the page logic has started, and calls [ready] when it is
+   * there, [failed] (optional) when it cannot be loaded: the page then works without its map.
+   */
+  function loadMapLibrary(ready, failed) {
+    if (typeof root.maplibregl !== 'undefined') {
+      ready();
+      return;
+    }
+    if (!mapLibrary) {
+      mapLibrary = new Promise((resolve) => {
+        const script = document.createElement('script');
+        script.src = MAPLIBRE_SRC;
+        script.async = true;
+        script.onload = () => resolve(typeof root.maplibregl !== 'undefined');
+        script.onerror = () => resolve(false);
+        document.head.append(script);
+      });
+    }
+    mapLibrary.then((ok) => {
+      if (!ok) {
+        if (failed) failed();
+        return;
+      }
+      try {
+        ready();
+      } catch (e) {
+        // A map that fails (no WebGL, say) leaves the rest of the page as it is.
+      }
+    });
+  }
+
+  root.NextStopUi = { create, loadMapLibrary };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

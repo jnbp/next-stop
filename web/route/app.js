@@ -16,8 +16,9 @@
 const core = typeof module !== 'undefined' && module.exports ? require('../shared/core.js') : window.NextStopCore;
 const {
   MAP_STYLE, fromBase64Url, toBase64Url, str, num, coord, parseBvgTrip, parseTransitousTrip,
-  decodePolyline, encodePolyline, cutPath, expectedTime, matchStop, tripUrl, lineColor, canonicalLine,
+  decodePolyline, encodePolyline, cutPath, cutPathBetween, expectedTime, matchStop, tripUrl, lineColor, canonicalLine,
   ROUTE_DRAW_MS, snakeFeatures, easeOutCubic, freshness, freshnessText, clock, delayText, delayLevel, LIMITS,
+  readLinkFragment, pickLanguage, minutesMark, appIntentUrl, boardParts, PLAY_URL,
 } = core;
 
 // Polling of the rides near now: every 30 s while the page is seen, every 2 min while hidden.
@@ -72,6 +73,30 @@ function parseRoute(hash) {
   } catch (e) {
     throw new Error('data');
   }
+  return parseRoutePayload(raw);
+}
+
+/**
+ * Reads the fragment of a route link of either format: v1 ("v=1&d=<base64url JSON>") or v2
+ * ("v=2&l=<language>&d=<base64url of the same JSON, raw-deflated>"). Resolves to the checked
+ * route with the sender's language as [lang]; rejects with an Error whose message is "version",
+ * "data" or "unsupported" (a browser that cannot unpack v2).
+ */
+async function readRoute(hash) {
+  const link = await readLinkFragment(hash);
+  let raw;
+  try {
+    raw = JSON.parse(link.text);
+  } catch (e) {
+    throw new Error('data');
+  }
+  const route = parseRoutePayload(raw);
+  route.lang = link.lang;
+  return route;
+}
+
+/** The route of a payload (the JSON of the route link), checked. */
+function parseRoutePayload(raw) {
   if (!raw || !Array.isArray(raw.legs) || raw.legs.length === 0 || raw.legs.length > LIMITS.legs) {
     throw new Error('data');
   }
@@ -190,8 +215,9 @@ function computeSteps(route, live) {
       dep = prev ? Math.max(leg.from.planned, prev.arr) : leg.from.planned;
       arr = dep + duration;
     } else if (data && data.stops && data.stops.length) {
-      const i = matchStop(data.stops, leg.from, null);
-      const j = i >= 0 ? matchStop(data.stops, leg.to, i) : -1;
+      // A ring line calls at a stop more than once: the calls at the times of the ride.
+      const i = matchStop(data.stops, leg.from, null, 'dep');
+      const j = i >= 0 ? matchStop(data.stops, leg.to, i, 'arr') : -1;
       if (i >= 0 && j > i) {
         const stops = data.stops.slice(i, j + 1);
         const first = stops[0];
@@ -209,7 +235,10 @@ function computeSteps(route, live) {
         if (!path) {
           const a = first.pos || leg.from.pos;
           const b = last.pos || leg.to.pos;
-          path = data.path && data.path.length > 1 ? cutPath(data.path, a, b) : stops.map((s) => s.pos).filter(Boolean);
+          // Cut between the very calls of the ride, each on its own pass of the way (a ring).
+          path = data.path && data.path.length > 1
+            ? cutPathBetween(data.path, data.stops, i, j) || cutPath(data.path, a, b)
+            : stops.map((s) => s.pos).filter(Boolean);
         }
       }
     }
@@ -367,8 +396,20 @@ function appSearchUrl(from, to, fallback) {
   if (from.pos) params.set('from', latLon(from.pos));
   params.set('toName', to.name);
   if (to.pos) params.set('to', latLon(to.pos));
-  return 'intent://open/route?' + params.toString() + '#Intent;scheme=nextstop;package=io.github.jnbp.nextstop;' +
-    (fallback ? 'S.browser_fallback_url=' + encodeURIComponent(fallback) + ';' : '') + 'end';
+  return appIntentUrl('route', params, fallback || null);
+}
+
+/**
+ * The hero of the page: the duration as the app writes it ("48′", "1:20 h") and where the first
+ * ride leaves ("ab S Hackescher Markt"; null when the route has no ride). A start that is an
+ * address stays out of it: only the stop of the first ride is named.
+ */
+function heroSummary(T, steps, status) {
+  const firstRide = steps.find((s) => !s.walk);
+  return {
+    duration: minutesMark((status.end - status.start) / 60000),
+    origin: firstRide ? T.from(firstRide.from.name) : null,
+  };
 }
 
 /* ---------- Texts ---------- */
@@ -526,8 +567,11 @@ const TEXTS = {
     demoForward: '+5 min',
     badLink: 'Dieser Link ist ungültig oder unvollständig.',
     badVersion: 'Dieser Link stammt aus einer neueren App-Version.',
+    badBrowser: 'Dieser Browser kann den Link nicht öffnen. Bitte aktualisiere ihn oder nimm einen anderen Browser.',
     destination: 'Ziel',
     start: 'Start',
+    openApp: 'In Next Stop öffnen',
+    getApp: 'Bei Google Play laden',
   },
   en: {
     lang: 'en',
@@ -605,13 +649,17 @@ const TEXTS = {
     demoForward: '+5 min',
     badLink: 'This link is invalid or incomplete.',
     badVersion: 'This link comes from a newer app version.',
+    badBrowser: 'This browser cannot open the link. Please update it or use another browser.',
     destination: 'Destination',
     start: 'Start',
+    openApp: 'Open in Next Stop',
+    getApp: 'Get it on Google Play',
   },
 };
 
-function pickTexts(language) {
-  return /^de\b/i.test(language || '') ? TEXTS.de : TEXTS.en;
+/** The texts for the browser [language], or the [sender]'s language for any but German and English. */
+function pickTexts(language, sender) {
+  return TEXTS[pickLanguage(language, sender)];
 }
 
 /**
@@ -636,9 +684,10 @@ function bannerModel(T, status) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    parseRoute, encodeRoute, routeFragment, computeSteps, routeStatus, stepStatus, realtimeKind, ridesToPoll,
+    parseRoute, readRoute, encodeRoute, routeFragment, computeSteps, routeStatus, stepStatus, realtimeKind, ridesToPoll,
     pollDelay, googleWalkUrl, transitousSearchUrl, appSearchUrl, platformText, spotText, exitText, entranceText,
-    boardText, durationText, metersText, dayText, countdownText, bannerModel, pickTexts, samePlatform, TEXTS,
+    boardText, durationText, metersText, dayText, countdownText, bannerModel, pickTexts, samePlatform, TEXTS, heroSummary,
+    boardParts, minutesMark, PLAY_URL,
     POLL_MS, REALTIME_WINDOW_MS, encodePolyline, toBase64Url, parseBvgTrip, parseTransitousTrip,
   };
 }
@@ -646,7 +695,8 @@ if (typeof module !== 'undefined' && module.exports) {
 /* ---------- Page ---------- */
 if (typeof document !== 'undefined') {
   (function page() {
-    const T = pickTexts(navigator.language);
+    // The recipient's language; the sender's ("l" in the link) only when it is neither German nor English.
+    const T = pickTexts(navigator.language, new URLSearchParams(location.hash.slice(1)).get('l'));
     document.documentElement.lang = T.lang;
     const $ = (id) => document.getElementById(id);
     const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -663,6 +713,9 @@ if (typeof document !== 'undefined') {
     $('oss-label').textContent = T.openSource;
     $('code-link').textContent = T.sourceCode;
     $('later-title').textContent = T.laterTitle;
+    $('title').textContent = T.title;
+    $('get-app-label').textContent = T.getApp;
+    $('get-app').href = PLAY_URL;
 
     let demo = null;
     const nowMs = () => (demo ? demo.now() : Date.now());
@@ -683,14 +736,13 @@ if (typeof document !== 'undefined') {
     window.addEventListener('hashchange', () => location.reload());
 
     function start(hash) {
-      let route;
-      try {
-        route = parseRoute(hash);
-      } catch (e) {
-        $('title').textContent = e.message === 'version' ? T.badVersion : T.badLink;
+      readRoute(hash).then(run, (e) => {
+        $('title').textContent = e.message === 'version' ? T.badVersion : e.message === 'unsupported' ? T.badBrowser : T.badLink;
         document.body.classList.add('broken');
-        return;
-      }
+      });
+    }
+
+    function run(route) {
       const live = {};
       const nextPoll = {};
       const failures = {};
@@ -703,12 +755,18 @@ if (typeof document !== 'undefined') {
       let selected = -1;
       const rows = [];
 
-      $('title').textContent = T.title;
-      $('dest').textContent = T.to(route.dest.name);
+      $('dest').textContent = route.dest.name;
       const origin = { name: route.legs[0].from.name, pos: route.legs[0].from.pos };
       const goal = { name: route.dest.name, pos: route.dest.pos };
       $('later-route').textContent = T.fromTo(origin.name, goal.name);
       fillLater($('later-actions'));
+      if (/Android/i.test(navigator.userAgent)) {
+        // The search of this connection in the app if it is installed; otherwise the store page.
+        const open = $('open-app');
+        open.textContent = T.openApp;
+        open.href = appSearchUrl(origin, goal, PLAY_URL);
+        open.hidden = false;
+      }
 
       /* ----- Links to a later connection ----- */
       function fillLater(box) {
@@ -875,9 +933,22 @@ if (typeof document !== 'undefined') {
 
       /* ----- Mini maps of the walks: made when seen, removed when gone, so few run at a time ----- */
       const minis = new Map(); // node -> map
-      const observer = typeof IntersectionObserver === 'function' && typeof maplibregl !== 'undefined'
-        ? new IntersectionObserver((entries) => entries.forEach((e) => (e.isIntersecting ? openMini(e.target) : closeMini(e.target))), { rootMargin: '120px' })
-        : null;
+      // Made once the map library is there (see startMinis); until then the mini maps wait hidden.
+      let observer = null;
+      const waitingMinis = [];
+      function watchMini(node) {
+        if (!observer) {
+          waitingMinis.push(node);
+          return;
+        }
+        node.hidden = false;
+        observer.observe(node);
+      }
+      function startMinis() {
+        if (observer || typeof IntersectionObserver !== 'function') return;
+        observer = new IntersectionObserver((entries) => entries.forEach((e) => (e.isIntersecting ? openMini(e.target) : closeMini(e.target))), { rootMargin: '120px' });
+        waitingMinis.splice(0).forEach(watchMini);
+      }
       function openMini(node) {
         if (minis.has(node)) return;
         const s = steps[Number(node.dataset.index)];
@@ -937,12 +1008,13 @@ if (typeof document !== 'undefined') {
             const target = entranceText(T, s.to.entrance) || spotText(T, s.to.spot);
             r.where = line('where', el('b', '', T.walkTo(s.to.name)), target ? ' · ' + target : '');
             body.append(r.where);
-            if (s.path.length >= 2 && observer) {
+            if (s.path.length >= 2 && typeof IntersectionObserver === 'function') {
               const mini = el('div', 'mini');
               mini.dataset.index = String(s.index);
               mini.setAttribute('aria-hidden', 'true');
+              mini.hidden = true;
               body.append(mini);
-              observer.observe(mini);
+              watchMini(mini);
             }
             const url = googleWalkUrl(s.path[0] || s.from.pos, s.path[s.path.length - 1] || s.to.pos, s.bike);
             if (url) {
@@ -1026,7 +1098,14 @@ if (typeof document !== 'undefined') {
           if (spot && spot !== platformText(T, s.depPlatform, s.product, s.line, s.from && s.from.pos)) r.where.append(' · ', spot);
           const hint = boardText(T, s.board);
           r.hint.hidden = !hint;
-          if (hint) r.hint.replaceChildren(icon(DOOR), document.createTextNode(hint));
+          if (hint) {
+            // Where to board, as the app shows it: the text and the part of the train.
+            const cars = el('span', 'cars');
+            cars.setAttribute('aria-hidden', 'true');
+            boardParts(s.board.part).forEach((on) => cars.append(el('i', on ? 'on' : '')));
+            r.hint.replaceChildren(icon(DOOR), el('span', 'hint-text', hint), cars);
+            r.hint.classList.toggle('estimated', !!s.board.estimated);
+          }
           const info = [s.stopCount != null ? T.stops(s.stopCount) : null, durationText(T, s.arr - s.dep)].filter(Boolean).join(' · ');
           r.info.replaceChildren(document.createTextNode(info));
           if (s.between.length) {
@@ -1069,7 +1148,12 @@ if (typeof document !== 'undefined') {
         } else if (status.phase === 'underway') lead = T.underway;
         else lead = T.arrivedAt(clock(status.end));
         rollTo($('countdown'), lead);
-        $('summary').textContent = durationText(T, status.end - status.start) + ' · ' + T.changes(status.changes);
+        $('summary').textContent = T.changes(status.changes);
+        const hero = heroSummary(T, steps, status);
+        $('duration').textContent = hero.duration || '';
+        $('duration').classList.toggle('long', (hero.duration || '').length > 4);
+        $('origin').textContent = hero.origin || '';
+        $('origin').hidden = !hero.origin;
         document.title = T.title + ' · ' + route.dest.name + ' · Next Stop';
         document.body.dataset.phase = status.phase;
 
@@ -1083,7 +1167,7 @@ if (typeof document !== 'undefined') {
           text = T.rtFar;
         }
         const liveEl = $('live');
-        liveEl.className = 'live ' + f.kind;
+        liveEl.className = 'live chip-live ' + f.kind;
         liveEl.hidden = status.phase === 'arrived';
         $('fresh').textContent = text;
 
@@ -1091,7 +1175,7 @@ if (typeof document !== 'undefined') {
         const box = $('banner');
         box.hidden = !banner.level;
         if (banner.level) {
-          box.className = 'banner glass ' + banner.level;
+          box.className = 'banner card ' + banner.level;
           const sig = banner.lines.join('|') + banner.later;
           if (box.dataset.sig !== sig) {
             box.dataset.sig = sig;
@@ -1203,8 +1287,12 @@ if (typeof document !== 'undefined') {
       }
 
       buildSteps();
-      initMap();
       render();
+      // The map library comes last: the steps work without it.
+      window.NextStopUi.loadMapLibrary(() => {
+        initMap();
+        startMinis();
+      }, () => document.body.classList.add('no-map'));
       poll();
       setInterval(() => {
         if (!document.hidden) render();

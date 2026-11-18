@@ -15,19 +15,105 @@ const BVG_URL = 'https://v6.bvg.transport.rest';
 const TRANSITOUS_URL = 'https://api.transitous.org';
 const MAP_STYLE = { light: 'https://tiles.openfreemap.org/styles/positron', dark: 'https://tiles.openfreemap.org/styles/dark' };
 
-/** Base64url (no padding) to a UTF-8 string. */
-function fromBase64Url(text) {
+/** Base64url (no padding) to bytes. */
+function base64UrlBytes(text) {
   let b64 = String(text).replace(/-/g, '+').replace(/_/g, '/');
   while (b64.length % 4) b64 += '=';
-  let bytes;
   if (typeof atob === 'function') {
     const binary = atob(b64);
-    bytes = new Uint8Array(binary.length);
+    const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  } else {
-    bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
+    return bytes;
   }
-  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  return Uint8Array.from(Buffer.from(b64, 'base64'));
+}
+
+/** Base64url (no padding) to a UTF-8 string. */
+function fromBase64Url(text) {
+  return new TextDecoder('utf-8', { fatal: true }).decode(base64UrlBytes(text));
+}
+
+// The most a compressed link may unpack to: far beyond any real journey, against made-up links.
+const MAX_LINK_BYTES = 256 * 1024;
+
+/**
+ * Raw deflate data (RFC 1951, as java.util.zip.Deflater(nowrap = true) writes it) unpacked to a
+ * UTF-8 string by the browser itself (DecompressionStream). Rejects with Error("unsupported") in
+ * browsers without it and with Error("data") for broken data.
+ */
+async function inflateRaw(bytes) {
+  let stream;
+  try {
+    stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  } catch (e) {
+    throw new Error('unsupported');
+  }
+  const reader = stream.getReader();
+  const parts = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_LINK_BYTES) throw new Error('too large');
+      parts.push(value);
+    }
+  } catch (e) {
+    reader.cancel().catch(() => {});
+    throw new Error('data');
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    all.set(part, at);
+    at += part.length;
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(all);
+  } catch (e) {
+    throw new Error('data');
+  }
+}
+
+/**
+ * The parts of a link fragment ("#v=2&l=de&d=..."): the format version, the sender's language
+ * ("l", null when absent) and the payload as text: v1 base64url JSON, v2 the same JSON
+ * raw-deflated before base64url. Rejects with Error("version"), Error("data") or
+ * Error("unsupported") (no DecompressionStream in this browser).
+ */
+async function readLinkFragment(hash) {
+  const params = new URLSearchParams(String(hash || '').replace(/^#/, ''));
+  const version = params.get('v');
+  const lang = /^[a-z]{2,3}$/.test(params.get('l') || '') ? params.get('l') : null;
+  const data = params.get('d') || '';
+  if (version === '1') {
+    try {
+      return { version: 1, lang, text: fromBase64Url(data) };
+    } catch (e) {
+      throw new Error('data');
+    }
+  }
+  if (version !== '2') throw new Error('version');
+  let bytes;
+  try {
+    bytes = base64UrlBytes(data);
+  } catch (e) {
+    throw new Error('data');
+  }
+  if (bytes.length === 0) throw new Error('data');
+  return { version: 2, lang, text: await inflateRaw(bytes) };
+}
+
+/**
+ * The texts of the page language: the recipient's browser language when it is German or
+ * English, else the sender's language from the link ([sender], "de" or "en"), else English.
+ */
+function pickLanguage(browser, sender) {
+  const own = String(browser || '').toLowerCase();
+  if (/^de\b/.test(own)) return 'de';
+  if (/^en\b/.test(own)) return 'en';
+  return sender === 'de' ? 'de' : 'en';
 }
 
 /** A UTF-8 string to base64url without padding (used by the tests; the app encodes in Kotlin). */
@@ -227,6 +313,16 @@ function distance(a, b) {
   return Math.sqrt(dLat * dLat + dLon * dLon) * 6371000;
 }
 
+// A way reaches a stop once it comes this close (metres), and has passed it once it runs this much
+// farther off than its nearest point there (as TripMatch in the app).
+const LOCK_METRES = 150;
+const LEAVE_METRES = 2000;
+
+/**
+ * The point of [path] from [from] on nearest to [point], on the first pass of the way that comes
+ * within LOCK_METRES: a ring line (S41/S42) passes the same place again a lap later, and the
+ * nearest point anywhere may lie on that later pass.
+ */
 function nearestIndex(path, point, from) {
   let best = -1;
   let bestDistance = Infinity;
@@ -235,6 +331,8 @@ function nearestIndex(path, point, from) {
     if (d < bestDistance) {
       bestDistance = d;
       best = i;
+    } else if (bestDistance <= LOCK_METRES && d > bestDistance + LEAVE_METRES) {
+      break;
     }
   }
   return best;
@@ -275,16 +373,64 @@ function expectedTime(stop, key) {
   return stop.dep !== null ? stop.dep : stop.pdep !== null ? stop.pdep : stop.arr;
 }
 
-/** Index of the stop of [live] that matches a place of the payload: by id, by name, by position. */
-function matchStop(stops, place, after) {
+/**
+ * The piece of [path] (the way of a whole run) from stop [i] to stop [j] of its [stops], each stop
+ * on its own pass of the way (see nearestIndex); null where the way does not tell them apart.
+ */
+function cutPathBetween(path, stops, i, j) {
+  if (!path || path.length < 2 || i < 0 || j <= i || j >= stops.length) return null;
+  let from = 0;
+  let a = -1;
+  for (let k = 0; k <= j; k++) {
+    if (stops[k].pos) from = Math.max(from, nearestIndex(path, stops[k].pos, from));
+    if (k === i) a = from;
+  }
+  if (from <= a) return null;
+  // From the stop itself to the stop itself, as cutPath.
+  return [stops[i].pos || path[a]].concat(path.slice(a + 1, from), [stops[j].pos || path[from]]);
+}
+
+/**
+ * Index of the stop of [live] that matches a place of the payload: by id, by name, by position.
+ * A ring line calls at one stop more than once: with [key] ('dep' or 'arr') the call nearest to
+ * the time of the place (planned, and as expected with its delay) wins, else the first.
+ */
+function matchStop(stops, place, after, key) {
   const start = after == null ? 0 : after + 1;
   const plainId = (id) => (id ? String(id).replace(/^tr:/, '') : null);
+  const planned = key && place.planned != null ? place.planned : null;
+  const expected = planned !== null ? planned + (place.delay || 0) * 60000 : null;
+  const gap = (stop) => {
+    const plan = key === 'arr' ? (stop.parr != null ? stop.parr : stop.pdep) : (stop.pdep != null ? stop.pdep : stop.parr);
+    const now = expectedTime(stop, key);
+    let g = Infinity;
+    if (plan != null) g = Math.abs(plan - planned);
+    if (now != null) g = Math.min(g, Math.abs(now - expected));
+    return g;
+  };
+  const pick = (same) => {
+    let best = -1;
+    let bestGap = Infinity;
+    for (let i = start; i < stops.length; i++) {
+      if (!same(stops[i])) continue;
+      if (planned === null) return i;
+      if (best < 0) best = i;
+      const g = gap(stops[i]);
+      if (g < bestGap) {
+        bestGap = g;
+        best = i;
+      }
+    }
+    return best;
+  };
   const id = plainId(place.id);
   if (id) {
-    for (let i = start; i < stops.length; i++) if (plainId(stops[i].id) === id) return i;
+    const byId = pick((stop) => plainId(stop.id) === id);
+    if (byId >= 0) return byId;
   }
   const name = (place.name || '').toLowerCase();
-  for (let i = start; i < stops.length; i++) if (stops[i].name.toLowerCase() === name) return i;
+  const byName = pick((stop) => stop.name.toLowerCase() === name);
+  if (byName >= 0) return byName;
   if (place.pos) {
     let best = -1;
     let bestD = 400; // metres
@@ -579,7 +725,93 @@ function encodePolyline(points, precision) {
   return out;
 }
 
+/* ---------- Look of both pages: counter, progress bar, swipe sheet, app links ---------- */
+
+/** The app on Google Play: the store page, for a button "Bei Google Play laden". */
+const APP_PACKAGE = 'io.github.jnbp.nextstop';
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=' + APP_PACKAGE;
+
+/**
+ * Minutes as the app writes them: "5′" below an hour, "1:20 h" from an hour on. Null for no
+ * value; negative values count as 0.
+ */
+function minutesMark(minutes) {
+  if (minutes == null || !Number.isFinite(minutes)) return null;
+  const m = Math.max(0, Math.round(minutes));
+  if (m < 60) return m + '′';
+  return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0') + ' h';
+}
+
+/**
+ * The counter of the hero card: the minutes until [t] (rounded up, like a departure board), or
+ * [nowText] in the last 45 s; empty once [t] has passed.
+ */
+function counterText(t, now, nowText) {
+  if (t == null || now >= t) return '';
+  if (t - now < 45000) return nowText;
+  return minutesMark(Math.ceil((t - now) / 60000));
+}
+
+/**
+ * The bar of a whole trip in pieces, one per leg: where each starts and how wide it is (both
+ * 0..1 of the time from the first departure to the last arrival), its colour and whether it is a
+ * walk. [legs]: [{ dep, arr, color, walk }] in order. A gap between legs (a wait) belongs to no
+ * piece; a leg of no length still gets a sliver so it stays visible.
+ */
+function progressSegments(legs) {
+  if (!legs || !legs.length) return [];
+  const start = legs[0].dep;
+  const end = legs[legs.length - 1].arr;
+  const span = end - start;
+  const f = (t) => (span > 0 ? Math.max(0, Math.min(1, (t - start) / span)) : 0);
+  return legs.map((l) => {
+    const left = f(l.dep);
+    const width = Math.max(0.004, f(l.arr) - left);
+    return { left, width: Math.min(width, 1 - left), color: l.walk ? null : l.color || null, walk: !!l.walk };
+  });
+}
+
+/**
+ * Where a swipe sheet comes to rest after a drag: 0 (open) or [closed] (the offset of its
+ * collapsed position, in px from the top of the open sheet). [offset] is where the drag let go,
+ * [velocity] its speed in px per ms (down positive): a flick decides, otherwise the nearer end.
+ */
+function sheetRest(offset, velocity, closed) {
+  if (!(closed > 0)) return 0;
+  if (velocity > 0.35) return closed;
+  if (velocity < -0.35) return 0;
+  return offset > closed / 2 ? closed : 0;
+}
+
+/** An offset of a sheet held within 0..[closed], with a soft give beyond both ends. */
+function sheetClamp(offset, closed) {
+  if (offset < 0) return offset / 3;
+  if (offset > closed) return closed + (offset - closed) / 3;
+  return offset;
+}
+
+/**
+ * An Android intent link that opens the app at nextstop://open/[path]?[params] and, when the app
+ * is not installed, [fallback] in the browser (the store page by default).
+ */
+function appIntentUrl(path, params, fallback) {
+  const query = params && String(params) ? '?' + String(params) : '';
+  const back = fallback === undefined ? PLAY_URL : fallback;
+  return 'intent://open' + (path ? '/' + path : '') + query + '#Intent;scheme=nextstop;package=' + APP_PACKAGE + ';' +
+    (back ? 'S.browser_fallback_url=' + encodeURIComponent(back) + ';' : '') + 'end';
+}
+
+/** Which of the three parts of a train to board ('front', 'middle', 'rear'), as three flags front to rear. */
+function boardParts(part) {
+  return ['front', 'middle', 'rear'].map((p) => p === part);
+}
+
 const api = {
+  base64UrlBytes,
+  inflateRaw,
+  readLinkFragment,
+  pickLanguage,
+  MAX_LINK_BYTES,
   BVG_URL,
   TRANSITOUS_URL,
   MAP_STYLE,
@@ -598,6 +830,7 @@ const api = {
   nearestIndex,
   along,
   cutPath,
+  cutPathBetween,
   expectedTime,
   matchStop,
   tripUrl,
@@ -626,6 +859,15 @@ const api = {
   delayLevel,
   encodePolyline,
   LIMITS,
+  APP_PACKAGE,
+  PLAY_URL,
+  minutesMark,
+  counterText,
+  progressSegments,
+  sheetRest,
+  sheetClamp,
+  appIntentUrl,
+  boardParts,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.NextStopCore = api;

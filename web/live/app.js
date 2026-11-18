@@ -19,9 +19,10 @@
 const core = typeof module !== 'undefined' && module.exports ? require('../shared/core.js') : window.NextStopCore;
 const {
   MAP_STYLE, fromBase64Url, toBase64Url, str, num, coord, ms, parseBvgTrip, decodePolyline,
-  parseTransitousTrip, distance, along, cutPath, expectedTime, matchStop, tripUrl, guessProduct,
+  parseTransitousTrip, distance, along, cutPath, cutPathBetween, expectedTime, matchStop, tripUrl, guessProduct,
   canonicalLine, lineColor, inkOn, ROUTE_DRAW_MS, textNumber, rollsUp, lineLength, snakeFeatures, easeOutCubic,
-  ageText, freshness, freshnessText, clock, delayText, delayLevel,
+  ageText, freshness, freshnessText, clock, delayText, delayLevel, readLinkFragment, pickLanguage,
+  counterText, progressSegments, sheetRest, sheetClamp, appIntentUrl, PLAY_URL,
 } = core;
 
 // Polling of each running ride: every 20 s while the page is seen, every 60 s while it is hidden.
@@ -50,8 +51,8 @@ function readPlace(raw, timeKey, delayKey) {
 }
 
 /**
- * Reads the fragment of the link ("v=1&d=..."). Returns the checked journey, or throws an
- * Error whose message is one of "version", "data".
+ * Reads the fragment of a v1 link ("v=1&d=..."). Returns the checked journey, or throws an
+ * Error whose message is one of "version", "data". Links of format v2 need readFragment.
  */
 function parseFragment(hash) {
   const params = new URLSearchParams(String(hash || '').replace(/^#/, ''));
@@ -62,6 +63,31 @@ function parseFragment(hash) {
   } catch (e) {
     throw new Error('data');
   }
+  return parsePayload(raw);
+}
+
+/**
+ * Reads the fragment of a link of either format: v1 ("v=1&d=<base64url JSON>") or v2
+ * ("v=2&l=<language>&d=<base64url of the raw-deflated compact JSON>", see expandLive). Resolves
+ * to the checked journey with the sender's language as [lang]; rejects with an Error whose
+ * message is "version", "data" or "unsupported" (a browser that cannot unpack v2).
+ */
+async function readFragment(hash) {
+  const link = await readLinkFragment(hash);
+  let raw;
+  try {
+    raw = JSON.parse(link.text);
+    if (link.version === 2) raw = expandLive(raw);
+  } catch (e) {
+    throw new Error('data');
+  }
+  const journey = parsePayload(raw);
+  journey.lang = link.lang;
+  return journey;
+}
+
+/** The journey of a v1 payload (or a v2 payload made v1 by expandLive), checked. */
+function parsePayload(raw) {
   if (!raw || !Array.isArray(raw.legs) || raw.legs.length === 0 || raw.legs.length > LIMITS.legs) {
     throw new Error('data');
   }
@@ -86,9 +112,173 @@ function parseFragment(hash) {
   return {
     name: str(raw.n, 40),
     created: num(raw.t) !== null ? raw.t * 1000 : null,
-    dest: { name: str(dest.name) || last.to.name, pos: coord(dest.lat, dest.lon) || last.to.pos },
+    dest: {
+      name: str(dest.name) || last.to.name,
+      pos: coord(dest.lat, dest.lon) || last.to.pos,
+      // A saved place of the sender: "h" home, "w" work (the page then says "nach Hause").
+      kind: dest.k === 'h' || dest.k === 'w' ? dest.k : null,
+    },
     legs,
   };
+}
+
+/*
+ * Format v2 of the live link (written by liveLinkCompactJson in JourneyShare.kt), before
+ * deflate: {n, b, c, s, r, o, e, z, k}
+ *   n  first name of the sender (optional)
+ *   b  planned departure of the first leg, epoch seconds; every other time is seconds after b
+ *   c  when the link was made, seconds after b
+ *   s  the stops, each once: [name] | [name, id] | [name, id or null, lat, lon] (4 decimals)
+ *   r  the legs: a ride {f, t, d, a, dd, ad, p, i, l, r, w}: from and to as indexes into s,
+ *      planned departure and arrival, delays (min), provider "bvg"/"tr", trip id, line,
+ *      direction, and w: [dep, arr] of the walk before it (from the stop where the leg before it
+ *      ends, or for the first leg from the start); a walk that is no such link {k:1, f, t, d, a}
+ *   o  name of the start of the first walk (only a stop; never an address or a position)
+ *   e  [dep, arr] of the walk after the last leg, to the destination
+ *   z  the destination: [name, lat, lon]
+ *   k  "h" when the destination is the sender's home, "w" their work
+ */
+
+/** A v2 payload as the v1 payload it stands for; throws on anything malformed. */
+function expandLive(c) {
+  if (!c || typeof c !== 'object' || !Array.isArray(c.s) || !Array.isArray(c.r)) throw new Error('data');
+  const base = num(c.b);
+  if (base === null || c.r.length === 0 || c.r.length > LIMITS.legs || c.s.length > 2 * LIMITS.legs + 2) throw new Error('data');
+  const at = (offset) => {
+    if (num(offset) === null) throw new Error('data');
+    return base + offset;
+  };
+  const stop = (index) => {
+    const s = Number.isInteger(index) ? c.s[index] : null;
+    if (!Array.isArray(s) || typeof s[0] !== 'string') throw new Error('data');
+    return { name: s[0], id: s[1] || undefined, lat: s[2], lon: s[3] };
+  };
+  const place = (index, timeKey, time, delayKey, delay, name) => {
+    const p = stop(index);
+    const out = { name: name || p.name, id: p.id, lat: p.lat, lon: p.lon };
+    out[timeKey] = at(time);
+    if (delay) out[delayKey] = delay;
+    return out;
+  };
+  const span = (pair) => {
+    if (!Array.isArray(pair) || pair.length !== 2) throw new Error('data');
+    return pair;
+  };
+  const legs = [];
+  let lastTo = null; // the stop index where the leg before ends
+  c.r.forEach((r) => {
+    if (!r || typeof r !== 'object') throw new Error('data');
+    if (r.k === 1) {
+      legs.push({ walk: true, from: place(r.f, 'dep', r.d), to: place(r.t, 'arr', r.a) });
+      lastTo = r.t;
+      return;
+    }
+    if (r.w != null) {
+      const [d, a] = span(r.w);
+      const origin = lastTo === null;
+      const fromStop = origin ? r.f : lastTo;
+      legs.push({
+        walk: true,
+        from: place(fromStop, 'dep', d, null, 0, origin ? str(c.o) : null),
+        to: place(r.f, 'arr', a),
+      });
+    }
+    legs.push({
+      p: r.p, trip: r.i, line: r.l, dir: r.r,
+      from: place(r.f, 'dep', r.d, 'dd', r.dd),
+      to: place(r.t, 'arr', r.a, 'ad', r.ad),
+    });
+    lastTo = r.t;
+  });
+  const z = Array.isArray(c.z) ? c.z : [];
+  const dest = { name: typeof z[0] === 'string' ? z[0] : null, lat: z[1], lon: z[2], k: c.k };
+  if (c.e != null) {
+    const [d, a] = span(c.e);
+    const from = place(lastTo, 'dep', d);
+    const to = { name: dest.name || from.name, arr: at(a) };
+    if (num(dest.lat) !== null && num(dest.lon) !== null) {
+      to.lat = dest.lat;
+      to.lon = dest.lon;
+    } else {
+      to.lat = from.lat;
+      to.lon = from.lon;
+    }
+    legs.push({ walk: true, from, to });
+  }
+  return { n: c.n, t: num(c.c) !== null ? base + c.c : null, legs, dest };
+}
+
+/** A coordinate as the app writes it in v2: 4 decimals (about 10 m). */
+function round4(value) {
+  return Math.round(value * 1e4) / 1e4;
+}
+
+/**
+ * The v2 JSON of a v1 payload, written exactly as the app writes it (liveLinkCompactJson in
+ * JourneyShare.kt), for the tests and the demo. [extra]: o (start name of the first walk), k.
+ */
+function encodeLive(raw, extra) {
+  const opts = extra || {};
+  const stops = [];
+  const keys = new Map();
+  const stopIndex = (p) => {
+    const key = p.id ? 'i:' + p.id + '|' + p.name : 'n:' + p.name + '|' + (p.lat != null ? round4(p.lat) + ',' + round4(p.lon) : '');
+    if (keys.has(key)) return keys.get(key);
+    const entry = [p.name];
+    if (p.lat != null && p.lon != null) entry.push(p.id || null, round4(p.lat), round4(p.lon));
+    else if (p.id) entry.push(p.id);
+    stops.push(entry);
+    keys.set(key, stops.length - 1);
+    return stops.length - 1;
+  };
+  const legs = raw.legs;
+  const base = legs[0].from.dep;
+  const out = { };
+  if (raw.n) out.n = raw.n;
+  out.b = base;
+  out.c = raw.t - base;
+  const rides = [];
+  let walkBefore = null;
+  let end = null;
+  // The same stop: the same id where both have one, else the same name.
+  const same = (a, b) => (a.id && b.id ? a.id === b.id : a.name === b.name);
+  legs.forEach((l, i) => {
+    if (l.walk) {
+      const next = legs[i + 1];
+      const prev = legs[i - 1];
+      const linksFrom = i === 0 || (prev && !prev.walk && same(prev.to, l.from));
+      if (next && !next.walk && linksFrom && same(l.to, next.from)) {
+        walkBefore = [l.from.dep - base, l.to.arr - base];
+        return;
+      }
+      if (!next && prev && !prev.walk && same(prev.to, l.from)) {
+        end = [l.from.dep - base, l.to.arr - base];
+        return;
+      }
+      // The start of the trip is never in the link: a first walk starts at the stop it leads to.
+      rides.push({ k: 1, f: stopIndex(i === 0 ? l.to : l.from), t: stopIndex(l.to), d: l.from.dep - base, a: l.to.arr - base });
+      return;
+    }
+    const r = { f: stopIndex(l.from), t: stopIndex(l.to), d: l.from.dep - base, a: l.to.arr - base };
+    if (l.from.dd) r.dd = l.from.dd;
+    if (l.to.ad) r.ad = l.to.ad;
+    if (l.p) r.p = l.p;
+    if (l.trip) r.i = l.trip;
+    if (l.line) r.l = l.line;
+    if (l.dir) r.r = l.dir;
+    if (walkBefore) r.w = walkBefore;
+    walkBefore = null;
+    rides.push(r);
+  });
+  out.s = stops;
+  out.r = rides;
+  if (opts.o) out.o = opts.o;
+  if (end) out.e = end;
+  const z = [raw.dest.name];
+  if (raw.dest.lat != null && raw.dest.lon != null) z.push(round4(raw.dest.lat), round4(raw.dest.lon));
+  out.z = z;
+  if (opts.k) out.k = opts.k;
+  return JSON.stringify(out);
 }
 
 /* ---------- Times and state ---------- */
@@ -110,6 +300,8 @@ function computeLegs(journey, live) {
     let path = null;
     let liveOk = false;
     let cancelled = false;
+    let depPlatform = null;
+    let arrPlatform = null;
     if (leg.walk) {
       const prev = out[out.length - 1];
       if (prev) {
@@ -120,17 +312,23 @@ function computeLegs(journey, live) {
         arr = dep + plannedDuration;
       }
     } else if (data && data.stops && data.stops.length) {
-      const i = matchStop(data.stops, leg.from, null);
-      const j = i >= 0 ? matchStop(data.stops, leg.to, i) : -1;
+      // A ring line calls at a stop more than once: the calls at the times of the ride.
+      const i = matchStop(data.stops, leg.from, null, 'dep');
+      const j = i >= 0 ? matchStop(data.stops, leg.to, i, 'arr') : -1;
       if (i >= 0 && j > i) {
         stops = data.stops.slice(i, j + 1);
         dep = expectedTime(stops[0], 'dep');
         arr = expectedTime(stops[stops.length - 1], 'arr');
         liveOk = true;
         cancelled = data.cancelled || stops[0].cancelled || stops[stops.length - 1].cancelled;
+        depPlatform = stops[0].depPlatform || null;
+        arrPlatform = stops[stops.length - 1].arrPlatform || null;
         const a = stops[0].pos || leg.from.pos;
         const b = stops[stops.length - 1].pos || leg.to.pos;
-        path = data.path && data.path.length > 1 ? cutPath(data.path, a, b) : stops.map((s) => s.pos).filter(Boolean);
+        // Cut between the very calls of the ride, each on its own pass of the way (a ring).
+        path = data.path && data.path.length > 1
+          ? cutPathBetween(data.path, data.stops, i, j) || cutPath(data.path, a, b)
+          : stops.map((s) => s.pos).filter(Boolean);
       }
     }
     if (!path || path.length < 2) path = [leg.from.pos, leg.to.pos].filter(Boolean);
@@ -156,6 +354,8 @@ function computeLegs(journey, live) {
       current: data && data.current ? data.current : null,
       live: liveOk,
       cancelled,
+      depPlatform,
+      arrPlatform,
     });
   });
   return out;
@@ -366,6 +566,57 @@ function stateLine(T, state) {
   }
 }
 
+const RAIL = ['subway', 'suburban', 'regional', 'express'];
+
+/** "Gleis 1" for rail, "Steig 3" for bus and tram (guessed from the line and place), other labels as they are. */
+function platformLabel(T, platform, line, pos) {
+  if (!platform) return null;
+  if (!/^\d/.test(platform)) return platform;
+  const p = guessProduct(line, pos);
+  return p && RAIL.indexOf(p) < 0 ? T.bay(platform) : T.track(platform);
+}
+
+/**
+ * The hero of the page, the next thing that happens, as the app's companion shows it:
+ * { kind, counter ("19′", "1:05 h", "jetzt" or ''), title ("Aussteigen in Flughafen BER"),
+ *   time (epoch ms of that moment), delay (min) and platform ("Gleis 1" or null) }.
+ * kind: 'before', 'off' (riding: get off), 'walk', 'board' (waiting for the next ride),
+ * 'arrived' or 'expired'.
+ */
+function heroModel(T, state, now) {
+  const leg = state.leg;
+  switch (state.phase) {
+    case 'before':
+      return {
+        kind: 'before', counter: counterText(leg.dep, now, T.now), time: leg.dep,
+        title: leg.walk ? T.heroWalkStart : T.heroBoard(leg.line || '?', leg.from.name),
+        delay: leg.walk ? 0 : leg.delayDep, platform: leg.walk ? null : platformLabel(T, leg.depPlatform, leg.line, leg.from.pos),
+      };
+    case 'ride':
+      return {
+        kind: 'off', counter: counterText(leg.arr, now, T.now), time: leg.arr, title: T.heroOff(leg.to.name),
+        delay: leg.delayArr, platform: platformLabel(T, leg.arrPlatform, leg.line, leg.to.pos),
+      };
+    case 'walk':
+      return {
+        kind: 'walk', counter: counterText(leg.arr, now, T.now), time: leg.arr,
+        title: T.heroWalk(state.nextLeg && !state.nextLeg.walk ? state.nextLeg.from.name : leg.to.name), delay: 0, platform: null,
+      };
+    case 'wait':
+      if (leg.walk) {
+        return { kind: 'walk', counter: counterText(leg.arr, now, T.now), time: leg.arr, title: T.heroWalk(leg.to.name), delay: 0, platform: null };
+      }
+      return {
+        kind: 'board', counter: counterText(leg.dep, now, T.now), time: leg.dep, title: T.heroBoard(leg.line || '?', leg.from.name),
+        delay: leg.delayDep, platform: platformLabel(T, leg.depPlatform, leg.line, leg.from.pos),
+      };
+    case 'arrived':
+      return { kind: 'arrived', counter: '', time: state.arr, title: T.heroArrived, delay: state.delay, platform: null };
+    default:
+      return { kind: 'expired', counter: '', time: state.arr, title: T.endedHead, delay: 0, platform: null };
+  }
+}
+
 /**
  * The timeline: one entry per leg with its status ('done', 'current', 'upcoming'), the stops
  * between board and alight stop (each 'passed', 'at', 'next' or 'upcoming') and, for the
@@ -423,6 +674,10 @@ const TEXTS = {
     onWay: (n, d) => (n ? n + ' ist unterwegs nach ' + d : 'Unterwegs nach ' + d),
     arrivedHead: (n, d) => (n ? n + ' ist in ' + d + ' angekommen' : 'Angekommen in ' + d),
     endedHead: 'Fahrt beendet',
+    onWayHome: (n) => (n ? n + ' ist auf dem Weg nach Hause' : 'Auf dem Weg nach Hause'),
+    arrivedHome: (n) => (n ? n + ' ist zu Hause angekommen' : 'Zu Hause angekommen'),
+    onWayWork: (n) => (n ? n + ' ist auf dem Weg zur Arbeit' : 'Auf dem Weg zur Arbeit'),
+    arrivedWork: (n) => (n ? n + ' ist bei der Arbeit angekommen' : 'Bei der Arbeit angekommen'),
     eta: 'Ankunft',
     onTime: 'pünktlich',
     late: (m) => '+' + m + ' min',
@@ -445,7 +700,7 @@ const TEXTS = {
     agoS: (s) => 'vor ' + s + ' s',
     agoM: (m) => 'vor ' + m + ' min',
     agoH: (h) => 'vor ' + h + ' h',
-    updated: (age) => 'aktualisiert ' + age,
+    updated: (age) => 'Live · ' + age,
     stale: (m) => 'Keine Live-Daten seit ' + m + ' min',
     noLive: 'Keine Live-Daten – Fahrplanzeiten',
     loading: 'Lädt Live-Daten …',
@@ -466,14 +721,35 @@ const TEXTS = {
     demo: 'Demo mit einer erfundenen Fahrt im Zeitraffer',
     badLink: 'Dieser Link ist ungültig oder unvollständig.',
     badVersion: 'Dieser Link stammt aus einer neueren App-Version.',
+    badBrowser: 'Dieser Browser kann den Link nicht öffnen. Bitte aktualisiere ihn oder nimm einen anderen Browser.',
     vehicle: 'Fahrzeug (geschätzt)',
     destination: 'Ziel',
+    heroOff: (s) => 'Aussteigen in ' + s,
+    heroWalk: (s) => 'Zu Fuß zu ' + s,
+    heroWalkStart: 'Los geht\'s zu Fuß',
+    heroBoard: (line, s) => 'Einsteigen in ' + line + ' · ' + s,
+    heroArrived: 'Angekommen',
+    track: (p) => 'Gleis ' + p,
+    bay: (p) => 'Steig ' + p,
+    arrivesAt: (t) => 'an ' + t,
+    barStart: 'Start',
+    barNow: (t) => 'jetzt ' + t,
+    barEnd: 'Ziel',
+    openApp: 'In Next Stop öffnen',
+    getApp: 'Bei Google Play laden',
+    appLine: 'Next Stop: Fahrten planen, live verfolgen und teilen. Open Source, ohne Tracking.',
+    nextStopBox: (s) => 'Nächster Halt: ' + s,
+    linkExpired: 'Link abgelaufen',
   },
   en: {
     lang: 'en',
     onWay: (n, d) => (n ? n + ' is on the way to ' + d : 'On the way to ' + d),
     arrivedHead: (n, d) => (n ? n + ' has arrived at ' + d : 'Arrived at ' + d),
     endedHead: 'Trip over',
+    onWayHome: (n) => (n ? n + ' is on the way home' : 'On the way home'),
+    arrivedHome: (n) => (n ? n + ' has arrived home' : 'Arrived home'),
+    onWayWork: (n) => (n ? n + ' is on the way to work' : 'On the way to work'),
+    arrivedWork: (n) => (n ? n + ' has arrived at work' : 'Arrived at work'),
     eta: 'Arrival',
     onTime: 'on time',
     late: (m) => '+' + m + ' min',
@@ -496,7 +772,7 @@ const TEXTS = {
     agoS: (s) => s + ' s ago',
     agoM: (m) => m + ' min ago',
     agoH: (h) => h + ' h ago',
-    updated: (age) => 'updated ' + age,
+    updated: (age) => 'Live · ' + age,
     stale: (m) => 'No live data for ' + m + ' min',
     noLive: 'No live data – timetable times',
     loading: 'Loading live data …',
@@ -517,23 +793,51 @@ const TEXTS = {
     demo: 'Demo with a made-up trip in fast motion',
     badLink: 'This link is invalid or incomplete.',
     badVersion: 'This link comes from a newer app version.',
+    badBrowser: 'This browser cannot open the link. Please update it or use another browser.',
     vehicle: 'Vehicle (estimated)',
     destination: 'Destination',
+    heroOff: (s) => 'Get off at ' + s,
+    heroWalk: (s) => 'Walking to ' + s,
+    heroWalkStart: 'Off on foot',
+    heroBoard: (line, s) => 'Board the ' + line + ' · ' + s,
+    heroArrived: 'Arrived',
+    track: (p) => 'Platform ' + p,
+    bay: (p) => 'Bay ' + p,
+    arrivesAt: (t) => 'arr. ' + t,
+    barStart: 'Start',
+    barNow: (t) => 'now ' + t,
+    barEnd: 'End',
+    openApp: 'Open in Next Stop',
+    getApp: 'Get it on Google Play',
+    appLine: 'Next Stop: plan, follow and share trips. Open source, no tracking.',
+    nextStopBox: (s) => 'Next stop: ' + s,
+    linkExpired: 'Link expired',
   },
 };
 
-function pickTexts(language) {
-  return /^de\b/i.test(language || '') ? TEXTS.de : TEXTS.en;
+/** The texts for the browser [language], or the [sender]'s language for any but German and English. */
+function pickTexts(language, sender) {
+  return TEXTS[pickLanguage(language, sender)];
+}
+
+/** The headline of the hero card: on the way, arrived or over; "nach Hause" for the sender's home. */
+function headline(T, phase, name, dest) {
+  if (phase === 'expired') return T.endedHead;
+  const arrived = phase === 'arrived';
+  if (dest.kind === 'h') return arrived ? T.arrivedHome(name) : T.onWayHome(name);
+  if (dest.kind === 'w') return arrived ? T.arrivedWork(name) : T.onWayWork(name);
+  return arrived ? T.arrivedHead(name, dest.name) : T.onWay(name, dest.name);
 }
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    fromBase64Url, toBase64Url, parseFragment, parseBvgTrip, parseTransitousTrip, decodePolyline,
-    computeLegs, tripState, ridePosition, legsToPoll, tripUrl, stateLine, delayText, delayLevel, pickTexts,
+    fromBase64Url, toBase64Url, parseFragment, readFragment, expandLive, encodeLive, parseBvgTrip, parseTransitousTrip, decodePolyline,
+    computeLegs, tripState, ridePosition, legsToPoll, tripUrl, stateLine, delayText, delayLevel, pickTexts, headline,
     cutPath, along, clock, tripProgress, splitPathAt, easeToward, countdownText, ageText, freshness,
     freshnessText, pollDelay, timelineModel, lineColor, inkOn, guessProduct, distance, EXPIRY_MS, POLL_MS,
     textNumber, rollsUp, lineLength, snakeFeatures, easeOutCubic, confettiPieces, confettiAt, CONFETTI_SECONDS,
-    CONFETTI_COUNT, ROUTE_DRAW_MS,
+    CONFETTI_COUNT, ROUTE_DRAW_MS, heroModel, platformLabel, progressSegments, counterText, sheetRest, sheetClamp,
+    appIntentUrl, PLAY_URL,
   };
 }
 
@@ -541,7 +845,8 @@ if (typeof module !== 'undefined' && module.exports) {
 
 if (typeof document !== 'undefined') {
   (function page() {
-    const T = pickTexts(navigator.language);
+    // The recipient's language; the sender's ("l" in the link) only when it is neither German nor English.
+    const T = pickTexts(navigator.language, new URLSearchParams(location.hash.slice(1)).get('l'));
     document.documentElement.lang = T.lang;
     const $ = (id) => document.getElementById(id);
     const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -555,7 +860,19 @@ if (typeof document !== 'undefined') {
     $('oss-label').textContent = T.openSource;
     $('code-link').textContent = T.sourceCode;
     $('follow-label').textContent = T.follow;
+    $('follow').title = T.follow;
     $('grabber').setAttribute('aria-label', T.expand);
+    $('app-line').textContent = T.appLine;
+    $('get-app-label').textContent = T.getApp;
+    $('get-app').href = PLAY_URL;
+    if (/Android/i.test(navigator.userAgent)) {
+      // The app opens if it is installed; otherwise the store page.
+      const open = $('open-app');
+      open.textContent = T.openApp;
+      open.href = appIntentUrl('', null);
+      open.hidden = false;
+      $('get-app').classList.add('quiet');
+    }
 
     let demo = null;
     const nowMs = () => (demo ? demo.now() : Date.now());
@@ -577,14 +894,13 @@ if (typeof document !== 'undefined') {
     window.addEventListener('hashchange', () => location.reload());
 
     function start(hash) {
-      let journey;
-      try {
-        journey = parseFragment(hash);
-      } catch (e) {
-        $('headline').textContent = e.message === 'version' ? T.badVersion : T.badLink;
+      readFragment(hash).then(run, (e) => {
+        $('headline').textContent = e.message === 'version' ? T.badVersion : e.message === 'unsupported' ? T.badBrowser : T.badLink;
         document.body.classList.add('broken');
-        return;
-      }
+      });
+    }
+
+    function run(journey) {
 
       const live = {};
       const nextPoll = {};
@@ -599,7 +915,12 @@ if (typeof document !== 'undefined') {
       let timelineSig = '';
       let scrolledTo = -2;
       let paddingSig = '';
-      let marksSig = '';
+      let segsSig = '';
+      // The swipe sheet of phones: open (all cards) or collapsed (the hero only); its offset in px.
+      let sheetOpen = false;
+      let sheetClosed = 0;
+      let sheetOffset = 0;
+      let dragging = null;
       let polling = false;
       let firstPoll = true;
 
@@ -623,22 +944,93 @@ if (typeof document !== 'undefined') {
       let unfolding = -1; // the leg the user just opened: its stops spring in once
       let celebrated = false;
 
+      const isWide = () => innerWidth >= 900;
+
       function insets() {
-        const hero = $('hero').getBoundingClientRect();
+        const top = $('topbar').getBoundingClientRect();
+        if (isWide()) {
+          const panel = $('panel').getBoundingClientRect();
+          return { top: 48, bottom: 48, left: 48, right: Math.round(innerWidth - panel.left) + 32 };
+        }
         const sheet = $('sheet').getBoundingClientRect();
-        const wide = innerWidth >= 900;
-        if (wide) return { top: 48, bottom: 48, left: Math.round($('panel').getBoundingClientRect().right) + 32, right: 48 };
         return {
-          top: Math.round(hero.bottom) + 24,
+          top: Math.round(top.bottom) + 24,
           bottom: Math.max(24, Math.round(innerHeight - sheet.top) + 24),
           left: 32,
           right: 32,
         };
       }
 
+      /**
+       * The sheet of phones: it reaches from below the top bar to the bottom; collapsed, only its
+       * hero (counter, what comes next, the bar of the trip) shows above the bottom edge.
+       */
+      function sheetGeometry() {
+        const sheet = $('sheet');
+        if (isWide()) {
+          sheet.style.removeProperty('--sheet-top');
+          sheet.style.removeProperty('--sheet-y');
+          sheetClosed = 0;
+          sheetOffset = 0;
+          return;
+        }
+        const top = Math.round($('topbar').getBoundingClientRect().bottom) + 10;
+        sheet.style.setProperty('--sheet-top', top + 'px');
+        const box = sheet.getBoundingClientRect();
+        const labels = $('bar-start').parentElement.getBoundingClientRect();
+        const body = $('sheet-body');
+        // The hero's bottom within the sheet, whatever the sheet's own offset and scroll are.
+        const heroBottom = labels.bottom - box.top + (sheetOpen ? 0 : body.scrollTop) + 18;
+        const height = innerHeight - top;
+        sheetClosed = Math.max(0, Math.round(height - heroBottom));
+        if (!dragging) sheetOffset = sheetOpen ? 0 : sheetClosed;
+        sheet.style.setProperty('--sheet-y', Math.round(sheetOffset) + 'px');
+        sheet.classList.toggle('open', sheetOpen);
+        $('grabber').setAttribute('aria-expanded', String(sheetOpen));
+      }
+
+      function setSheet(open) {
+        sheetOpen = open;
+        if (!open) $('sheet-body').scrollTop = 0;
+        layoutVars();
+        setTimeout(layoutVars, 380);
+      }
+
+      // Dragging the grabber or the hero moves the sheet with the finger; it rests open or collapsed.
+      function startDrag(e) {
+        if (isWide() || (e.button != null && e.button !== 0)) return;
+        dragging = { y: e.clientY, from: sheetOffset, t: performance.now(), v: 0, moved: false, id: e.pointerId };
+        $('sheet').classList.add('dragging');
+      }
+      function moveDrag(e) {
+        if (!dragging || e.pointerId !== dragging.id) return;
+        const dy = e.clientY - dragging.y;
+        if (Math.abs(dy) > 6) dragging.moved = true;
+        if (!dragging.moved) return;
+        const t = performance.now();
+        const next = sheetClamp(dragging.from + dy, sheetClosed);
+        dragging.v = (next - sheetOffset) / Math.max(1, t - dragging.t);
+        dragging.t = t;
+        sheetOffset = next;
+        $('sheet').style.setProperty('--sheet-y', Math.round(sheetOffset) + 'px');
+      }
+      function endDrag(e, tap) {
+        if (!dragging || e.pointerId !== dragging.id) return;
+        const d = dragging;
+        dragging = null;
+        $('sheet').classList.remove('dragging');
+        if (!d.moved) {
+          if (tap) setSheet(!sheetOpen);
+          else layoutVars();
+          return;
+        }
+        setSheet(sheetRest(sheetOffset, d.v, sheetClosed) === 0);
+      }
+
       function layoutVars() {
+        sheetGeometry();
         const sheet = $('sheet').getBoundingClientRect();
-        document.documentElement.style.setProperty('--sheet-h', innerWidth >= 900 ? '0px' : Math.round(innerHeight - sheet.top) + 'px');
+        document.documentElement.style.setProperty('--sheet-h', isWide() ? '0px' : Math.max(0, Math.round(innerHeight - sheet.top)) + 'px');
         // setPadding moves the camera at once (and stops a running animation): only on a change.
         const padding = insets();
         const sig = JSON.stringify(padding);
@@ -914,45 +1306,72 @@ if (typeof document !== 'undefined') {
         requestAnimationFrame(draw);
       }
 
-      /* ----- Hero card ----- */
+      /* ----- Top bar and hero ----- */
       function drawHero(now) {
-        const dest = journey.dest.name;
         const phase = state.phase;
-        const head = phase === 'expired' ? T.endedHead : phase === 'arrived' ? T.arrivedHead(journey.name, dest) : T.onWay(journey.name, dest);
+        const head = headline(T, phase, journey.name, journey.dest);
         $('headline').textContent = head;
         document.title = head + ' · Next Stop';
+        // The top bar: when the trip ends, coloured by the delay.
         rollTo($('eta-time'), clock(state.arr));
         const level = delayLevel(state.delay);
         $('eta').className = 'eta ' + level;
+
+        // The hero: the next thing that happens, with the counter until then.
+        const over = phase === 'arrived' || phase === 'expired';
+        const hero = heroModel(T, state, now);
+        rollTo($('countdown'), hero.counter);
+        $('countdown').hidden = over;
+        $('counter').classList.toggle('long', hero.counter.length > 4);
+        $('counter').classList.toggle('done', over);
+        $('hero-title').textContent = hero.title;
+        $('hero-time').textContent = phase === 'expired' ? T.linkExpired : clock(hero.time);
         const d = $('eta-delay');
-        d.textContent = delayText(T, state.delay);
-        d.className = 'delay ' + level;
-        rollTo($('countdown'), phase === 'arrived' || phase === 'expired' ? '' : countdownText(T, state.arr, now));
+        const showDelay = hero.kind === 'off' || hero.kind === 'board' || hero.kind === 'before' || hero.kind === 'arrived';
+        d.hidden = !showDelay;
+        d.textContent = delayText(T, hero.delay);
+        d.className = 'delay ' + delayLevel(hero.delay);
+        $('hero-plat').textContent = hero.platform || '';
+        $('hero-plat').hidden = !hero.platform;
+
+        // The bar of the whole trip: a piece per leg in its line colour, the travelled part pale.
         const progress = tripProgress(legs, now);
+        const segs = progressSegments(legs);
+        const sig = JSON.stringify(segs);
+        if (sig !== segsSig) {
+          segsSig = sig;
+          $('progress-segs').replaceChildren(...segs.map((g) => {
+            const piece = el('i', g.walk ? 'walk' : '');
+            piece.style.left = (g.left * 100).toFixed(2) + '%';
+            piece.style.width = (g.width * 100).toFixed(2) + '%';
+            if (!g.walk) piece.style.background = g.color || 'var(--blue)';
+            return piece;
+          }));
+        }
         const fill = $('progress-fill');
+        const dot = $('progress-dot');
         if (!fill.dataset.shown && !reducedMotion) {
           // The first fill springs from empty to where the trip is.
           fill.dataset.shown = '1';
           fill.classList.add('first');
+          dot.classList.add('first');
           void fill.offsetWidth;
-          setTimeout(() => fill.classList.remove('first'), 1300);
+          setTimeout(() => {
+            fill.classList.remove('first');
+            dot.classList.remove('first');
+          }, 1300);
         }
         fill.style.transform = 'scaleX(' + progress.value.toFixed(4) + ')';
-        const sig = progress.marks.map((m) => m.toFixed(3)).join(',');
-        if (sig !== marksSig) {
-          marksSig = sig;
-          const marks = $('progress-marks');
-          marks.replaceChildren();
-          progress.marks.forEach((m) => {
-            const tick = el('i');
-            tick.style.left = (m * 100).toFixed(2) + '%';
-            marks.append(tick);
-          });
-        }
+        dot.style.left = (progress.value * 100).toFixed(2) + '%';
+        dot.hidden = over;
+        $('bar-start').textContent = clock(legs[0].dep) + ' ' + T.barStart;
+        $('bar-now').textContent = over || phase === 'before' ? '' : T.barNow(clock(now));
+        $('bar-end').textContent = clock(legs[legs.length - 1].arr) + ' ' + T.barEnd;
+
         $('state').textContent = stateLine(T, state);
-        const f = phase === 'expired' || phase === 'arrived' ? { kind: 'over' } : freshness(lastOk, lastFail, pollable, now);
+        const f = over ? { kind: 'over' } : freshness(lastOk, lastFail, pollable, now);
         const live = $('live');
-        live.className = 'live ' + f.kind;
+        live.className = 'live chip-live ' + f.kind;
         live.hidden = f.kind === 'over';
         if (f.kind !== 'over') $('fresh').textContent = freshnessText(T, f);
         document.body.dataset.phase = phase;
@@ -960,6 +1379,7 @@ if (typeof document !== 'undefined') {
           celebrated = true;
           celebrate();
         }
+        if (phase === 'expired') $('check').hidden = false;
         const notes = [];
         if (demo) notes.push(T.demo);
         if (phase === 'expired') notes.push(T.expiredNote);
@@ -1001,7 +1421,7 @@ if (typeof document !== 'undefined') {
           const main = el('span', 'leg-main');
           main.append(el('span', 'leg-route', m.walk ? T.walkLeg + ' · ' + T.minutes(m.minutes) : m.from.name + ' → ' + m.to.name));
           const sub = [];
-          if (m.walk) sub.push(m.from.name + ' → ' + m.to.name);
+          if (m.walk) sub.push(m.from.name === m.to.name ? m.to.name : m.from.name + ' → ' + m.to.name);
           else {
             if (m.direction) sub.push(T.towards(m.direction));
             if (m.stops.length) sub.push(T.stopCount(m.stops.length + 1));
@@ -1058,14 +1478,13 @@ if (typeof document !== 'undefined') {
           list.append(item);
         });
         timelineShown = true;
-        // When the current leg changes (and at the start), scroll it to the top of the sheet.
+        // When the current leg changes (and at the start), bring it into view where the cards show.
         const current = model.find((m) => m.status === 'current');
         const currentIndex = current ? current.index : -1;
-        if (currentIndex !== scrolledTo) {
+        if (currentIndex !== scrolledTo && (isWide() || sheetOpen)) {
           scrolledTo = currentIndex;
           const item = list.querySelector('.leg.current');
-          const body = list.parentElement;
-          if (item && body) body.scrollTop += item.getBoundingClientRect().top - body.getBoundingClientRect().top - 6;
+          if (item && item.scrollIntoView) item.scrollIntoView({ block: 'nearest', behavior: reducedMotion ? 'auto' : 'smooth' });
         }
         layoutVars();
       }
@@ -1143,13 +1562,26 @@ if (typeof document !== 'undefined') {
       });
 
       $('follow').addEventListener('click', () => setFollowing(true));
-      $('grabber').addEventListener('click', () => {
-        $('sheet').classList.toggle('tall');
-        setTimeout(layoutVars, 320);
+      [$('grabber'), $('hero')].forEach((handle) => {
+        handle.addEventListener('pointerdown', (e) => {
+          startDrag(e);
+          if (dragging && handle.setPointerCapture) handle.setPointerCapture(e.pointerId);
+        });
+        handle.addEventListener('pointermove', moveDrag);
+        handle.addEventListener('pointerup', (e) => endDrag(e, true));
+        handle.addEventListener('pointercancel', (e) => endDrag(e, false));
+      });
+      // The keyboard: the grabber is a button that opens and collapses the sheet.
+      $('grabber').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setSheet(!sheetOpen);
+        }
       });
       window.addEventListener('resize', layoutVars);
 
-      initMap();
+      // The map library comes last: the hero and the timeline work without it.
+      window.NextStopUi.loadMapLibrary(initMap);
       render();
       poll();
       setInterval(() => {

@@ -130,6 +130,36 @@ test('a fragment from the app (Kotlin base64Url) decodes', () => {
   assert.equal(r.legs[2].direction, 'Frankfurt (Oder) "Bhf" ü€😀');
 });
 
+// route-v1.deflate.txt: route-v1.json raw-deflated by java.util.zip.Deflater(nowrap = true), as the app does it.
+const FROM_JAVA = fs.readFileSync(path.join(__dirname, 'fixtures', 'route-v1.deflate.txt'), 'utf8').trim();
+
+test('v2: the same JSON raw-deflated reads back, with the language of the sender', async () => {
+  const r = await route.readRoute('#v=2&l=de&d=' + FROM_JAVA);
+  assert.equal(r.lang, 'de');
+  assert.deepEqual(r, Object.assign(route.parseRoute(fragment(FIXTURE)), { lang: 'de' }));
+  // Links of format v1 still read; newer or broken ones do not.
+  assert.equal((await route.readRoute(fragment(FIXTURE))).legs.length, 3);
+  await assert.rejects(route.readRoute('#v=9&d=' + FROM_JAVA), /version/);
+  await assert.rejects(route.readRoute('#v=2&d=' + FROM_JAVA.slice(0, 40)), /data/);
+});
+
+test('v2: a browser without DecompressionStream gets its own message', async () => {
+  const saved = globalThis.DecompressionStream;
+  delete globalThis.DecompressionStream;
+  try {
+    await assert.rejects(route.readRoute('#v=2&d=' + FROM_JAVA), /unsupported/);
+  } finally {
+    globalThis.DecompressionStream = saved;
+  }
+});
+
+test('page language: the recipient\'s German or English, else the sender\'s', () => {
+  assert.equal(route.pickTexts('fr', 'de'), T);
+  assert.equal(route.pickTexts('en-US', 'de'), E);
+  assert.equal(route.pickTexts('de-CH', 'en'), T);
+  assert.equal(route.pickTexts('es', null), E);
+});
+
 test('steps without live data follow the delays known when shared; walks start after the ride before', () => {
   const r = route.parseRoute(fragment(FIXTURE));
   const steps = route.computeSteps(r, {});
@@ -400,4 +430,36 @@ test('a way by bike (the bike combo) is read, kept and says so', () => {
   assert.equal(route.TEXTS.de.bike, 'Mit dem Rad');
   assert.equal(route.TEXTS.en.bike, 'By bike');
   assert.match(route.googleWalkUrl([52.5, 13.4], [52.51, 13.41], true), /travelmode=bicycling$/);
+});
+
+test('hero: duration as the app writes it, and the stop of the first ride (never an address)', () => {
+  const r = route.parseRoute(fragment(FIXTURE));
+  const steps = route.computeSteps(r, {});
+  const status = route.routeStatus(steps, (T0 - 600) * 1000);
+  const hero = route.heroSummary(T, steps, status);
+  assert.equal(hero.origin, 'ab S+U Alexanderplatz');
+  assert.ok(!/Startstraße/.test(hero.origin), 'the address of the start stays out');
+  assert.equal(hero.duration, route.minutesMark((status.end - status.start) / 60000));
+  assert.match(hero.duration, /^\d+′$|^\d+:\d\d h$/);
+  assert.equal(route.minutesMark(80), '1:20 h');
+  // A route of walks only has no first ride.
+  const walkOnly = route.computeSteps({ legs: [r.legs[0]], dest: r.dest }, {});
+  assert.equal(route.heroSummary(T, walkOnly, route.routeStatus(walkOnly, 0)).origin, null);
+});
+
+test('boarding: the part of the train as three flags, front to rear', () => {
+  assert.deepEqual(route.boardParts('front'), [true, false, false]);
+  assert.deepEqual(route.boardParts('middle'), [false, true, false]);
+  assert.deepEqual(route.boardParts('rear'), [false, false, true]);
+  assert.deepEqual(route.boardParts(null), [false, false, false]);
+});
+
+test('the app: "In Next Stop öffnen" falls back to the store page', () => {
+  const from = { name: 'S+U Alexanderplatz', pos: [52.52151, 13.41127] };
+  const to = { name: 'Flughafen BER', pos: [52.36443, 13.5097] };
+  const app = route.appSearchUrl(from, to, route.PLAY_URL);
+  assert.match(app, /S\.browser_fallback_url=https%3A%2F%2Fplay\.google\.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dio\.github\.jnbp\.nextstop;end$/);
+  assert.equal(route.appSearchUrl(from, to).indexOf('browser_fallback_url'), -1);
+  assert.equal(route.TEXTS.de.openApp, 'In Next Stop öffnen');
+  assert.equal(route.TEXTS.de.getApp, 'Bei Google Play laden');
 });

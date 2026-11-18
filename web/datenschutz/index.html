@@ -68,6 +68,7 @@
           <tr><td>Photon (photon.komoot.io)</td><td>Ortssuche und Adressen</td><td>Suchtext; als Suchumgebung deine auf etwa 1 km gerundete Position</td></tr>
           <tr><td>OpenFreeMap (tiles.openfreemap.org)</td><td>Kartenkacheln, auch für Kartenbilder in „Meine Wege“ und kleine Wegkarten</td><td>der sichtbare Kartenausschnitt, nicht deine genaue Position</td></tr>
           <tr><td>accessibility.cloud und DB FaSta (apis.deutschebahn.com)</td><td>Zustand von Aufzügen an Bahnhöfen</td><td>Anfrage nach Aufzügen einer Station</td></tr>
+          <tr><td>Open-Meteo (api.open-meteo.com)</td><td>Bewölkung für den Hinweis zur Sonnenseite, nur bei angezeigtem Hinweis</td><td>ein auf etwa 10 km gerundeter Ort der Fahrt, höchstens alle 30 Minuten je Gebiet</td></tr>
         </tbody>
       </table>
     </div>
@@ -80,7 +81,7 @@
     <ul>
       <li><strong>Widgets</strong> aktualisieren Abfahrten mit der letzten Position, die die App beim Benutzen gespeichert hat (nur auf dem Gerät); die App fragt dafür nicht im Hintergrund nach dem Standort. Diese Position geht an die Fahrplandienste.</li>
       <li><strong>Störungswächter</strong> (optional, von dir eingeschaltet): Ein Hintergrundauftrag (WorkManager) prüft in einem von dir gewählten Takt oder zu gewählten Uhrzeiten gespeicherte Wege mit eingeschalteter Glocke und, wenn du es einschaltest, gespeicherte Orte auf Störungen. Dafür verwendet er <strong>nur die gespeicherten Haltestellen und Koordinaten</strong> dieser Wege und Orte, nicht deinen aktuellen Standort, und schickt sie an die Fahrplandienste. Ist nichts eingeschaltet, läuft nichts. Meldungen, die schon angezeigt wurden, merkt sich die App einige Tage auf dem Gerät.</li>
-      <li><strong>Fahrtbegleiter</strong>: Der Vordergrunddienst aktualisiert die von dir gestartete Fahrt (Abfahrtszeiten, Verspätungen) und zeigt sie in einer dauerhaften Benachrichtigung. Er verwendet keinen Standort, kein Mikrofon und keine Kamera und endet fünf Minuten nach der Ankunft oder wenn du die Fahrt beendest.</li>
+      <li><strong>Live-Fahrt</strong>: Der Vordergrunddienst aktualisiert die von dir gestartete Fahrt (Abfahrtszeiten, Verspätungen) und zeigt sie in einer dauerhaften Benachrichtigung. Er verwendet keinen Standort, kein Mikrofon und keine Kamera und endet fünf Minuten nach der Ankunft oder wenn du die Fahrt beendest.</li>
     </ul>
 
     <h2>5. Kontakte und Kalender (optional)</h2>
@@ -88,20 +89,20 @@
     <!-- Einschätzung: Adresse eines vom Nutzer angetippten Kontakts bzw. Terminorts wird wie ein Suchtext behandelt (nutzergesteuerte Suchanfrage). Das ist im Play-Console-Formular als "nicht erfasst" geführt, mit Rückfall auf "Adresse, geteilt". -->
 
     <h2>6. Benachrichtigungen</h2>
-    <p>Die App sendet Benachrichtigungen lokal auf deinem Gerät (Fahrtbegleiter, Aussteigehinweis, Störungen). Es gibt keinen Push-Dienst und keinen Server, der Benachrichtigungen schickt. Die Berechtigung ist freiwillig; unter Android 16 und neuer kann die Fahrt als „Live-Update“ erscheinen.</p>
+    <p>Die App sendet Benachrichtigungen lokal auf deinem Gerät (Live-Fahrt, Aussteigehinweis, Störungen). Es gibt keinen Push-Dienst und keinen Server, der Benachrichtigungen schickt. Die Berechtigung ist freiwillig; unter Android 16 und neuer kann die Fahrt als „Live-Update“ erscheinen.</p>
 
     <h2>7. Android-Datensicherung</h2>
     <p>Android kann Einstellungen, Favoriten, gespeicherte Orte und Wege und letzte Ziele in die Google-Datensicherung deines Kontos aufnehmen oder auf ein neues Gerät übertragen. Das steuerst du in den Systemeinstellungen; die Cloud-Sicherung wird nur genutzt, wenn sie auf dem Gerät verschlüsselt werden kann (Bildschirmsperre gesetzt). Zugangsschlüssel für Datendienste, Zwischenspeicher und der Zustand von Widgets sind ausgenommen. Auf diese Sicherung habe ich keinen Zugriff; es gelten die Bedingungen von Google.</p>
 
     <h2>8. Live-Link und „So kommst du hin“</h2>
-    <p>Du kannst eine Fahrt oder Verbindung als Link teilen. Die Fahrt steckt im <strong>Teil des Links nach dem „#“ (Fragment)</strong>; Browser schicken diesen Teil nie an einen Server. Die Seite des Empfängers (<a href="../live/">Live-Seite</a>, <a href="../route/">Route-Seite</a>) fragt die öffentlichen Fahrplandienste (BVG REST, Transitous) und OpenFreeMap vom Browser des Empfängers aus ab; dort werden daher IP-Adresse und Anfrage an diese Dienste übertragen. Die Seiten laden außerdem die Kartenbibliothek MapLibre von unpkg.com. Die Seiten zeigen die <strong>geplante Fahrt mit Echtzeitdaten, nicht den GPS-Standort deines Handys</strong>. Den Namen, den ein Live-Link anzeigt, legst du selbst fest; er ist optional. Die Adresse der Live-Seite lässt sich in den Einstellungen ändern.</p>
+    <p>Du kannst eine Fahrt oder Verbindung als Link teilen. Die Fahrt steckt im <strong>Teil des Links nach dem „#“ (Fragment)</strong>; Browser schicken diesen Teil nie an einen Server. Die Seite des Empfängers (<a href="../live/">Live-Seite</a>, <a href="../route/">Route-Seite</a>) fragt die öffentlichen Fahrplandienste (BVG REST, Transitous) und OpenFreeMap vom Browser des Empfängers aus ab; dort werden daher IP-Adresse und Anfrage an diese Dienste übertragen. Die Kartenbibliothek MapLibre liefert diese Website selbst aus; es gibt keine Anfrage an ein fremdes CDN. Der Startpunkt deiner Fahrt steht nicht im Live-Link (die Fahrt beginnt dort an der ersten Haltestelle); führt sie zu einem gespeicherten Ort wie „Zuhause“, zeigt die Seite nur dessen Namen und die Gegend auf etwa 100 m, nicht die Adresse. Die Seiten zeigen die <strong>geplante Fahrt mit Echtzeitdaten, nicht den GPS-Standort deines Handys</strong>. Den Namen, den ein Live-Link anzeigt, legst du selbst fest; er ist optional. Die Adresse der Live-Seite lässt sich in den Einstellungen ändern.</p>
 
     <h2>9. Uhr-App (Wear OS)</h2>
     <p>Handy und Uhr tauschen Fahrten, Favoriten und ggf. Kontaktadressen über die Wearable Data Layer von Google Play-Diensten direkt zwischen den Geräten aus. Die Uhr-App kann außerdem eigenständig Anfragen an die Dienste aus Abschnitt 3 senden und nutzt dafür ihren eigenen Standort, nur solange sie in Gebrauch ist.</p>
 
     <h2>10. Diese Website</h2>
-    <p>Die Website ist statisch, setzt keine Cookies, enthält kein Tracking und lädt auf dieser Seite nichts von Dritten. Sie liegt bei Cloudflare Pages; der Hoster protokolliert technisch bedingt Anfragen (z. B. IP-Adresse, Zeit, abgerufene Seite, Browserkennung). Ich habe darauf nur begrenzt Zugriff und werte sie nicht aus.</p>
-    <!-- OWNER: Hoster-Angabe stimmt mit dem Footer der Startseite überein (Cloudflare Pages). Falls ein Auftragsverarbeitungsvertrag/Drittlandtransfer relevant ist, bitte prüfen. -->
+    <p>Die Website ist statisch, setzt keine Cookies, enthält kein Tracking und lädt auf dieser Seite nichts von Dritten. Sie wird über GitHub Pages ausgeliefert (Anbieter: GitHub, Inc.). GitHub protokolliert als Hoster technisch bedingt Anfragen (z. B. IP-Adresse, Zeit, abgerufene Seite, Browserkennung). Ich habe auf diese Protokolle keinen Zugriff und werte nichts aus.</p>
+    <!-- OWNER: Hoster-Angabe stimmt mit dem Footer und .github/workflows/pages.yml überein (GitHub Pages, Domain nextstop.bapo.me). GitHub sitzt in den USA: Drittlandtransfer bitte prüfen. -->
 
     <h2>11. Rechtsgrundlagen</h2>
     <ul>
@@ -125,7 +126,7 @@
   <div class="wrap">
     <div>
       <p><strong>Next Stop – ein privates Open-Source-Projekt. Kein Angebot der BVG, des VBB oder der Deutschen Bahn.</strong></p>
-      <p>Diese Seite setzt keine Cookies, lädt nichts von Dritten und nutzt kein Tracking. Sie liegt bei Cloudflare Pages; der Hoster protokolliert Anfragen (z. B. IP-Adresse, Zeit) technisch bedingt.</p>
+      <p>Diese Seite setzt keine Cookies, lädt nichts von Dritten und nutzt kein Tracking. Sie liegt bei GitHub Pages; GitHub als Hoster protokolliert Anfragen (z. B. IP-Adresse, Zeit) technisch bedingt.</p>
       <p>© 2026 Next Stop · GPL-3.0 · Kartendaten © OpenStreetMap</p>
     </div>
     <nav aria-label="Footer">

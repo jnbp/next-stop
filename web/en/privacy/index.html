@@ -68,6 +68,7 @@
           <tr><td>Photon (photon.komoot.io)</td><td>Place and address search</td><td>The search text; as a search bias your position rounded to about 1 km</td></tr>
           <tr><td>OpenFreeMap (tiles.openfreemap.org)</td><td>Map tiles, also for the map images in “My routes” and small walk maps</td><td>The visible map area, not your exact position</td></tr>
           <tr><td>accessibility.cloud and DB FaSta (apis.deutschebahn.com)</td><td>Lift status at stations</td><td>A request for the lifts of a station</td></tr>
+          <tr><td>Open-Meteo (api.open-meteo.com)</td><td>Cloud cover for the sunny side hint, only while the hint is shown</td><td>A place of the ride rounded to about 10 km, at most every 30 minutes per area</td></tr>
         </tbody>
       </table>
     </div>
@@ -80,7 +81,7 @@
     <ul>
       <li><strong>Widgets</strong> refresh departures with the last position the app recorded while you used it (kept on the device only); the app does not ask for location in the background. That position is sent to the timetable services.</li>
       <li><strong>Disruption watch</strong> (optional, switched on by you): a background job (WorkManager) checks, at an interval or at times you choose, saved routes with the bell on and, if you switch it on, saved places for disruptions. It uses <strong>only the saved stops and coordinates</strong> of those routes and places, not your current location, and sends them to the timetable services. If nothing is switched on, nothing runs. Notices already shown are remembered on the device for a few days.</li>
-      <li><strong>Trip companion:</strong> the foreground service refreshes the trip you started (departure times, delays) and shows it in an ongoing notification. It uses no location, microphone or camera and ends five minutes after arrival or when you end the trip.</li>
+      <li><strong>Live trip:</strong> the foreground service refreshes the trip you started (departure times, delays) and shows it in an ongoing notification. It uses no location, microphone or camera and ends five minutes after arrival or when you end the trip.</li>
     </ul>
 
     <h2>5. Contacts and calendar (optional)</h2>
@@ -88,20 +89,20 @@
     <!-- Judgement: the address of a contact or appointment location tapped by the user is treated like a typed search query. In the Play Console form this is "not collected", with a fallback of "address, shared". -->
 
     <h2>6. Notifications</h2>
-    <p>The app posts notifications locally on your device (trip companion, get-off reminder, disruptions). There is no push service and no server that sends notifications. The permission is optional; on Android 16 and later the trip can appear as a “Live Update”.</p>
+    <p>The app posts notifications locally on your device (live trip, get-off reminder, disruptions). There is no push service and no server that sends notifications. The permission is optional; on Android 16 and later the trip can appear as a “Live Update”.</p>
 
     <h2>7. Android backup</h2>
     <p>Android can include settings, favourites, saved places and routes and recent destinations in the Google backup of your account or transfer them to a new device. You control this in the system settings; the cloud backup is only used where it can be encrypted on the device (a screen lock is set). Access keys for data services, caches and widget state are excluded. I have no access to this backup; Google’s terms apply.</p>
 
     <h2>8. Live link and “route” link</h2>
-    <p>You can share a trip or a connection as a link. The trip sits in the <strong>part of the link after the “#” (fragment)</strong>, which browsers never send to a server. The recipient’s page (<a href="../../live/">live page</a>, <a href="../../route/">route page</a>) queries the public timetable services (BVG REST, Transitous) and OpenFreeMap from the recipient’s own browser, so their IP address and request go to those services. The pages also load the map library MapLibre from unpkg.com. The pages show the <strong>planned trip with real-time data, not the GPS position of your phone</strong>. The name a live link shows is set by you and is optional. The address of the live page can be changed in the settings.</p>
+    <p>You can share a trip or a connection as a link. The trip sits in the <strong>part of the link after the “#” (fragment)</strong>, which browsers never send to a server. The recipient’s page (<a href="../../live/">live page</a>, <a href="../../route/">route page</a>) queries the public timetable services (BVG REST, Transitous) and OpenFreeMap from the recipient’s own browser, so their IP address and request go to those services. The map library MapLibre is served by this website itself; there is no request to a third-party CDN. The start of your trip is not in a live link (the trip there begins at the first stop); when it leads to a saved place such as “Home”, the page shows only its name and the area to about 100 m, not the address. The pages show the <strong>planned trip with real-time data, not the GPS position of your phone</strong>. The name a live link shows is set by you and is optional. The address of the live page can be changed in the settings.</p>
 
     <h2>9. Watch app (Wear OS)</h2>
     <p>Phone and watch exchange trips, favourites and, if used, contact addresses directly between the devices through the Wearable Data Layer of Google Play services. The watch app can also send requests on its own to the services in section 3 and uses its own location for that, only while it is in use.</p>
 
     <h2>10. This website</h2>
-    <p>The website is static, sets no cookies, contains no tracking and loads nothing from third parties on this page. It is hosted on Cloudflare Pages; the host logs requests for technical reasons (such as IP address, time, page requested, browser identifier). I have only limited access to these logs and do not evaluate them.</p>
-    <!-- OWNER: the host matches the footer of the home page (Cloudflare Pages). If a data processing agreement / third-country transfer matters, please check. -->
+    <p>The website is static, sets no cookies, contains no tracking and loads nothing from third parties on this page. It is served by GitHub Pages (provider: GitHub, Inc.). As the host, GitHub logs requests for technical reasons (such as IP address, time, page requested, browser identifier). I have no access to these logs and evaluate nothing.</p>
+    <!-- OWNER: the host matches the footer and .github/workflows/pages.yml (GitHub Pages, domain nextstop.bapo.me). GitHub is based in the USA: please check the third-country transfer. -->
 
     <h2>11. Legal bases</h2>
     <ul>
@@ -125,7 +126,7 @@
   <div class="wrap">
     <div>
       <p><strong>Next Stop – a private open-source project. Not affiliated with BVG, VBB or Deutsche Bahn.</strong></p>
-      <p>This site sets no cookies, loads nothing from third parties and uses no tracking. It is hosted on Cloudflare Pages; the host logs requests (such as IP address and time) for technical reasons.</p>
+      <p>This site sets no cookies, loads nothing from third parties and uses no tracking. It is hosted on GitHub Pages; GitHub as the host logs requests (such as IP address and time) for technical reasons.</p>
       <p>© 2026 Next Stop · GPL-3.0 · Map data © OpenStreetMap</p>
     </div>
     <nav aria-label="Footer">

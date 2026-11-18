@@ -17,6 +17,7 @@ web/
   shared/ui.js         DOM helpers of both pages: badges, walk icon, rolling numbers
   shared/base.css      design of both pages: colours, dark mode, glass, badges, live dot, motion
   shared/fonts/        Google Sans Flex (SIL OFL 1.1, see fonts/OFL.txt), served by the site itself
+  shared/vendor/       MapLibre GL JS 5.24.1 (BSD-3-Clause, see LICENSE-maplibre-gl.txt), served by the site itself
   live/index.html      live page (German, English by browser language; dark mode by the system)
   live/app.js          its logic, no build step, no framework
   live/style.css       its layout: glass cards over a full-screen map
@@ -27,37 +28,55 @@ web/
   route/demo.js        made-up connection for "#demo"; route/demo.html redirects to it
   test/live.test.js    offline tests: node web/test/live.test.js
   test/route.test.js   offline tests: node web/test/route.test.js
-  test/fixtures/       route-v1.json: the route link JSON of the app for a fixed connection
+  test/fixtures/       route-v1.json: the route link JSON of the app for a fixed connection;
+                       live-v2.json: the v2 live link JSON of the app for a fixed trip; *.deflate.txt:
+                       both raw-deflated by Java as the app does it; live-v1-13-legs.json: a v1
+                       payload of 13 legs from Bonn to Berlin for the link length
 ```
 
 ## Live page
 
-- **Hero card** on top: "<Name> ist unterwegs nach <Ziel>" (without a name in the link:
-  "Unterwegs nach …"), the arrival in large digits coloured by the delay (green on time,
-  amber 1–4 min late, red from 5 min), a countdown ("in 23 min"), a thin progress bar of the
-  whole trip with a tick at each change, one line with the current state ("Im U8 · nächster
-  Halt Moritzplatz", "Steigt um in U Rudow · X7 um 15:16", "Zu Fuß zu …", "Angekommen um …")
-  and a pulsing live dot with "aktualisiert vor 12 s" / "Keine Live-Daten seit 2 min".
+Both pages look like the app's trip companion: white cards on a calm grey, a blue hero, the lime
+counter ("19′", "1:05 h"), line badges in the colours of the operators; dark by the system (the map
+too).
+
+- **Top bar:** "<Name> ist unterwegs nach <Ziel>" (without a name in the link: "Unterwegs nach
+  …"), the arrival coloured by the delay (green on time, amber 1–4 min late, red from 5 min) and
+  the live chip "Live · vor 12 s" / "Keine Live-Daten seit 2 min"; a round button "Folgen" once the
+  map no longer follows.
+- **Hero:** the next thing that happens with the lime counter until then – "Aussteigen in …",
+  "Einsteigen in U8 · …", "Zu Fuß zu …", "Angekommen", "Fahrt beendet" – its time, the delay and
+  the platform when the live data names one; below it the bar of the whole trip, one piece per
+  leg in its line colour (walks dashed), the travelled part pale and a dot at now, with the start,
+  "jetzt" and the end under it; then the state line ("Im U8 · nächster Halt Moritzplatz").
+- **Phones:** the map fills the screen; the hero sits in a sheet at the bottom. Swiping it up (or
+  tapping the grabber) opens the cards of the timeline, swiping down collapses it again.
+  **Wide screens:** the map on the left, the top bar, the blue hero and the cards on the right.
 - **Map** (MapLibre over OpenFreeMap, its dark style in dark mode): the route in the line
   colours of the app, the part already travelled greyed out, a destination pin and the vehicle
   as a badge with the line name (a walker on foot). The vehicle moves continuously along the
   trip's polyline between the stops (computed from the live times every frame and eased, so a
   correction after an update glides instead of jumping). The map follows the vehicle; a pan or
   pinch stops that and shows a "Folgen" button.
-- **Timeline** in a sheet below (a column on the left on wide screens): one compact row per leg
+- **Timeline:** one card per leg
   (badge, from → to, times); only the current leg is open, with the stops passed counted, the
   next three stops and "+ n weitere Halte". Tap a row to open or close it.
 - **End states:** "Angekommen" after the arrival, "Fahrt beendet · Link abgelaufen" 2 h later.
+- **The app:** "Bei Google Play laden" (a plain button, no store artwork) and on Android "In Next
+  Stop öffnen" (`intent://open`, the store page when the app is not installed).
 
 ## Route page ("So kommst du hin")
 
-- **Header:** where it leads, the day ("Heute", "Morgen", "Sa., 15.11."), departure – arrival,
-  "Los geht's in 12 min", duration and changes, and the live dot.
+- **Hero** (a blue card over the lower edge of the map; the map on the left on wide screens):
+  where it leads, the stop of the first ride ("ab S+U Alexanderplatz"; a start that is an address
+  is not named here), the duration as a lime counter ("43′", "1:20 h"), departure – arrival, the
+  day ("Heute", "Morgen", "Sa., 15.11."), the changes, "Los geht's in 12 min" and the live chip.
 - **Steps**, one card per leg:
   - a ride: the departure time (amber when late) and delay, line badge and direction, the stop
     with its platform ("Gleis 2", "Steig 3", "Pos. 11") or stop position ("Pos. 3") – a
     platform change as "Gleis 6 statt 5" –, where to board for the next change ("In der Mitte
-    einsteigen"; "Eher …" when the app estimated it from the map), the number of stops (the
+    einsteigen", with the part of the train drawn as in the app; "Eher …" when the app estimated
+    it from the map), the number of stops (the
     stops themselves once live data came in), the state of real time, and where to get off;
   - a walk: minutes and metres, the station exit to take or the entrance / stop position it
     leads to, a mini map of the way (made only while it is on screen) and a button
@@ -75,6 +94,8 @@ web/
   end: a search from the start to the destination on the Transitous website, and on Android
   "In Next Stop öffnen" (an `intent://open/route?…` link to the app, with the Transitous search
   as fallback when the app is not installed).
+- **The app** at the bottom of the screen: "Bei Google Play laden" and on Android "In Next Stop
+  öffnen" (the search of this connection in the app, the store page when it is not installed).
 
 ## Demos
 
@@ -124,13 +145,35 @@ HTML and CSS: no scripts, no cookies, nothing loaded from other hosts (fonts fro
 light and dark by the system. It is published with the rest of `web/`, so `/live/` and `/route/`
 stay where they are. The Google Play badge is prepared as a comment in both pages.
 
-## Link formats (v1)
+## Link formats
 
-Both are `#v=1&d=<base64url JSON>` (UTF-8, no padding) in the fragment. Coordinates have 5
-decimals; delays (minutes known when shared) and empty fields are left out. `p` is `bvg` (HAFAS
+The app writes **v2**: `#v=2&l=<language>&d=<base64url of the raw-deflated JSON>` (deflate
+without zlib header, as `java.util.zip.Deflater(nowrap = true)` writes it; the pages unpack it
+with `DecompressionStream('deflate-raw')` and say so in browsers without it). `l` is the
+language of the sender's app; a page takes the recipient's browser language when it is German or
+English and only otherwise the sender's. The pages still read **v1** links,
+`#v=1&d=<base64url JSON>` (UTF-8, no padding). Coordinates have 5 decimals unless said
+otherwise; delays (minutes known when shared) and empty fields are left out. `p` is `bvg` (HAFAS
 ids, `v6.bvg.transport.rest`) or `tr` (Transitous/MOTIS ids, without the app's `tr:` prefix).
 
-**Live link** `https://<site>/live/#v=1&d=…`, built by `liveLinkJson` in `ui/JourneyShare.kt`:
+**Live link v2** `https://<site>/live/#v=2&l=de&d=…`, built by `liveLinkCompactJson` in
+`ui/JourneyShare.kt`; `expandLive` in `live/app.js` documents the keys and turns it into the v1
+shape. Each stop is written once, times are seconds after the first departure `b`, positions
+have 4 decimals, and a walk between two legs is only its two times on the leg after it. The
+start of the trip is never in it (a first walk starts at the stop it leads to), and a saved
+place as destination goes by its label (`k`: `h` home, `w` work) with a position to 3 decimals.
+`test/fixtures/live-v2.json` is checked by `LiveLinkTest.kt` (app) and `live.test.js` (page).
+A sample trip of 13 legs from Bonn to Berlin (`test/fixtures/live-v1-13-legs.json`): 4,812
+characters as v1, 940 as v2.
+
+```json
+{"n":"Ana","b":1794640320,"c":-600,
+ "s":[["S+U Alexanderplatz","900100003",52.5215,13.4113],["S Ostkreuz","900120003",52.503,13.469]],
+ "r":[{"f":0,"t":1,"d":300,"a":840,"dd":2,"ad":3,"p":"bvg","i":"<trip id>","l":"S5","r":"Strausberg Nord","w":[0,240]}],
+ "e":[840,1200],"z":["Zuhause",52.366,13.51],"k":"h"}
+```
+
+**Live link v1** `https://<site>/live/#v=1&d=…` (read only):
 
 ```json
 {"n":"optional first name","t":1794570000,
@@ -141,8 +184,8 @@ ids, `v6.bvg.transport.rest`) or `tr` (Transitous/MOTIS ids, without the app's `
          {"walk":true,"from":{…},"to":{…}}]}
 ```
 
-**Route link** `https://<site>/route/#v=1&d=…`, built by `routeLinkJson` in
-`ui/JourneyShare.kt` (no name field). Key order as in `test/fixtures/route-v1.json`, which
+**Route link** `https://<site>/route/#v=2&l=de&d=…` (v2: the JSON below raw-deflated; v1 the
+same JSON without deflate), built by `routeLinkJson` in `ui/JourneyShare.kt` (no name field). Key order as in `test/fixtures/route-v1.json`, which
 `RouteLinkTest.kt` (app) and `route.test.js` (page) both check, so the two sides stay in step:
 
 ```json
@@ -170,13 +213,17 @@ straight line). A connection of three legs gives a link of about 1–2 kB.
   of the recipient and, as Referer, only the origin of the site (`strict-origin-when-cross-origin`).
 - The route page's buttons open Google Maps (walking directions: only the two ends of that
   walk) and the Transitous website (start and destination of the connection) only when tapped.
-- MapLibre GL JS is loaded from unpkg with a pinned version and Subresource Integrity. The font
-  comes from the site itself (no Google Fonts request).
+- MapLibre GL JS 5.24.1 is served by the site itself (`shared/vendor`, from `npm pack
+  maplibre-gl@5.24.1`, the same files as the earlier pinned unpkg copy with its Subresource
+  Integrity hashes), and loaded only after the page logic has started: without it the hero card,
+  the timeline and the steps still work, just without the map. The font comes from the site
+  itself (no Google Fonts request).
 - Nothing is stored (the live page keeps one flag in sessionStorage so the arrival confetti
   plays once), no cookies, no analytics. A Content-Security-Policy limits the pages to exactly
   these hosts.
 - Anyone who has a link can see what is in it: the stops, times and the optional first name
-  (live link), and the start of the connection – which is the current position when the search
+  (live link, which leaves out the start of the trip and the address of a saved destination),
+  and for a route link the start of the connection – which is the current position when the search
   in the app started there.
 
 ## Behaviour and limits
@@ -227,6 +274,7 @@ permission ask. It also names what the pages show:
 - the map: tiles and styles of [OpenFreeMap](https://openfreemap.org/), map data
   © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL 1.0); the map's
   own compact attribution button (MapLibre) shows the same;
-- MapLibre GL JS (BSD-3-Clause) and Google Sans Flex (SIL OFL 1.1, `shared/fonts/OFL.txt`).
+- MapLibre GL JS (BSD-3-Clause, `shared/vendor/LICENSE-maplibre-gl.txt`) and Google Sans Flex
+  (SIL OFL 1.1, `shared/fonts/OFL.txt`).
 
 Keep these lines when you change the pages or host your own copy.

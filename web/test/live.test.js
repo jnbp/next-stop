@@ -1,7 +1,14 @@
-// Offline tests of the logic of web/live/app.js: node web/test/live.test.js [base64url from Kotlin]
-// With an argument, it also checks that a fragment made by the app (JourneyShare.kt) decodes.
+// Offline tests of the logic of web/live/app.js: node web/test/live.test.js [v2 data from Kotlin]
+// With an argument (base64url of the raw-deflated liveLinkCompactJson of LiveLinkTest.kt), it also
+// checks that a fragment made by the app (JourneyShare.kt) decodes.
+// test/fixtures/live-v2.json is the v2 JSON the app writes for a fixed trip (LiveLinkTest.kt checks
+// the Kotlin encoder against the same file); live-v2.deflate.txt is that JSON raw-deflated by
+// java.util.zip.Deflater(nowrap = true), as the app does it.
 'use strict';
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const zlib = require('node:zlib');
 const test = require('node:test');
 const live = require('../live/app.js');
 
@@ -53,7 +60,7 @@ test('fragment parses and rejects bad links', () => {
   assert.equal(j.legs[1].provider, 'bvg');
   assert.equal(j.legs[1].from.delay, 2);
   assert.equal(j.legs[1].from.planned, (T0 + 360) * 1000);
-  assert.throws(() => live.parseFragment('#v=2&d=x'), /version/);
+  assert.throws(() => live.parseFragment('#v=3&d=x'), /version/);
   assert.throws(() => live.parseFragment('#v=1&d=%%%'), /data/);
   assert.throws(() => live.parseFragment('#v=1&d=' + live.toBase64Url('{"legs":[]}')), /data/);
 });
@@ -209,7 +216,7 @@ test('countdown, age and freshness texts', () => {
   const stale = live.freshness(n - 125000, n - 5000, true, n);
   assert.equal(stale.kind, 'stale');
   assert.equal(live.freshnessText(de, stale), 'Keine Live-Daten seit 2 min');
-  assert.equal(live.freshnessText(de, live.freshness(n - 12000, null, true, n)), 'aktualisiert vor 12 s');
+  assert.equal(live.freshnessText(de, live.freshness(n - 12000, null, true, n)), 'Live · vor 12 s');
 });
 
 test('polling: 20 s seen, 60 s hidden, longer after failures', () => {
@@ -311,19 +318,193 @@ test('the rides of the demo follow dense ways that pass every stop', async () =>
   delete global.window;
 });
 
+/* ---------- Link format v2 ---------- */
+
+const fixturePath = (name) => path.join(__dirname, 'fixtures', name);
+const V2_FIXTURE = fs.readFileSync(fixturePath('live-v2.json'), 'utf8').trim();
+const V2_FROM_JAVA = fs.readFileSync(fixturePath('live-v2.deflate.txt'), 'utf8').trim();
+const V1_13_LEGS = JSON.parse(fs.readFileSync(fixturePath('live-v1-13-legs.json'), 'utf8'));
+const deflated = (json) => zlib.deflateRawSync(Buffer.from(json, 'utf8'), { level: 9 }).toString('base64url');
+const fragment2 = (json, lang) => '#v=2' + (lang ? '&l=' + lang : '') + '&d=' + deflated(json);
+
+const V2_T0 = 1794640320; // the first departure of live-v2.json, epoch seconds
+// The input of live-v2.json, as in LiveLinkTest.kt: a walk from an address, the S5, a change
+// between two ids of Ostkreuz, the RE7 and a walk home.
+const V2_INPUT = {
+  n: 'Ana',
+  t: V2_T0 - 600,
+  dest: { name: 'Zuhause', lat: 52.366, lon: 13.51 },
+  legs: [
+    { walk: true, from: { name: 'Startstraße 1', lat: 52.52, lon: 13.405, dep: V2_T0 }, to: { name: 'S+U Alexanderplatz', id: '900100003', lat: 52.52151, lon: 13.41127, arr: V2_T0 + 240 } },
+    { p: 'bvg', trip: '1|31911|21|86|14112026', line: 'S5', dir: 'Strausberg Nord',
+      from: { name: 'S+U Alexanderplatz', id: '900100003', lat: 52.52151, lon: 13.41127, dep: V2_T0 + 300, dd: 2 },
+      to: { name: 'S Ostkreuz', id: '900120003', lat: 52.50303, lon: 13.46902, arr: V2_T0 + 840, ad: 3 } },
+    { walk: true, from: { name: 'S Ostkreuz', id: '900120003', lat: 52.50303, lon: 13.46902, dep: V2_T0 + 840 }, to: { name: 'S Ostkreuz', id: 'de-DELFI_000:11', lat: 52.50281, lon: 13.46985, arr: V2_T0 + 1020 } },
+    { p: 'tr', trip: 'de-DELFI_1234#5', line: 'RE7', dir: 'Frankfurt (Oder) "Bhf" ü€😀',
+      from: { name: 'S Ostkreuz', id: 'de-DELFI_000:11', lat: 52.50281, lon: 13.46985, dep: V2_T0 + 1200, dd: -1 },
+      to: { name: 'Flughafen BER', id: 'de-DELFI_000:22', lat: 52.36443, lon: 13.5097, arr: V2_T0 + 2280 } },
+    { walk: true, from: { name: 'Flughafen BER', id: 'de-DELFI_000:22', lat: 52.36443, lon: 13.5097, dep: V2_T0 + 2280 }, to: { name: 'Zuhause', lat: 52.366, lon: 13.51, arr: V2_T0 + 2700 } },
+  ],
+};
+
+/** Checks [j], the journey of live-v2.json, as the page reads it. */
+function checkV2Journey(j) {
+  assert.equal(j.name, 'Ana');
+  assert.equal(j.created, (V2_T0 - 600) * 1000);
+  assert.equal(j.legs.length, 5);
+  assert.deepEqual(j.legs.map((l) => l.walk), [true, false, true, false, true]);
+  // The start is not in the link: the first walk starts at the stop it leads to.
+  assert.equal(j.legs[0].from.name, 'S+U Alexanderplatz');
+  assert.deepEqual(j.legs[0].from.pos, [52.5215, 13.4113]);
+  assert.equal(j.legs[0].from.planned, V2_T0 * 1000);
+  assert.equal(j.legs[0].to.planned, (V2_T0 + 240) * 1000);
+  assert.equal(j.legs[1].provider, 'bvg');
+  assert.equal(j.legs[1].trip, '1|31911|21|86|14112026');
+  assert.equal(j.legs[1].line, 'S5');
+  assert.equal(j.legs[1].from.delay, 2);
+  assert.equal(j.legs[1].to.delay, 3);
+  assert.equal(j.legs[1].to.id, '900120003');
+  // The change walk runs from where the S5 ends to where the RE7 starts.
+  assert.equal(j.legs[2].from.id, '900120003');
+  assert.equal(j.legs[2].to.id, 'de-DELFI_000:11');
+  assert.equal(j.legs[2].from.planned, (V2_T0 + 840) * 1000);
+  assert.equal(j.legs[2].to.planned, (V2_T0 + 1020) * 1000);
+  assert.equal(j.legs[3].direction, 'Frankfurt (Oder) "Bhf" ü€😀');
+  assert.equal(j.legs[3].provider, 'tr');
+  assert.equal(j.legs[3].from.delay, -1);
+  assert.equal(j.legs[4].from.name, 'Flughafen BER');
+  assert.equal(j.legs[4].to.name, 'Zuhause');
+  assert.deepEqual(j.legs[4].to.pos, [52.366, 13.51]);
+  assert.equal(j.legs[4].to.planned, (V2_T0 + 2700) * 1000);
+  assert.deepEqual(j.dest, { name: 'Zuhause', pos: [52.366, 13.51], kind: 'h' });
+}
+
+test('v2: the JS encoder writes exactly the JSON of the app (live-v2.json)', () => {
+  assert.equal(live.encodeLive(V2_INPUT, { k: 'h' }), V2_FIXTURE);
+});
+
+test('v2: the fixture deflated by Java (as the app does it) reads back', async () => {
+  const j = await live.readFragment('#v=2&l=de&d=' + V2_FROM_JAVA);
+  checkV2Journey(j);
+  assert.equal(j.lang, 'de');
+  // The same with node's own deflate.
+  checkV2Journey(await live.readFragment(fragment2(V2_FIXTURE)));
+});
+
+test('v2: links of format v1 still read, newer or broken ones do not', async () => {
+  const j = await live.readFragment(fragment(sample));
+  assert.equal(j.legs.length, 2);
+  assert.equal(j.legs[1].from.delay, 2);
+  assert.equal(j.lang, null);
+  await assert.rejects(live.readFragment('#v=3&d=x'), /version/);
+  await assert.rejects(live.readFragment('#v=2&d='), /data/);
+  await assert.rejects(live.readFragment('#v=2&d=' + live.toBase64Url('not deflate data at all')), /data/);
+  await assert.rejects(live.readFragment(fragment2('{"b":1,"s":[],"r":[]}')), /data/);
+  await assert.rejects(live.readFragment(fragment2('{"b":1,"s":[["A"]],"r":[{"f":0,"t":7,"d":0,"a":60}]}')), /data/);
+  await assert.rejects(live.readFragment(fragment2('[1,2')), /data/);
+});
+
+test('v2: a browser without DecompressionStream gets its own message', async () => {
+  const saved = globalThis.DecompressionStream;
+  delete globalThis.DecompressionStream;
+  try {
+    await assert.rejects(live.readFragment(fragment2(V2_FIXTURE)), /unsupported/);
+    // v1 needs no unpacking.
+    assert.equal((await live.readFragment(fragment(sample))).legs.length, 2);
+  } finally {
+    globalThis.DecompressionStream = saved;
+  }
+});
+
+test('v2: walks that are no change between two rides stay legs of their own', async () => {
+  const raw = {
+    t: T0,
+    dest: { name: 'Hermannplatz', lat: 52.48693, lon: 13.42484 },
+    legs: [
+      { walk: true, from: { name: 'Startstraße 1', lat: 52.52, lon: 13.405, dep: T0 }, to: { name: 'Park', lat: 52.51, lon: 13.41, arr: T0 + 600 } },
+      { walk: true, from: { name: 'Park', lat: 52.51, lon: 13.41, dep: T0 + 600 }, to: { name: 'Hermannplatz', lat: 52.48693, lon: 13.42484, arr: T0 + 1500 } },
+    ],
+  };
+  const json = live.encodeLive(raw);
+  assert.doesNotMatch(json, /Startstra/, 'the start of the trip is not in the link');
+  assert.doesNotMatch(json, /52\.52,13\.405/);
+  const j = await live.readFragment(fragment2(json));
+  assert.equal(j.legs.length, 2);
+  assert.ok(j.legs.every((l) => l.walk));
+  assert.equal(j.legs[0].from.name, 'Park');
+  assert.equal(j.legs[1].to.planned, (T0 + 1500) * 1000);
+  assert.equal(j.name, null);
+});
+
+test('v2: a start that is a stop gives the first walk its name, still without its position', async () => {
+  const json = live.encodeLive(V2_INPUT, { o: 'S Hackescher Markt' });
+  const j = await live.readFragment(fragment2(json));
+  assert.equal(j.legs[0].from.name, 'S Hackescher Markt');
+  assert.deepEqual(j.legs[0].from.pos, [52.5215, 13.4113]);
+  assert.equal(j.dest.kind, null);
+});
+
+test('v2: a trip of 13 legs from Bonn to Berlin fits in a short link', async (t) => {
+  const site = 'https://nextstop.bapo.me/live/';
+  const v1 = site + fragment(V1_13_LEGS);
+  const v2 = site + fragment2(live.encodeLive(V1_13_LEGS), 'de');
+  t.diagnostic('13 legs: v1 ' + v1.length + ' characters, v2 ' + v2.length);
+  assert.ok(v1.length > 4096);
+  assert.ok(v2.length < 1500, 'v2 is ' + v2.length + ' characters');
+  const before = live.parseFragment(fragment(V1_13_LEGS));
+  const after = await live.readFragment(v2.slice(v2.indexOf('#')));
+  assert.equal(after.legs.length, 13);
+  before.legs.forEach((a, i) => {
+    const b = after.legs[i];
+    assert.equal(b.walk, a.walk, 'leg ' + i);
+    assert.equal(b.line, a.line);
+    assert.equal(b.trip, a.trip);
+    assert.equal(b.provider, a.provider);
+    assert.equal(b.direction, a.direction);
+    assert.equal(b.from.planned, a.from.planned, 'departure of leg ' + i);
+    assert.equal(b.to.planned, a.to.planned, 'arrival of leg ' + i);
+    if (!a.walk) {
+      assert.equal(b.from.delay, a.from.delay);
+      assert.equal(b.to.delay, a.to.delay);
+      assert.equal(b.from.id, a.from.id);
+      assert.equal(b.to.name, a.to.name);
+      assert.ok(live.distance(b.from.pos, a.from.pos) < 10, 'positions to about 10 m');
+    }
+  });
+  // Only the start of the trip is left out.
+  assert.notEqual(after.legs[0].from.name, before.legs[0].from.name);
+  assert.equal(after.dest.name, before.dest.name);
+  // The states follow the same times.
+  const now = (V1_13_LEGS.legs[5].from.dep + 600) * 1000;
+  assert.equal(live.tripState(live.computeLegs(after, {}), now).phase, live.tripState(live.computeLegs(before, {}), now).phase);
+});
+
+test('page language: the recipient\'s German or English, else the sender\'s', () => {
+  assert.equal(live.pickTexts('de-AT', 'en').lang, 'de');
+  assert.equal(live.pickTexts('en-GB', 'de').lang, 'en');
+  assert.equal(live.pickTexts('fr-FR', 'de').lang, 'de');
+  assert.equal(live.pickTexts('fr-FR', 'en').lang, 'en');
+  assert.equal(live.pickTexts('fr-FR', null).lang, 'en');
+  assert.equal(live.pickTexts('pl', 'it').lang, 'en');
+});
+
+test('headline: a saved home or work goes by "nach Hause", not by its address', () => {
+  const de = live.pickTexts('de');
+  const en = live.pickTexts('en');
+  const home = { name: 'Zuhause', kind: 'h' };
+  assert.equal(live.headline(de, 'ride', 'Ana', home), 'Ana ist auf dem Weg nach Hause');
+  assert.equal(live.headline(de, 'arrived', null, home), 'Zu Hause angekommen');
+  assert.equal(live.headline(en, 'walk', 'Ana', home), 'Ana is on the way home');
+  assert.equal(live.headline(de, 'before', 'Ana', { name: 'Arbeit', kind: 'w' }), 'Ana ist auf dem Weg zur Arbeit');
+  assert.equal(live.headline(en, 'arrived', 'Ana', { name: 'Work', kind: 'w' }), 'Ana has arrived at work');
+  assert.equal(live.headline(de, 'ride', 'Ana', { name: 'Hermannplatz', kind: null }), 'Ana ist unterwegs nach Hermannplatz');
+  assert.equal(live.headline(de, 'expired', 'Ana', home), 'Fahrt beendet');
+});
+
 const fromKotlin = process.argv[2];
 if (fromKotlin) {
-  test('a fragment made by the app (Kotlin base64Url) decodes', () => {
-    const j = live.parseFragment('#v=1&d=' + fromKotlin);
-    assert.equal(j.legs.length, 3);
-    assert.equal(j.name, 'Ana');
-    assert.equal(j.legs[0].from.name, 'Startstraße 1');
-    assert.equal(j.legs[1].direction, 'Hermannstraße');
-    assert.equal(j.legs[2].direction, 'Frankfurt (Oder) "Bhf" ü€😀');
-    assert.equal(j.legs[2].provider, 'tr');
-    assert.equal(j.legs[2].from.delay, -1);
-    assert.equal(j.legs[0].from.pos[0], 52.52);
-    assert.equal(j.dest.name, 'Erkner');
+  test('a fragment made by the app (Kotlin deflateRaw + base64Url of live-v2.json) decodes', async () => {
+    checkV2Journey(await live.readFragment('#v=2&d=' + fromKotlin));
   });
 }
 
@@ -401,4 +582,162 @@ test('line colours by the ride: product and place, the feed colour first', () =>
   assert.equal(core.canonicalLine('S 1', 'suburban'), 'S 1');
   assert.equal(core.inVbbArea(berlin), true);
   assert.equal(core.inVbbArea(bohemia), false);
+});
+
+// A ring line (S41/S42) whose run covers more than one lap calls at the same stations twice: the
+// ride is matched to the calls of its own times and its way cut on the pass of that lap.
+test('ring line: the ride on its own lap, its way and its vehicle', () => {
+  const core = require('../shared/core.js');
+  const names = ['Westkreuz', 'Halensee', 'Tempelhof', 'Südkreuz', 'Ostkreuz', 'Gesundbrunnen', 'Beusselstraße'];
+  const centre = [52.5, 13.4];
+  const r = 0.05;
+  const lonScale = 1 / Math.cos((centre[0] * Math.PI) / 180);
+  const angle = (k) => (k * 2 * Math.PI) / names.length;
+  const onCircle = (a, f) => [centre[0] + r * f * Math.sin(a), centre[1] + r * f * lonScale * Math.cos(a)];
+  const station = (k) => onCircle(angle(k % names.length), 0.995);
+  const start = Date.UTC(2026, 2, 2, 11, 0);
+  const delay = 3 * 60000;
+  const hops = 10;
+  const per = 24;
+  const stops = [];
+  for (let k = 0; k <= hops; k++) {
+    const planned = start + k * 8 * 60000;
+    stops.push({ name: names[k % names.length], id: 'id' + (k % names.length), pos: station(k),
+      pdep: planned, parr: planned, dep: planned + delay, arr: planned + delay });
+  }
+  // The second lap's way runs a few metres nearer to the stations, so the nearest point of all lies a lap ahead.
+  const path = [];
+  for (let h = 0; h < hops; h++) {
+    for (let s = 0; s < per; s++) path.push(onCircle(angle(h) + (angle(1) * s) / per, h < names.length ? 1 : 0.9985));
+  }
+  path.push(onCircle(angle(hops), 0.9985));
+  assert.ok(core.nearestIndex(path, station(1), 0) < names.length * per, 'first pass');
+  const place = (k) => ({ name: names[k % names.length], id: 'id' + (k % names.length), pos: station(k),
+    planned: start + k * 8 * 60000, delay: 3 });
+  // By id and by name alike: the second call at Halensee, then Südkreuz after it.
+  assert.equal(core.matchStop(stops, place(8), null, 'dep'), 8);
+  assert.equal(core.matchStop(stops, Object.assign(place(8), { id: null }), null, 'dep'), 8);
+  assert.equal(core.matchStop(stops, place(10), 8, 'arr'), 10);
+  assert.equal(core.matchStop(stops, place(3), 1, 'arr'), 3);
+  // Without a key as before: the first call.
+  assert.equal(core.matchStop(stops, place(8), null), 1);
+  const journey = { legs: [{ walk: false, line: 'S42', from: place(8), to: place(10) }] };
+  const legs = live.computeLegs(journey, { 0: { stops, path, line: 'S42', product: 'suburban' } });
+  const leg = legs[0];
+  assert.equal(leg.stops.length, 3);
+  assert.deepEqual(leg.stops.map((s) => s.name), ['Halensee', 'Tempelhof', 'Südkreuz']);
+  assert.equal(leg.dep, start + 64 * 60000 + delay);
+  // The way covers Halensee, Tempelhof and Südkreuz only: never the far side of the ring.
+  assert.equal(leg.path.length, 2 * per + 1);
+  leg.path.forEach((p) => assert.ok(live.distance(p, station(6)) > 3000 && live.distance(p, station(4)) > 2000));
+  assert.ok(leg.path.some((p) => live.distance(p, station(2)) < 60));
+  // Half way from Halensee to Tempelhof by the times: there, on the second lap's tracks.
+  const at = live.ridePosition(leg, start + 68 * 60000 + delay);
+  assert.ok(live.distance(at.pos, onCircle((angle(1) + angle(2)) / 2, 0.9985)) < 50);
+  // The plain cut of the old way finds the stretch too.
+  const cut = core.cutPathBetween(path, stops, 8, 10);
+  assert.equal(cut.length, 2 * per + 1);
+});
+
+test('look of the app: minutes as "19′" and "1:20 h", the counter of the hero', () => {
+  const c = require('../shared/core.js');
+  assert.equal(c.minutesMark(5), '5′');
+  assert.equal(c.minutesMark(59.4), '59′');
+  assert.equal(c.minutesMark(60), '1:00 h');
+  assert.equal(c.minutesMark(80), '1:20 h');
+  assert.equal(c.minutesMark(-3), '0′');
+  assert.equal(c.minutesMark(null), null);
+  const t = 10 * 3600000;
+  assert.equal(live.counterText(t, t - 19 * 60000 + 1000, 'jetzt'), '19′'); // rounded up, like a departure board
+  assert.equal(live.counterText(t, t - 30000, 'jetzt'), 'jetzt');
+  assert.equal(live.counterText(t, t - 65 * 60000, 'jetzt'), '1:05 h');
+  assert.equal(live.counterText(t, t, 'jetzt'), '');
+});
+
+test('look of the app: the bar of the trip in pieces by leg', () => {
+  const segs = live.progressSegments([
+    { dep: 0, arr: 100, walk: true },
+    { dep: 100, arr: 600, color: '#EB7405' },
+    { dep: 700, arr: 1000, color: '#992746' },
+  ]);
+  assert.equal(segs.length, 3);
+  assert.deepEqual(segs.map((s) => s.walk), [true, false, false]);
+  assert.equal(segs[0].left, 0);
+  assert.ok(Math.abs(segs[1].width - 0.5) < 1e-9);
+  assert.ok(Math.abs(segs[2].left - 0.7) < 1e-9, 'the wait before the S9 belongs to no piece');
+  assert.equal(segs[2].color, '#992746');
+  assert.equal(segs[0].color, null);
+  // A leg of no length still shows as a sliver, never past the end.
+  const zero = live.progressSegments([{ dep: 0, arr: 0, color: '#000' }, { dep: 0, arr: 1000, color: '#111' }]);
+  assert.ok(zero[0].width > 0);
+  assert.ok(zero[1].left + zero[1].width <= 1);
+  assert.deepEqual(live.progressSegments([]), []);
+});
+
+test('look of the app: the swipe sheet rests open or collapsed', () => {
+  assert.equal(live.sheetRest(100, 0, 500), 0, 'near the top: open');
+  assert.equal(live.sheetRest(400, 0, 500), 500, 'near the bottom: collapsed');
+  assert.equal(live.sheetRest(100, 0.8, 500), 500, 'a flick down collapses');
+  assert.equal(live.sheetRest(450, -0.8, 500), 0, 'a flick up opens');
+  assert.equal(live.sheetRest(10, 0, 0), 0, 'nothing to collapse');
+  assert.equal(live.sheetClamp(250, 500), 250);
+  assert.equal(live.sheetClamp(-30, 500), -10, 'a soft give above the top');
+  assert.equal(live.sheetClamp(530, 500), 510, 'and below the bottom');
+});
+
+test('hero: what comes next, with counter, time, delay and platform', () => {
+  const j = live.parseFragment(fragment(sample));
+  const withPlatforms = JSON.parse(JSON.stringify(bvgTrip));
+  withPlatforms.trip.stopovers[0].departurePlatform = '1';
+  withPlatforms.trip.stopovers[2].arrivalPlatform = '2';
+  const legs = live.computeLegs(j, { 1: live.parseBvgTrip(withPlatforms) });
+  assert.equal(legs[1].depPlatform, '1');
+  assert.equal(legs[1].arrPlatform, '2');
+  const T = live.pickTexts('de');
+  const at = (s) => live.heroModel(T, live.tripState(legs, (T0 + s) * 1000), (T0 + s) * 1000);
+  const before = at(-60);
+  assert.equal(before.kind, 'before');
+  assert.equal(before.title, 'Los geht\'s zu Fuß');
+  assert.equal(before.counter, '1′');
+  const walk = at(100);
+  assert.equal(walk.kind, 'walk');
+  assert.equal(walk.title, 'Zu Fuß zu U Alexanderplatz');
+  const board = at(400);
+  assert.equal(board.kind, 'board');
+  assert.equal(board.title, 'Einsteigen in U8 · U Alexanderplatz');
+  assert.equal(board.platform, 'Gleis 1');
+  assert.equal(board.delay, 2);
+  const ride = at(945);
+  assert.equal(ride.kind, 'off');
+  assert.equal(ride.title, 'Aussteigen in U Hermannplatz');
+  assert.equal(ride.counter, '6′'); // arrives at +1260
+  assert.equal(ride.time, (T0 + 1260) * 1000);
+  assert.equal(ride.delay, 3);
+  assert.equal(ride.platform, 'Gleis 2');
+  assert.equal(live.heroModel(live.pickTexts('en'), live.tripState(legs, (T0 + 945) * 1000), (T0 + 945) * 1000).title, 'Get off at U Hermannplatz');
+  const arrived = at(1300);
+  assert.equal(arrived.kind, 'arrived');
+  assert.equal(arrived.counter, '');
+  const expired = live.heroModel(T, live.tripState(legs, (T0 + 1300) * 1000 + live.EXPIRY_MS), (T0 + 1300) * 1000 + live.EXPIRY_MS);
+  assert.equal(expired.kind, 'expired');
+  assert.equal(expired.title, 'Fahrt beendet');
+  // Without live data no platform is made up.
+  const plain = live.computeLegs(j, {});
+  assert.equal(live.heroModel(T, live.tripState(plain, (T0 + 700) * 1000), (T0 + 700) * 1000).platform, null);
+});
+
+test('platforms: "Gleis" for rail, "Steig" for bus, labels as they are', () => {
+  const T = live.pickTexts('de');
+  assert.equal(live.platformLabel(T, '3', 'S9', [52.5, 13.4]), 'Gleis 3');
+  assert.equal(live.platformLabel(T, '3', 'M10', [52.5, 13.4]), 'Steig 3');
+  assert.equal(live.platformLabel(T, 'Pos. 11', 'RE7', [52.5, 13.4]), 'Pos. 11');
+  assert.equal(live.platformLabel(T, null, 'S9', null), null);
+});
+
+test('the app: opens by an intent link, else its store page', () => {
+  assert.equal(live.PLAY_URL, 'https://play.google.com/store/apps/details?id=io.github.jnbp.nextstop');
+  const url = live.appIntentUrl('', null);
+  assert.match(url, /^intent:\/\/open#Intent;scheme=nextstop;package=io\.github\.jnbp\.nextstop;S\.browser_fallback_url=https%3A%2F%2Fplay\.google\.com%2F/);
+  assert.match(url, /;end$/);
+  assert.equal(live.appIntentUrl('route', 'toName=X', null), 'intent://open/route?toName=X#Intent;scheme=nextstop;package=io.github.jnbp.nextstop;end');
 });
