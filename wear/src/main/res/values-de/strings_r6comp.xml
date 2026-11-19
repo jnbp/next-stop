@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A connection or a step without a ride, in a complication or a tile (in place of the lines). -->
+    <string name="r6comp_on_foot">Zu Fuß</string>
+    <!-- A step by bike in a short complication slot (at most 7 characters). -->
+    <string name="r6comp_by_bike">Rad</string>
+</resources>

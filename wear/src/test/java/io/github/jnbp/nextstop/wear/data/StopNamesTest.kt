@@ -59,4 +59,30 @@ class StopNamesTest {
         assertNull(dominantTown(listOf("U Freie Universität (Thielplatz)", "Freie Universität (Thielplatz)", "Habelschwerdter Allee")))
         assertNull(dominantTown(listOf("Lahr (Nord)", "Markt (Nord)", "Schule (Nord)")))
     }
+
+    @Test
+    fun aBareStationWordKeepsItsTown() {
+        // #255: dropping the home town never leaves a bare "Hauptbahnhof" (as the phone's StopTownsTest).
+        assertEquals("Musterstadt Hbf", stopNameParts("Hauptbahnhof (Musterstadt)", "Musterstadt").title)
+        assertEquals("Musterstadt Hbf", stopNameParts("Hbf (Musterstadt)", "Musterstadt").title)
+        assertEquals("Musterstadt Hbf", stopNameParts("Hauptbahnhof, Musterstadt", "Musterstadt").title)
+        assertEquals("Musterstadt", stopNameParts("Bahnhof (Musterstadt)", "Musterstadt").title)
+        assertEquals("Musterstadt Busbahnhof", stopNameParts("Busbahnhof (Musterstadt)", "Musterstadt").title)
+        assertEquals("Musterstadt ZOB", stopNameParts("ZOB, Musterstadt", "Musterstadt").title)
+        assertEquals("Rathaus", stopNameParts("Rathaus (Musterstadt)", "Musterstadt").title)
+        assertEquals("S+U Hauptbahnhof", stopNameParts("S+U Hauptbahnhof (Musterstadt)", "Musterstadt").title)
+    }
+
+    @Test
+    fun aStreetInBracketsIsNoTownAndStays() {
+        // #278 (the phone's StopTownsTest): Dresden, "Bf Neustadt (Hansastr.)" is not "Bahnhof Neustadt".
+        assertEquals("Dresden Bf Neustadt (Hansastr.)", stopNameParts("Dresden Bf Neustadt (Hansastr.)", "Dresden").title)
+        assertEquals("Dresden Bf Neustadt (Hansastr)", stopNameParts("Dresden Bf Neustadt (Hansastr)", "Hansastr").title)
+        assertEquals("Schule (Am Marktplatz)", stopNameParts("Schule (Am Marktplatz)", "Musterstadt").title)
+        assertEquals("Parkstr. (Hauptallee)", listedStopName("Parkstr. (Hauptallee)", "Musterstadt"))
+        // A town in brackets that repeats the town still goes.
+        assertEquals("Rathaus", stopNameParts("Rathaus (Musterstadt)", "Musterstadt").title)
+        assertEquals("Rathaus (Beispielstadt)", stopNameParts("Rathaus (Beispielstadt)", "Musterstadt").title)
+        assertEquals("S Beispielhof", stopNameParts("S Beispielhof (Berlin)", "Berlin").title)
+    }
 }

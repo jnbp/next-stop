@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #196: no source reached at all, instead of "nothing found". -->
+    <string name="r6s2w_services_offline">Services unreachable.\nCheck your internet connection.</string>
+    <string name="r6s2w_services_down">Services unreachable.\nPlease try again later.</string>
+</resources>

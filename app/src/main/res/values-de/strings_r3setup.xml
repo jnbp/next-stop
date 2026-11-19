@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Setup: the short welcome with its two paths. -->
+    <string name="setup_welcome_line">Live-Verbindungen in ganz Deutschland, auch die, die du sonst nicht siehst.</string>
+    <string name="setup_quick_start">Schnell starten</string>
+    <string name="setup_quick_view_text">Das und alles andere kannst du später in den Einstellungen ändern.</string>
+    <string name="setup_quick_basics_title">Zwei Freigaben, dann geht’s los</string>
+    <string name="setup_quick_basics_text">Dein Standort, damit du dort startest, wo du bist, und Benachrichtigungen für die Live-Fahrt unterwegs. Beides ist freiwillig.</string>
+    <!-- Setup: the watch page without a watch. -->
+    <string name="setup_watch_none_short">Gerade ist keine Uhr verbunden. Das ist okay.</string>
+    <string name="setup_watch_none_title">Hast du eine Wear-OS-Uhr?</string>
+    <string name="setup_watch_none_text">Die App gibt es auch für die Uhr. Du kannst sie dort jederzeit später installieren.</string>
+    <string name="setup_watch_store_link">Im Play Store öffnen</string>
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r7night_search_known">Zuletzt und Favoriten</string>
+    <!-- #225: the pinned status line of the map view brings the blue box back. -->
+    <string name="r7night_pin_show_step">Nächsten Schritt zeigen</string>
+</resources>

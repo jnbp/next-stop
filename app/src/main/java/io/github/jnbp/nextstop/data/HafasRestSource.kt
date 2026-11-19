@@ -402,7 +402,7 @@ abstract class HafasRestSource(baseUrl: String) : TransitSource {
         placeQuery("from", from) + "&" + placeQuery("to", to) +
             "&results=$results&stopovers=false&remarks=true&polylines=true&language=$language" +
             "&transferTime=${options.comfort.minutes}" + optionQuery(options) +
-            productQuery(searchProducts(options, from, time)) + viaQuery(options.via) + ticketQuery(options)
+            productQuery(searchProducts(options, from, time)) + viaQuery(options.via)
 
     /**
      * The products a journey search asks for: those of [options]; with the bike combo without
@@ -417,12 +417,9 @@ abstract class HafasRestSource(baseUrl: String) : TransitSource {
             BikeRules.comboProducts(options.products, BikeRules.busesWorthAsking(from.position, time))
         }
 
-    /**
-     * Bicycle (also the bike combo): `bike=true`, only journeys that take a bicycle along. The
-     * Deutschlandticket is long-distance trains off, which [productQuery] does.
-     */
-    private fun ticketQuery(options: SearchOptions): String =
-        if (options.carriesBike) "&bike=true" else ""
+    // Nothing for the bicycle (#263): HAFAS `bike=true` drops every ride without an explicit
+    // "bicycles allowed", and the BVG even marks its S-Bahn "no bicycles" where they are allowed;
+    // the app's own BikeRules filter instead (see ticketFits).
 
     /**
      * A station the journeys must pass (parameter `via` of /journeys, a stop id). The API has
@@ -509,6 +506,7 @@ abstract class HafasRestSource(baseUrl: String) : TransitSource {
             warnings = parseWarnings(item.optJSONArray("remarks"), item.optJSONObject("stop")?.let { parseStop(it) }),
             // Where it leaves: the colour of its line depends on the place.
             at = item.optJSONObject("stop")?.let { parseStop(it) }?.position,
+            occupancy = Occupancy.fromLoadFactor(item.stringOrNull("loadFactor")),
         )
     }
 
@@ -538,6 +536,8 @@ abstract class HafasRestSource(baseUrl: String) : TransitSource {
         val fromPlace = item.optJSONObject("origin")?.let { parseStop(it) }
         val toPlace = item.optJSONObject("destination")?.let { parseStop(it) }
         val shape = parsePolyline(item.optJSONObject("polyline"))
+        // The hints among the remarks: bicycles and step-free as icons, the bicycle words for its chip (#248).
+        val hints = if (walking) emptyList() else hintsOf(item.optJSONArray("remarks"))
         return Leg(
             line = lineNameOf(line),
             product = productOf(line),
@@ -550,6 +550,8 @@ abstract class HafasRestSource(baseUrl: String) : TransitSource {
             plannedArrival = plannedArrival,
             departurePlatform = item.stringOrNull("departurePlatform"),
             arrivalPlatform = item.stringOrNull("arrivalPlatform"),
+            plannedDeparturePlatform = item.stringOrNull("plannedDeparturePlatform"),
+            plannedArrivalPlatform = item.stringOrNull("plannedArrivalPlatform"),
             direction = item.stringOrNull("direction"),
             cancelled = item.optBoolean("cancelled", false),
             realtime = !item.isNull("departureDelay") || !item.isNull("arrivalDelay"),
@@ -561,7 +563,19 @@ abstract class HafasRestSource(baseUrl: String) : TransitSource {
             tripId = item.stringOrNull("tripId"),
             additional = isAdditional(item.optJSONArray("remarks")),
             walkMeters = if (walking) item.intOrNull("distance") else null,
+            occupancy = if (walking) null else Occupancy.fromLoadFactor(item.stringOrNull("loadFactor")),
+            features = if (walking) emptySet() else rideFeatures(hints),
+            bikeNote = if (walking) null else bikeRemarkText(hints),
         )
+    }
+
+    /** The hints among [remarks] (not the warnings), each as its code and text, for [rideFeatures]. */
+    private fun hintsOf(remarks: JSONArray?): List<Pair<String?, String?>> {
+        if (remarks == null) return emptyList()
+        return (0 until remarks.length()).mapNotNull { index ->
+            val item = remarks.optJSONObject(index) ?: return@mapNotNull null
+            if (item.stringOrNull("type") != "hint") null else item.stringOrNull("code") to item.stringOrNull("text")
+        }
     }
 
     /** The provider sends no shape for a walk: the straight line between both ends stands in for it. */

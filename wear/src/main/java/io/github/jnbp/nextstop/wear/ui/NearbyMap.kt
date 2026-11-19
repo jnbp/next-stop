@@ -38,6 +38,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.runtime.mutableFloatStateOf
+import io.github.jnbp.nextstop.wear.data.MapZoom
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -384,6 +387,8 @@ private fun StopsMap(
     val hintFit = remember(hint, hintStyle, canvasSize, round) {
         fitHint(textMeasurer, hint, hintStyle, min(canvasSize.width, canvasSize.height).toFloat(), round, density)
     }
+    val hostView = LocalView.current
+    var crownRest by remember { mutableFloatStateOf(0f) }
     ScreenScaffold { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
             Canvas(
@@ -391,7 +396,12 @@ private fun StopsMap(
                     .fillMaxSize()
                     .onSizeChanged { canvasSize = it }
                     .onRotaryScrollEvent { event ->
+                        val before = span
                         span = (span * exp(event.verticalScrollPixels / ROTARY_PIXELS_PER_E)).coerceIn(MIN_SPAN, MAX_SPAN)
+                        // A tick of the haptics per notch of the crown, none at the ends of the zoom (#144).
+                        val (notches, rest) = MapZoom.notches(crownRest + event.verticalScrollPixels)
+                        crownRest = rest
+                        if (notches != 0 && span != before) mapZoomTick(hostView)
                         true
                     }
                     .crownFocus()
@@ -523,6 +533,7 @@ private fun StopsMap(
                         onClick = { onStop(chosen.place) },
                         icon = R.drawable.ic_schedule,
                         primary = true,
+                        compact = true,
                     )
                 } else {
                     // A short hint, narrow enough for the bottom of a round screen, that fades

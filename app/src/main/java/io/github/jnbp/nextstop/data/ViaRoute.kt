@@ -74,3 +74,30 @@ fun joinedVia(head: Journey, tail: Journey, via: Via): Journey = mergeThroughRun
         via = JourneyVia(via.place, via.minutes, head.legs.size),
     ),
 )
+
+/**
+ * From this many hours after the time asked for, the first connection of a search through a
+ * place on the way does not count as found soon (see [viaFoundTooLate]).
+ */
+const val VIA_SOON_HOURS = 3L
+
+/**
+ * True when a search through a place on the way, leaving at [asked], found nothing that leaves
+ * within [VIA_SOON_HOURS]: none at all, or only later ones (#35a: "über Bonn" at 20:39 came back
+ * with the next morning's 05:21 alone, although trains passed Bonn Hbf all evening). The search
+ * is then put together from two (see composeVia), and if that finds nothing soon either, the
+ * list says so instead of showing the later ones as the next.
+ */
+fun viaFoundTooLate(asked: OffsetDateTime, journeys: List<Journey>): Boolean =
+    journeys.isEmpty() || journeys.minOf { it.departure.toInstant() }.isAfter(asked.plusHours(VIA_SOON_HOURS).toInstant())
+
+/**
+ * The better of a search through a place on the way in one request ([single]) and the same put
+ * together from two ([composed], see composeVia), leaving at [asked]: the single one where it
+ * found something soon (see [viaFoundTooLate]); else the one whose first connection leaves first.
+ */
+fun earlierVia(asked: OffsetDateTime, single: List<Journey>, composed: List<Journey>?): Boolean {
+    if (!viaFoundTooLate(asked, single) || composed.isNullOrEmpty()) return false
+    if (single.isEmpty()) return true
+    return composed.minOf { it.departure.toInstant() }.isBefore(single.minOf { it.departure.toInstant() })
+}

@@ -457,13 +457,15 @@ function tripUrl(leg) {
 // The colours of the app (data/LineColors.kt, ui/Components.kt): S- and U-Bahn of Berlin's
 // network map, which belong to a U-Bahn named U... or an S-Bahn named S... in the VBB area only;
 // then by kind and product.
+// The U-Bahn colours are those of the BVG's current line signs.
 const LINE_COLORS = {
-  U1: '#7DAD4C', U2: '#DA421E', U3: '#16683D', U4: '#F0D722', U5: '#7E5330', U6: '#8C6DAB',
-  U7: '#528DBA', U8: '#224F86', U9: '#F3791D',
+  U1: '#419328', U2: '#ED3C12', U3: '#016144', U4: '#FFC101', U5: '#603B2C', U6: '#504F87',
+  U7: '#0279BD', U8: '#013F75', U9: '#F96815',
   S1: '#DA6BA2', S2: '#007734', S25: '#007734', S26: '#007734', S3: '#0066AD', S41: '#AD5937',
   S42: '#CB6418', S45: '#CD9C53', S46: '#CD9C53', S47: '#CD9C53', S5: '#EB7405', S7: '#816DA6',
   S75: '#816DA6', S8: '#66AA22', S85: '#66AA22', S9: '#992746',
 };
+const SUBWAY_SIGN_COLORS = Object.keys(LINE_COLORS).filter((k) => k.charAt(0) === 'U').map((k) => LINE_COLORS[k]);
 const PRODUCT_COLORS = {
   subway: '#115D91', suburban: '#2D8B3C', tram: '#BE1414', bus: '#95276E', ferry: '#528DBA',
   regional: '#DA251D', express: '#4A4F57', coach: '#2F6F73',
@@ -545,14 +547,16 @@ function guessProduct(line, pos) {
 
 /**
  * The colour of the badge of a ride of [line] of [product] at [pos] ([lat, lon], where it is
- * boarded), as in the app (LineColors.rideStyle): the colour its feed sends for this very ride
- * first; Berlin's network colours only for a U-Bahn named U... or an S-Bahn named S... in the VBB
- * area; then ICE red, FlixTrain green, and the colour of the product.
+ * boarded), as in the app (LineColors.rideStyle): for a U-Bahn of Berlin the colour of the BVG's
+ * line sign, before any colour a feed sends; else the colour its feed sends for this very ride;
+ * Berlin's network colours for an S-Bahn named S... in the VBB area; then ICE red, FlixTrain
+ * green, and the colour of the product.
  */
 function lineColor(line, product, feedColor, pos) {
-  if (feedColor && /^#[0-9a-f]{6}$/i.test(feedColor)) return feedColor;
   const kind = product || guessProduct(line, pos);
   const name = String(line || '').replace(/\s+/g, '').toUpperCase();
+  if (kind === 'subway' && name.charAt(0) === 'U' && LINE_COLORS[name] && inHomeArea(pos)) return LINE_COLORS[name];
+  if (feedColor && /^#[0-9a-f]{6}$/i.test(feedColor)) return feedColor;
   const letter = kind === 'subway' ? 'U' : kind === 'suburban' ? 'S' : null;
   if (letter && name.charAt(0) === letter && LINE_COLORS[name] && inHomeArea(pos)) return LINE_COLORS[name];
   const upper = String(line || '').toUpperCase();
@@ -561,10 +565,16 @@ function lineColor(line, product, feedColor, pos) {
   return PRODUCT_COLORS[kind] || '#5A6072';
 }
 
-/** Dark or white ink on a badge of [hex]. */
+/**
+ * Dark or white ink on a badge of [hex]. On the colour of a Berlin U-Bahn line the ink of the
+ * BVG's sign: white, black on the U4's yellow.
+ */
 function inkOn(hex) {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '');
   if (!m) return '#ffffff';
+  const upper = '#' + (m[1] + m[2] + m[3]).toUpperCase();
+  if (upper === LINE_COLORS.U4) return '#000000';
+  if (SUBWAY_SIGN_COLORS.indexOf(upper) >= 0) return '#ffffff';
   const lin = (v) => {
     const c = parseInt(v, 16) / 255;
     return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
@@ -783,6 +793,19 @@ function sheetRest(offset, velocity, closed) {
   return offset > closed / 2 ? closed : 0;
 }
 
+/**
+ * What a drag on the head of a swipe sheet does (#262), decided once it has moved [dy] px (down
+ * positive): 'sheet' moves the sheet, 'scroll' scrolls its content. The handle row always moves
+ * the sheet. The hero ([handle] 'hero') moves the collapsed sheet either way and the open one
+ * down while its content is at the top ([scrollTop] 0), as a native bottom sheet; pushed up on
+ * the open sheet, or down while the content is scrolled, it scrolls the content instead.
+ */
+function sheetDragMode(handle, open, dy, scrollTop) {
+  if (handle !== 'hero' || !open) return 'sheet';
+  if (dy > 0 && !(scrollTop > 0)) return 'sheet';
+  return 'scroll';
+}
+
 /** An offset of a sheet held within 0..[closed], with a soft give beyond both ends. */
 function sheetClamp(offset, closed) {
   if (offset < 0) return offset / 3;
@@ -866,6 +889,7 @@ const api = {
   progressSegments,
   sheetRest,
   sheetClamp,
+  sheetDragMode,
   appIntentUrl,
   boardParts,
 };

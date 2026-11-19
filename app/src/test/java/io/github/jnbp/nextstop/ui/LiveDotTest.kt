@@ -88,4 +88,12 @@ class LiveDotTest {
         assertEquals(1_500L, hintSwitchDelayMillis(wanted = true, sinceChangeMillis = 500L))
         assertTrue(hintSwitchDelayMillis(wanted = false, sinceChangeMillis = 0L) >= HINT_STEADY_MILLIS)
     }
+
+    @Test
+    fun leavingTheMapHidesTheHintAtOnce() {
+        // #141: off the map's pages (another tab) no waiting, also right after it showed.
+        assertEquals(0L, hintSwitchDelayMillis(wanted = false, sinceChangeMillis = 0L, mapLeft = true))
+        // Coming back to the map shows it as before.
+        assertEquals(HINT_SHOW_AFTER_MILLIS, hintSwitchDelayMillis(wanted = true, sinceChangeMillis = 60_000L, mapLeft = true))
+    }
 }

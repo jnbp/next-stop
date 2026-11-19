@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Wohin ein Umstieg führt, wenn weder Gleis noch Halteposition bekannt sind (#239). -->
+    <string name="r8fix_change_to_stop">Haltestelle</string>
+    <!-- Ein Fußweg verlässt den Bahnhof über einen Ausgang ohne eigenen Namen (#240). -->
+    <string name="r8fix_walk_exit_plain">über den Ausgang</string>
+    <!-- Der vom Entwicklertest erzwungene Sonnen-Chip sagt das (#241). -->
+    <string name="r8fix_sun_chip_test">Test</string>
+    <string name="r8fix_sun_chip_test_a11y">Entwicklertest</string>
+</resources>

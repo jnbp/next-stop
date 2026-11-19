@@ -8,6 +8,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
@@ -19,12 +20,13 @@ import androidx.wear.compose.foundation.rotary.rotaryScrollable
  * with [crownScroll]. The focus is asked for again each time the page comes back to the front
  * (its navigation entry or the app resumed: back from a page above it, from voice input, from
  * ambient mode) and, for a page of a pager, when it becomes the [active] one, so the crown never
- * goes dead after a detour.
+ * goes dead after a detour. Also when the window gets the focus back (a heads-up, a dialog) and
+ * when [refocus] changes (the companion passes its ambient state: back from always-on).
  */
 @Composable
-fun Modifier.crownFocus(active: Boolean = true): Modifier {
+fun Modifier.crownFocus(active: Boolean = true, refocus: Any? = null): Modifier {
     val focus = remember { FocusRequester() }
-    CrownFocusEffect(focus, active)
+    CrownFocusEffect(focus, active, refocus)
     return this.focusRequester(focus)
 }
 
@@ -33,17 +35,19 @@ fun Modifier.crownFocus(active: Boolean = true): Modifier {
  * [crownFocus]. Put it before verticalScroll.
  */
 @Composable
-fun Modifier.crownScroll(scroll: ScrollState, active: Boolean = true): Modifier {
+fun Modifier.crownScroll(scroll: ScrollState, active: Boolean = true, refocus: Any? = null): Modifier {
     val focus = remember { FocusRequester() }
-    CrownFocusEffect(focus, active)
+    CrownFocusEffect(focus, active, refocus)
     return this.rotaryScrollable(behavior = RotaryScrollableDefaults.behavior(scroll), focusRequester = focus)
 }
 
 @Composable
-private fun CrownFocusEffect(focus: FocusRequester, active: Boolean) {
+private fun CrownFocusEffect(focus: FocusRequester, active: Boolean, refocus: Any?) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(focus, active, lifecycle) {
-        if (!active) return@LaunchedEffect
+    // The window back in focus (a notification, a dialog or another window was in front) asks again too.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(focus, active, lifecycle, windowFocused, refocus) {
+        if (!active || !windowFocused) return@LaunchedEffect
         lifecycle.currentStateFlow.collect { state ->
             if (state == Lifecycle.State.RESUMED) {
                 // One frame later, so the focus target is attached.

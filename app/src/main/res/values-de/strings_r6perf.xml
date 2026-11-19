@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Jank meter of the developer options (r6perf) -->
+    <string name="r6perf_jank_late">verspätet</string>
+    <string name="r6perf_jank_cause_vehicles">Fahrzeuge</string>
+    <string name="r6perf_jank_cause_pulse">Puls</string>
+    <string name="r6perf_jank_cause_other">sonst</string>
+    <string name="r6perf_jank_basis">p95 und max: Arbeit pro Bild auf Haupt- und Render-Thread (Budget 8,3 ms bei 120 Hz). Verspätet: Bilder, die ihren Vsync verpasst haben.</string>
+    <string name="r6perf_jank_transitions">Übergänge</string>
+    <string name="r6perf_jank_transitions_none">Noch kein Seitenwechsel gezählt</string>
+    <string name="r6perf_jank_first_draw">erstes Bild</string>
+    <string name="r6perf_jank_longest">längstes Bild</string>
+    <string name="r6perf_jank_backdrop">Glas-Bild</string>
+</resources>

@@ -8,7 +8,7 @@
 <br>
 
 [![Android](https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white)](#getting-started)
-[![Wear OS](https://img.shields.io/badge/Wear%20OS-3%2B-4285F4?logo=wearos&logoColor=white)](#trip-companion)
+[![Wear OS](https://img.shields.io/badge/Wear%20OS-3%2B-4285F4?logo=wearos&logoColor=white)](#live-trip)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-1B4FD8)](LICENSE)
@@ -30,7 +30,7 @@ on the phone, on the watch and on a page your friends can follow.
 
 - [Highlights](#highlights) · [All features](#all-features)
 - [How it works](#how-it-works)
-  - [Transfer levels](#transfer-levels) · [Chart view](#chart-view) · [Setup and settings](#setup-and-settings) · [Trip companion](#trip-companion)
+  - [Transfer levels](#transfer-levels) · [Chart view](#chart-view) · [Setup and settings](#setup-and-settings) · [Live trip](#live-trip)
   - [Live link and route link](#live-link-and-route-link) · [Little motions](#little-motions) · [Timetable sources](#timetable-sources) · [From OpenStreetMap to the app](#from-openstreetmap-to-the-app)
 - [Screenshots](#screenshots)
 - [Architecture](#architecture)
@@ -59,7 +59,7 @@ Measured on the station's OpenStreetMap footways – stairs, lifts and platforms
 </td>
 <td width="33%" valign="top">
 <img src="docs/images/icon-companion.svg" width="40" height="40" alt=""><br>
-<b>Trip companion</b><br>
+<b>Live trip</b><br>
 Next step, countdown and stops left with live times – in the app and as a live notification.
 </td>
 </tr>
@@ -94,7 +94,7 @@ Entrances, accesses through buildings, lifts and the stop positions of bus and t
 <td valign="top">
 <img src="docs/images/icon-watch.svg" width="40" height="40" alt=""><br>
 <b>Made for Wear OS</b><br>
-Tiles, a complication, companion pages, a map and standalone search on the wrist.
+Tiles, a complication, live trip pages, a map and standalone search on the wrist.
 </td>
 </tr>
 <tr>
@@ -137,11 +137,11 @@ No account, no ads, no tracking – and no server of ours in between.
 </details>
 
 <details>
-<summary><b>Ride</b> – companion, boarding hints, shortcut alert, reminders</summary>
+<summary><b>Ride</b> – live trip, boarding hints, shortcut alert, reminders</summary>
 
 | | |
 |---|---|
-| **Trip companion** | Follows your trip with live times: the next step, the countdown to the departure, the stops left – in the app and as a live notification. |
+| **Live trip** | Follows your trip with live times: the next step, the countdown to the departure, the stops left – in the app and as a live notification. |
 | **Boarding hints** | *Board at the front / middle / rear* from change-position data; estimated for changes to buses and trams. |
 | **Shortcut alert** | Searches in the background while you ride and alerts you when a faster way turns up – optionally only equally comfortable ones. |
 | **Every minute counts** | A per-trip mode: sprint changes allowed, shortcut alert on, searching again from the next stop you can reach. |
@@ -164,12 +164,12 @@ No account, no ads, no tracking – and no server of ours in between.
 </details>
 
 <details>
-<summary><b>Watch</b> – tiles, complication, companion pages, map, search</summary>
+<summary><b>Watch</b> – tiles, complication, live trip pages, map, search</summary>
 
 | | |
 |---|---|
 | **Tiles & complication** | *Next departure* and *Favourite* tiles and a complication on the watch face. |
-| **Companion pages** | Swipe through depart, ride, change and overview pages during a trip; get-off alerts with haptics. |
+| **Live trip pages** | Swipe through depart, ride, change and overview pages during a trip; get-off alerts with haptics. |
 | **Map** | A map of the stops and departures nearby. |
 | **Standalone search** | Type or speak a destination on the watch; it uses the phone's position or its own. |
 
@@ -228,7 +228,7 @@ rules live in `Models.kt` (`changeNeed`, `paceTightness`, `journeyChangeRatings`
 The same sketches move when you pick an option, and stand still when the system has animations
 turned off.
 
-### Trip companion
+### Live trip
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-companion-dark.svg">
@@ -310,12 +310,12 @@ The pipeline needs no public server: it reads local Geofabrik `.osm.pbf` files. 
 <summary>Planned layout</summary>
 
 <!--
-| Start | Connections | Companion | Map | Watch |
+| Start | Connections | Live trip | Map | Watch |
 |:---:|:---:|:---:|:---:|:---:|
-| <img src="docs/screenshots/start.png" width="180" alt="Start page"> | <img src="docs/screenshots/connections.png" width="180" alt="Connections"> | <img src="docs/screenshots/companion.png" width="180" alt="Trip companion"> | <img src="docs/screenshots/map.png" width="180" alt="Map"> | <img src="docs/screenshots/watch.png" width="140" alt="Wear OS"> |
+| <img src="docs/screenshots/start.png" width="180" alt="Start page"> | <img src="docs/screenshots/connections.png" width="180" alt="Connections"> | <img src="docs/screenshots/companion.png" width="180" alt="Live trip"> | <img src="docs/screenshots/map.png" width="180" alt="Map"> | <img src="docs/screenshots/watch.png" width="140" alt="Wear OS"> |
 -->
 
-| Start | Connections | Companion | Map | Watch |
+| Start | Connections | Live trip | Map | Watch |
 |:---:|:---:|:---:|:---:|:---:|
 | `start.png` | `connections.png` | `companion.png` | `map.png` | `watch.png` |
 
@@ -423,6 +423,7 @@ python3 tools/test_extract_osm_pbf.py
 | Timetables, Berlin/Brandenburg | VBB HAFAS ReST API, BVG REST ([v6.bvg.transport.rest](https://v6.bvg.transport.rest)) | per provider terms |
 | Change positions | [vbb-change-positions](https://github.com/derhuerst/vbb-change-positions) | ODbL |
 | Lift status | [accessibility.cloud](https://accessibility.cloud) (brokenlifts.org), DB FaSta | provider terms |
+| Cloud cover (sunny side hint) | [Open-Meteo](https://open-meteo.com) | CC BY 4.0 |
 | Library | [public-transport-enabler](https://github.com/schildbach/public-transport-enabler) | GPL-3.0 |
 | Font | Google Sans Flex | SIL OFL 1.1 ([text](docs/licenses/GoogleSansFlex-OFL.txt)) |
 
@@ -454,7 +455,7 @@ Open-source licenses*, from `data/ThirdPartyNotices.kt`, which a unit test holds
   set). Keys, caches, downloaded OpenStreetMap data and the widgets' state are left out
   (`app/src/main/res/xml/data_extraction_rules.xml`; the watch app likewise keeps its settings and
   leaves out cached departures). Turn it off in the system settings under Google › Backup.
-- **Permissions for features only:** location (nearby stops, the companion), notifications (trip
+- **Permissions for features only:** location (nearby stops, the live trip), notifications (trip
   and get-off reminders), and – only if you turn them on – contacts and calendar.
 
 ## Roadmap

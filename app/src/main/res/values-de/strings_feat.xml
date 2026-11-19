@@ -35,7 +35,6 @@
     <string name="disruption_link_bvg_map">Umleitungskarte (BVG)</string>
     <string name="disruption_link_other">Link</string>
     <string name="disruptions_source">Meldungen der BVG/VBB-Fahrplanauskunft, wie sie mit den Abfahrten der großen Bahnhöfe und der Enden deiner gespeicherten Strecken kommen. Deine Linien zuerst.</string>
-    <string name="disruption_channel">Störungen</string>
     <string name="disruption_notification_title">Störung: %1$s → %2$s</string>
     <string name="disruption_cancelled">Eine Fahrt auf dieser Strecke fällt aus</string>
     <string name="disruption_bell_on">Störungen dieser Route melden</string>
@@ -110,14 +109,14 @@
     </plurals>
     <string name="ways_sheet_route_radius">Auf den Fahrten und im Umkreis von %1$s um Start, Ziel und Umstiege</string>
     <string name="dwatch_period_title">Unterwegs prüfen</string>
-    <string name="dwatch_period_text">Wie oft zwischendurch</string>
+    <string name="dwatch_period_text">Alle paar Minuten zwischendurch</string>
     <string name="dwatch_period_off">Aus</string>
-    <string name="dwatch_period_minutes">%1$d Min.</string>
+    <string name="dwatch_period_minutes">%1$d′</string>
     <string name="dwatch_times_title">Feste Uhrzeiten</string>
-    <string name="dwatch_when_both">Geprüft wird alle %1$d Minuten und um %2$s.</string>
-    <string name="dwatch_when_period">Geprüft wird alle %1$d Minuten.</string>
-    <string name="dwatch_when_times">Geprüft wird um %1$s.</string>
-    <string name="dwatch_when_none">Noch ist keine Prüfung eingestellt: wähle, wie oft oder zu welchen Zeiten.</string>
+    <string name="dwatch_when_both">Geprüft wird beim Öffnen der App, alle %1$d Minuten und um %2$s.</string>
+    <string name="dwatch_when_period">Geprüft wird beim Öffnen der App und alle %1$d Minuten.</string>
+    <string name="dwatch_when_times">Geprüft wird beim Öffnen der App und um %1$s.</string>
+    <string name="dwatch_when_none">Geprüft wird beim Öffnen der App. Für feste Prüfungen wähle Zeiten.</string>
     <string name="bell_sheet_title">Störungen dieser Route melden</string>
     <string name="bell_sheet_text">Du bekommst eine Mitteilung, wenn auf dieser Route eine neue Störung auftaucht. Jede Meldung kommt nur einmal.</string>
     <string name="bell_sheet_settings">Zeiten einstellen</string>
@@ -126,7 +125,7 @@
     <!-- The map at the top of "My routes". -->
     <string name="ways_map_description">Karte deiner Orte; öffnet die Karte</string>
     <string name="ways_map_minutes">%1$d′</string>
-    <string name="ways_map_hours">%1$d Std %2$d′</string>
+    <string name="ways_map_hours">%1$d:%2$02d h</string>
     <string name="ways_map_hint">Merke dir Orte, um sie hier zu sehen</string>
     <!-- Störungen auf den Hauptkarten. -->
     <string name="map_notices_title">Störungen auf der Karte</string>

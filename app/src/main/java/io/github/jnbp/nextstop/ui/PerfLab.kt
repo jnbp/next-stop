@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -43,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -516,6 +518,6 @@ private fun LabSwitch(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
         color = if (on) Color.White else Color(0xFF9E9E9E),
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
-        modifier = Modifier.clickable { onChange(!on) }.padding(vertical = 4.dp),
+        modifier = Modifier.toggleable(value = on, role = Role.Checkbox, onValueChange = onChange).padding(vertical = 4.dp),
     )
 }

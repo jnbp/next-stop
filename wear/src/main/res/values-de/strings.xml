@@ -10,11 +10,12 @@
     <string name="retry">Nochmal</string>
     <string name="no_favorites">Noch keine Favoriten. Leg welche in der App auf dem Handy an.</string>
     <string name="now">jetzt</string>
-    <string name="in_min">%d Min.</string>
-    <string name="in_hours">%1$d Std. %2$d Min.</string>
-    <string name="in_whole_hours">%1$d Std.</string>
+    <string name="in_min">%d′</string>
+    <string name="in_hours">%1$d:%2$02d h</string>
+    <string name="in_whole_hours">%1$d:00 h</string>
     <string name="min_short">%d\'</string>
     <string name="platform">Gl. %s</string>
+    <string name="platform_bay">Stg. %s</string>
     <string name="cancelled">fällt aus</string>
     <string name="delay_plus">%+d</string>
     <string name="from_phone_position">Standort des Handys</string>
@@ -28,7 +29,7 @@
     <string name="towards">Richtung %s</string>
     <string name="towards_arrow">→ %s</string>
     <string name="stops_left">%d Stationen</string>
-    <string name="next_stop_get_off">Nächste Station aussteigen!</string>
+    <string name="next_stop_get_off">Nächste Station aussteigen</string>
     <string name="get_off_in_at">Aussteigen in %1$s, um %2$s</string>
     <string name="change_in_at">Umsteigen in %1$s, um %2$s</string>
     <string name="arrival_at">Ankunft %s</string>
@@ -46,7 +47,7 @@
     <string name="tile_description">Der nächste Schritt deiner Fahrt oder die Abfahrten deiner Lieblingshaltestelle.</string>
     <string name="tile_empty">Lege auf dem Handy eine Lieblingshaltestelle an.</string>
     <string name="open">Öffnen</string>
-    <string name="complication_label">Nächste Abfahrt</string>
+    <string name="complication_label">Automatisch: Abfahrten oder Fahrt</string>
     <string name="alert_channel">Aussteige-Alarm</string>
     <string name="type_or_speak">Tippen oder sprechen</string>
     <string name="where_to">Wohin?</string>
@@ -57,7 +58,7 @@
     <string name="phone_not_connected">Handy nicht verbunden – Next Stop auf dem Handy öffnen.</string>
     <string name="phone_no_app">Next Stop auf dem Handy nicht gefunden. Dort installieren oder öffnen.</string>
     <string name="phone_waiting">Handy verbunden, noch keine Orte. Next Stop auf dem Handy öffnen.</string>
-    <string name="phone_off_info">Handy nicht verbunden – Favoriten und Begleiter werden nicht abgeglichen. Abfahrten kommen trotzdem.</string>
+    <string name="phone_off_info">Handy nicht verbunden – Favoriten und Live-Fahrt werden nicht abgeglichen. Abfahrten kommen trotzdem.</string>
     <string name="phone_off_icon">Handy nicht verbunden</string>
     <string name="phone_off_close">Schließen</string>
     <string name="reconnect">Erneut verbinden</string>
@@ -72,11 +73,11 @@
     <string name="show_more">Weitere anzeigen (%d)</string>
     <string name="show_less">Weniger anzeigen</string>
     <string name="age_now">gerade eben</string>
-    <string name="age_minutes">vor %d min</string>
+    <string name="age_minutes">vor %d′</string>
     <string name="age_at">um %s</string>
     <string name="last_loaded">Zuletzt geladen %s</string>
     <string name="alert_channel_change">Umsteige-Alarm</string>
-    <string name="next_stop_change">Nächste Station umsteigen!</string>
+    <string name="next_stop_change">Nächste Station umsteigen</string>
     <string name="missed_it">Verpasst</string>
     <string name="missed_it_failed">Ziel nicht gefunden – bitte unter Route suchen.</string>
     <string name="trip_channel">Aktuelle Fahrt</string>
@@ -90,7 +91,7 @@
     <string name="install_on_phone">Auf dem Handy installieren</string>
     <string name="look_at_phone">Schau aufs Handy</string>
     <string name="comfort_chip">Umstieg: %s</string>
-    <string name="comfort_relaxed">entspannt</string>
+    <string name="comfort_relaxed">relaxed</string>
     <string name="comfort_normal">normal</string>
     <string name="comfort_risky">knapp</string>
     <string name="comfort_very_risky">Sprint</string>
@@ -99,17 +100,17 @@
     <string name="change_label">Umstieg</string>
     <string name="then_label">Danach</string>
     <string name="departs_at">ab %1$s · %2$s</string>
-    <string name="walk_minutes">%d min Fußweg</string>
+    <string name="walk_minutes">%d′\u00A0Fußweg</string>
     <string name="map_show">Karte</string>
     <string name="map_hide">Karte zu</string>
-    <string name="walk_distance">%1$d m · %2$d min zu Fuß</string>
-    <string name="cycle_distance">%1$d m · %2$d min mit dem Rad</string>
+    <string name="walk_distance">%1$d\u00A0m · %2$d′\u00A0zu\u00A0Fuß</string>
+    <string name="cycle_distance">%1$d\u00A0m · %2$d′\u00A0mit\u00A0dem\u00A0Rad</string>
     <string name="alight_reminders">Erinnerung vor dem Aussteigen</string>
     <string name="on">An</string>
     <string name="off">Aus</string>
     <!-- The trip companion: countdown, on board, change card, overview. -->
     <string name="overview">Übersicht</string>
-    <string name="depart_in">Abfahrt in %d min</string>
+    <string name="depart_in">Abfahrt in %d′</string>
     <string name="depart_in_seconds">Abfahrt in %d s</string>
     <string name="depart_now">Abfahrt jetzt</string>
     <string name="depart_at">Abfahrt %s</string>
@@ -120,14 +121,14 @@
     <string name="board_middle_estimated">Eher Mitte einsteigen</string>
     <string name="board_front_estimated">Eher vorne einsteigen</string>
     <string name="get_off_in_stops">Aussteigen in %d Halten</string>
-    <string name="remaining_min">noch %d min</string>
+    <string name="remaining_min">noch %d′</string>
     <string name="arrive_left">an %1$s · %2$s</string>
     <string name="arrive_clock">an %s</string>
     <string name="next_stop_name">Nächster Halt: %s</string>
-    <string name="walk_on_foot">%d min zu Fuß</string>
-    <string name="cycle_minutes">%d min mit dem Rad</string>
+    <string name="walk_on_foot">%d′\u00A0zu\u00A0Fuß</string>
+    <string name="cycle_minutes">%d′\u00A0mit\u00A0dem\u00A0Rad</string>
     <string name="no_walk">kein Fußweg</string>
-    <string name="rating_spare">%1$s · %2$s min Puffer</string>
+    <string name="rating_spare">%1$s · %2$s′ Puffer</string>
     <string name="to_destination">Zum Ziel</string>
     <string name="to_first_stop">Zum Einstieg</string>
     <!-- The start page and its settings. -->
@@ -135,7 +136,7 @@
     <!-- The map of the stops nearby. -->
     <string name="map">Karte</string>
     <string name="map_hint">Halt antippen</string>
-    <string name="rating_gap">%1$s · %2$d min Umstieg</string>
+    <string name="rating_gap">%1$s · %2$d′ Umstieg</string>
     <string name="rating_gap_span">%1$s · %2$s Umstieg</string>
     <string name="map_finding_position">Suche Standort…</string>
     <string name="map_loading_stops">Lade Haltestellen…</string>
@@ -143,8 +144,8 @@
     <string name="map_from_phone">Karte vom Handy…</string>
     <string name="map_no_phone">Kein Handy verbunden</string>
     <string name="map_retry">Karte nicht geladen · Erneut versuchen</string>
-    <string name="walk_meters">%d m zu Fuß</string>
-    <string name="cycle_meters">%d m mit dem Rad</string>
+    <string name="walk_meters">%d\u00A0m\u00A0zu\u00A0Fuß</string>
+    <string name="cycle_meters">%d\u00A0m\u00A0mit\u00A0dem\u00A0Rad</string>
     <string name="same_platform">gleicher Bahnsteig</string>
     <!-- The style of the map pictures of the phone (watch setting). -->
     <string name="map_style">Kartenstil</string>
@@ -190,4 +191,44 @@
     <!-- The kind of vehicle a line badge shows as a small icon where its name does not tell it, read out before the name. -->
     <string name="mode_bus">Bus</string>
     <string name="mode_train">Zug</string>
+    <!-- Complications: the names in the picker of the watch face, and their texts. -->
+    <string name="complication_favorite_label">Lieblingshaltestelle</string>
+    <string name="complication_companion_label">Live-Fahrt</string>
+    <string name="complication_home_label">Nach Hause</string>
+    <string name="complication_disruptions_label">Störungen</string>
+    <string name="complication_quick_label">Schnellstart: Verbindungssuche</string>
+    <string name="complication_quick_long">Verbindung suchen</string>
+    <string name="complication_no_trip">Keine Fahrt aktiv</string>
+    <string name="complication_failed">Laden fehlgeschlagen</string>
+    <string name="complication_no_disruptions">Keine Störungen</string>
+    <!-- The lines of a connection home, the countdown to it (as the watch face writes it) and the arrival time. -->
+    <string name="complication_home_long">%1$s in %2$s · an %3$s</string>
+    <plurals name="complication_cancelled">
+        <item quantity="one">%d Fahrt fällt aus</item>
+        <item quantity="other">%d Fahrten fallen aus</item>
+    </plurals>
+    <!-- A trip started on the phone opens the companion on the watch (a setting, off by default). -->
+    <string name="open_companion_setting">Live-Fahrt öffnen, wenn das Handy eine Fahrt startet</string>
+    <string name="trip_start_channel">Fahrt auf dem Handy gestartet</string>
+    <string name="trip_started_title">Deine Fahrt hat begonnen</string>
+    <string name="trip_started_text">Tippen öffnet die Live-Fahrt</string>
+    <string name="wake_channel">Aufwach-Alarm</string>
+    <string name="wake_title">Aufwachen!</string>
+    <string name="wake_text">In %1$s um %2$s aussteigen</string>
+    <string name="wake_confirm">Ich bin wach</string>
+    <string name="companion_status_never">Noch kein Fahrtstand vom Handy empfangen</string>
+    <string name="companion_status_running">Fahrt vom Handy, letzter Stand %1$s</string>
+    <string name="companion_status_none">Keine Fahrt auf dem Handy (letzter Stand %1$s)</string>
+    <string name="companion_status_no_phone">Kein Handy verbunden</string>
+    <string name="companion_status_no_phone_app">Next Stop fehlt auf dem Handy (oder anders signiert)</string>
+    <!-- The last try to open the companion: time and reason. -->
+    <string name="companion_status_last">Zuletzt %1$s: %2$s</string>
+    <string name="companion_outcome_opened">geöffnet</string>
+    <string name="companion_outcome_in_front">App war schon offen</string>
+    <string name="companion_outcome_setting_off">Option „Live-Fahrt öffnen“ ist aus</string>
+    <string name="companion_outcome_notifications_off">Keine Benachrichtigungen erlaubt</string>
+    <string name="companion_outcome_channel_muted">Kanal „Fahrt auf dem Handy gestartet“ stumm</string>
+    <string name="companion_outcome_no_full_screen">Vollbild nicht erlaubt (nur Hinweis)</string>
+    <string name="step_wait">Warte auf %1$s ab %2$s</string>
+    <string name="step_missed">%1$s verpasst?</string>
 </resources>

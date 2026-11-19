@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r7card_sun_chip">Sonne %1$s</string>
+    <string name="r7card_sun_chip_a11y">Sonne %1$s in Fahrtrichtung, Schatten %2$s</string>
+    <string name="r7card_bike_info_open">Fahrradmitnahme erklären</string>
+    <string name="r7card_bike_info">Laut Verkehrsunternehmen dürfen auf dieser Fahrt Fahrräder mitgenommen werden. Die Plätze sind begrenzt und können zu Stoßzeiten eingeschränkt sein.</string>
+</resources>

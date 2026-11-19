@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Watch setting (#253): complications show the trip state icon instead of the app icon. -->
+    <string name="r8wear_state_icons_setting">Eigene Symbole in Komplikationen</string>
+    <!-- Watch setting (#254): the crown on the trip overview shows the time travel pill. -->
+    <string name="r8wear_time_travel_setting">Zeitreise mit der Krone</string>
+</resources>

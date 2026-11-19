@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #129: the style of the connection detail -->
+    <string name="r6d_detail_style_title">Verbindungsdetails</string>
+    <string name="r6d_detail_style_text">Wie Fahrten, Umstiege und Fußwege einer Verbindung unter ihren Zeiten erscheinen.</string>
+    <string name="r6d_detail_style_timeline">Neu (Standard)</string>
+    <string name="r6d_detail_style_classic">Klassisch</string>
+    <string name="r6d_detail_style_timeline_text">Wie in der Live-Fahrt: jede Fahrt als Karte mit ihren Halten, dazwischen Umstiege und Fußwege. Die Linie bleibt oben stehen, während ihre Halte scrollen.</string>
+    <string name="r6d_detail_style_classic_text">Wie bisher: Zeiten links, eine Schiene pro Fahrt; ein Tipp auf die Linie zeigt alle Halte.</string>
+</resources>

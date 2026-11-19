@@ -174,12 +174,12 @@ fun withTrainKind(name: String?, product: String, number: String?, vararg hints:
     val trip = number?.trim()?.takeIf { it.isNotEmpty() && it.all { char -> char.isDigit() } }
     // A name that is only the kind ("RJ", "Railjet") takes the trip number behind it: "RJ 174".
     if (plain != null && trip != null && plain.none { it.isDigit() }) {
-        trainKindOf(plain)?.let { return "$it $trip" }
+        trainKindOf(plain)?.let { return withoutTrainNumberZeros("$it $trip") }
     }
-    if (plain != null && !plain.all { it.isDigit() }) return name
+    if (plain != null && !plain.all { it.isDigit() }) return withoutTrainNumberZeros(name)
     val digits = plain ?: trip?.takeIf { product != "" } ?: return name
     val kind = hints.firstNotNullOfOrNull { trainKindOf(it) } ?: return digits
-    return "$kind $digits"
+    return withoutTrainNumberZeros("$kind $digits")
 }
 
 /** True when [line] of [product] is a train named by a bare number, no kind in front ("174"). */

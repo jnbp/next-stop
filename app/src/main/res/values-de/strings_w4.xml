@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Release 0.2: Bedienung und Akku (BatterySaver, HapticSetting). -->
+    <string name="settings_group_comfort">Bedienung</string>
+    <string name="battery_saver_title">Akkusparen</string>
+    <string name="battery_saver_text">Keine Hintergrundkarte (eine Karte nur, wenn du sie öffnest, z. B. im Tab Karte), keine Live-Fahrzeuge, Live-Fahrt ohne Karte, Widgets aktualisieren nur per Tipp oder beim Öffnen der App, kein Standort im Hintergrund.</string>
+    <string name="battery_saver_off">Aus</string>
+    <string name="battery_saver_auto">Automatisch</string>
+    <string name="battery_saver_always">Immer</string>
+    <string name="battery_saver_auto_text">Automatisch: an, solange der Energiesparmodus des Systems an ist.</string>
+    <string name="battery_saver_now_on">Spart gerade Akku</string>
+    <string name="battery_saver_now_off">Spart gerade nicht</string>
+    <string name="haptics_title">Haptik bei Bedienung</string>
+    <string name="haptics_text">Ein leichtes Ticken bei Chips, Schaltern, Tabs und beim Aktualisieren durch Ziehen.</string>
+
+    <!-- Verspätungen im Takt-Stil (DelayDisplay.StruckPlanned). -->
+    <string name="delay_display_struck">Planzeit durchgestrichen + neue Zeit</string>
+    <string name="delay_display_struck_text">Die Zeit laut Fahrplan durchgestrichen, die neue Zeit daneben.</string>
+
+    <!-- Auf welcher Seite die Sonne scheint (SunSide). -->
+    <string name="sun_side_hint">Sonne eher %1$s – Schattenseite: %2$s</string>
+    <string name="sun_side_left">links</string>
+    <string name="sun_side_right">rechts</string>
+
+    <!-- Erwartete Auslastung (Occupancy). -->
+    <string name="occupancy_low">Geringe Auslastung erwartet</string>
+    <string name="occupancy_medium">Mittlere Auslastung</string>
+    <string name="occupancy_high">Hohe Auslastung</string>
+    <string name="occupancy_full">Sehr hohe Auslastung</string>
+
+    <!-- Tempo mit dem Rad (BikePace) und Hinweise einer Fahrt. -->
+    <string name="bike_speed_title">Tempo mit dem Rad</string>
+    <string name="bike_speed_text">Für die Radstrecken der Kombination Rad + ÖPNV.</string>
+    <string name="bike_speed_relaxed">Gemütlich</string>
+    <string name="bike_speed_normal">Normal</string>
+    <string name="bike_speed_fast">Schnell</string>
+    <string name="bike_speed_custom">Eigenes</string>
+    <string name="bike_speed_kmh">%1$d km/h</string>
+    <string name="bike_speed_custom_label">Eigenes Tempo in km/h (%1$d–%2$d)</string>
+    <string name="ride_bike_carriage">Fahrradmitnahme</string>
+    <string name="ride_step_free">Stufenfrei</string>
+
+    <!-- Der Anfang der Einrichtung: ausführlich oder überspringen. -->
+    <string name="setup_mode_title">Wie möchtest du einrichten?</string>
+    <string name="setup_mode_text">Ausführlich gehst du jede Wahl einmal durch. Übersprungen wird nur gefragt, wie Verbindungen aussehen sollen; alles andere bleibt und lässt sich in den Einstellungen ändern.</string>
+    <string name="setup_mode_detailed">Ausführlich einrichten</string>
+    <string name="setup_mode_skip">Überspringen</string>
+    <string name="setup_view_title">Verbindungen als Liste oder Diagramm?</string>
+    <string name="setup_comfort_title">Bedienung &amp; Akku</string>
+    <string name="setup_comfort_short">Akku sparen und die Bedienung spüren.</string>
+
+    <!-- Kleiner Feinschliff. -->
+    <string name="appointments_after_title">Termine nach Beginn</string>
+    <string name="appointments_after_text">So lange nach seinem Beginn wird ein Termin noch als Ziel angeboten.</string>
+    <string name="appointments_after_minutes">%1$d′</string>
+</resources>

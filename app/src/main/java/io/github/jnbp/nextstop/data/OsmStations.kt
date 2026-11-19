@@ -952,8 +952,8 @@ object OsmStations {
         platformsOfLine(ride.line, if (boarding) ride.departurePlatform else ride.arrivalPlatform, station.platforms)
 
     /**
-     * Where the walk [walk] before the ride [ride] should lead: the stop position of a bus or
-     * tram with the platform of the ride, or for the U-Bahn, S-Bahn and trains the entrance of
+     * Where the walk [walk] before the ride [ride] should lead: the stop position where a bus or
+     * tram is boarded, the one the big map shows too (see [sharedBoardingSpot]), or for the U-Bahn, S-Bahn and trains the entrance of
      * the station on the shortest way from where the walk starts ([from], else the start of
      * its way) to the platform of the ride (see [stationEntrance]). Null when neither is
      * known, and for a walk that starts inside the station itself.
@@ -964,7 +964,8 @@ object OsmStations {
         val rideStart = ride.path.firstOrNull() ?: ride.fromPlace?.position
         val near = rideStart ?: walk.path.lastOrNull() ?: walk.toPlace?.position
         return when (ride.product) {
-            "bus", "tram" -> {
+            // The position the big map shows for the ride (#210): its boardingSpot, else the same choice.
+            "bus", "tram" -> sharedBoardingSpot(ride.boardingSpot, { rideSpot(ride, boarding = true) }) {
                 val stop = stopPosition(ride.fromPlace?.id, ride.fromPlace?.name ?: ride.from, ride.departurePlatform, near)
                 stop?.let {
                     val lines = linesAt(it.position, tram = ride.product == "tram", within = 15.0, pos = it.pos)
@@ -976,7 +977,7 @@ object OsmStations {
                 val station = station(ride.fromPlace?.id, ride.fromPlace?.name ?: ride.from, near) ?: return null
                 if (meters(start, station.position) <= INSIDE_METERS) return null
                 val platform = ridePlatforms(ride, boarding = true).takeIf { it.isNotEmpty() }
-                stationEntrance(station, start, platform, rideStart, signOf(ride.product))
+                stationEntrance(station, start, platform, rideStart, signOf(ride.product), nearestInUnknown = true)
             }
             else -> null
         }
@@ -1046,6 +1047,9 @@ object OsmStations {
      * way is shorter by at least [BUILDING_SHORTER_METERS], and only where it is not known to
      * close: without opening hours or with "24/7". Other opening hours are not evaluated, so
      * such a door is never aimed for (it may be shut when the walk gets there).
+     *
+     * With [nearestInUnknown] (the way in to a ride) and no platform of the ride known, the
+     * entrance with [sign] nearest to [outside] is taken (see [nearestSignedEntrance], #204).
      */
     private fun stationEntrance(
         station: OsmStation,
@@ -1053,17 +1057,27 @@ object OsmStations {
         platforms: List<OsmPlatform>?,
         inside: Pair<Double, Double>?,
         sign: String?,
+        nearestInUnknown: Boolean = false,
     ): WalkTarget? {
         fun inner(entrance: OsmEntrance): Double = when {
             platforms != null -> platforms.minOf { platformMeters(it, entrance.position) }
             inside != null -> meters(inside, entrance.position)
             else -> meters(station.position, entrance.position)
         }
-        fun way(entrance: OsmEntrance): Double = meters(outside, entrance.position) + inner(entrance)
+        // No platform of the ride known (#204): each entrance with its sign leads to the line, and
+        // the way in is the one nearest to where the walk comes from, not one near a point inside.
+        val byNearest = nearestInUnknown && platforms == null && sign != null &&
+            station.entrances.any { !it.throughBuilding && it.marker?.contains(sign) == true }
+        fun way(entrance: OsmEntrance): Double =
+            meters(outside, entrance.position) + if (byNearest) 0.0 else inner(entrance)
         fun signed(entrance: OsmEntrance) = sign == null || entrance.marker?.contains(sign) ?: true
         val (accesses, entrances) = station.entrances.partition { it.throughBuilding }
         val candidates = entrances.filter { signed(it) }.ifEmpty { entrances }
-        val best = candidates.minByOrNull { way(it) }
+        val best = if (byNearest) {
+            nearestSignedEntrance(entrances, sign, { it.marker }) { meters(outside, it.position) }
+        } else {
+            candidates.minByOrNull { way(it) }
+        }
         val access = accesses
             .filter { signed(it) && (it.openingHours == null || it.openingHours.trim() == "24/7") }
             .minByOrNull { way(it) }

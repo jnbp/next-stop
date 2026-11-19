@@ -128,7 +128,10 @@ const val HINT_STEADY_MILLIS = 2_000L
  * [sinceChangeMillis] ago: it shows after a short moment and goes only after a longer one, and
  * never changes again within [HINT_STEADY_MILLIS] of the last change.
  */
-fun hintSwitchDelayMillis(wanted: Boolean, sinceChangeMillis: Long): Long {
+fun hintSwitchDelayMillis(wanted: Boolean, sinceChangeMillis: Long, mapLeft: Boolean = false): Long {
+    // The page with the map was left (another tab, as "My ways"): the hint goes at once, it must
+    // not stand over the next page for the time a reload of the vehicles is waited out (#141).
+    if (!wanted && mapLeft) return 0L
     val hold = if (wanted) HINT_SHOW_AFTER_MILLIS else HINT_HIDE_AFTER_MILLIS
     return maxOf(hold, HINT_STEADY_MILLIS - sinceChangeMillis)
 }
@@ -136,14 +139,15 @@ fun hintSwitchDelayMillis(wanted: Boolean, sinceChangeMillis: Long): Long {
 /**
  * Whether the vehicle hint is shown, following [wanted] steadily (see [hintSwitchDelayMillis]):
  * a short gap while the vehicles reload, or vehicles that come and go, do not make it flicker.
+ * With [mapLeft] (no page with the map in front) it goes at once.
  */
 @Composable
-fun rememberSteadyHint(wanted: Boolean): State<Boolean> {
+fun rememberSteadyHint(wanted: Boolean, mapLeft: Boolean = false): State<Boolean> {
     val shown = remember { mutableStateOf(false) }
     val changedAt = remember { longArrayOf(Long.MIN_VALUE / 2) }
-    LaunchedEffect(wanted) {
+    LaunchedEffect(wanted, mapLeft) {
         if (wanted == shown.value) return@LaunchedEffect
-        delay(hintSwitchDelayMillis(wanted, SystemClock.uptimeMillis() - changedAt[0]))
+        delay(hintSwitchDelayMillis(wanted, SystemClock.uptimeMillis() - changedAt[0], mapLeft))
         shown.value = wanted
         changedAt[0] = SystemClock.uptimeMillis()
     }
@@ -185,14 +189,15 @@ fun LiveDot(modifier: Modifier = Modifier, pulse: Boolean = true, beatOnce: Bool
         LaunchedEffect(beat) {
             if (beat.value > 0f) return@LaunchedEffect
             awaitIntroStep(IntroStep.LIVE)
-            delay(LIVE_BEAT_ONCE_DELAY_MILLIS)
+            animationDelay(LIVE_BEAT_ONCE_DELAY_MILLIS)
             beat.animateTo(1f, tween(LIVE_PULSE_MILLIS.toInt(), easing = LinearEasing))
         }
         beat
     } else {
         null
     }
-    val phase = if (pulse) {
+    // The pulse is an idle animation: still while the battery saver is active.
+    val phase = if (pulse && !BatterySaver.active) {
         rememberInfiniteTransition(label = "liveDot").animateFloat(
             initialValue = 0f,
             targetValue = 1f,
@@ -289,18 +294,23 @@ fun VehicleHint(modifier: Modifier = Modifier, open: MutableState<Boolean>) {
  */
 @Composable
 fun VehicleBadgeSample(line: String, product: String, live: Boolean, caption: String, modifier: Modifier = Modifier, drift: Dp = 0.dp) {
-    val shift = rememberInfiniteTransition(label = "badgeDrift").animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2_400, easing = LinearEasing), RepeatMode.Reverse),
-        label = "badgeShift",
-    )
+    // An idle drift: still while the battery saver is active.
+    val shift = if (BatterySaver.active) {
+        null
+    } else {
+        rememberInfiniteTransition(label = "badgeDrift").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(2_400, easing = LinearEasing), RepeatMode.Reverse),
+            label = "badgeShift",
+        )
+    }
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(modifier = Modifier.graphicsLayer { translationX = (shift.value - 0.5f) * drift.toPx() }) {
+        Box(modifier = Modifier.graphicsLayer { translationX = ((shift?.value ?: 0.5f) - 0.5f) * drift.toPx() }) {
             LineBadge(line = line, product = product, minWidth = 40.dp, at = LineColors.BERLIN_CENTRE)
             if (live) {
                 LiveDot(

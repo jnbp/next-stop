@@ -1,5 +1,8 @@
 package io.github.jnbp.nextstop.wear
 
+import io.github.jnbp.nextstop.data.DiagLog
+import io.github.jnbp.nextstop.data.distinctStopNames
+import io.github.jnbp.nextstop.data.StationIdentity
 import io.github.jnbp.nextstop.data.getOffSoon
 import io.github.jnbp.nextstop.data.plausible
 import android.Manifest
@@ -11,7 +14,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.location.LocationManager
-import android.util.Log
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -35,6 +37,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -45,6 +48,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import io.github.jnbp.nextstop.MainActivity
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.ui.AppChannel
+import io.github.jnbp.nextstop.ui.NotifyFeature
 import io.github.jnbp.nextstop.ui.ensureChannel
 import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.data.Departure
@@ -67,12 +71,28 @@ import io.github.jnbp.nextstop.data.journeyChangesOf
 import io.github.jnbp.nextstop.data.loadContactAddresses
 import io.github.jnbp.nextstop.data.ownServerUrl
 import io.github.jnbp.nextstop.data.plainStopName
-import io.github.jnbp.nextstop.data.searchOrder
+import io.github.jnbp.nextstop.data.railwayDirection
+import io.github.jnbp.nextstop.data.SearchOptions
+import io.github.jnbp.nextstop.data.servicesUnreachable
+import io.github.jnbp.nextstop.data.shownRideStop
+import io.github.jnbp.nextstop.data.townOf
+import io.github.jnbp.nextstop.data.townedStopName
+import io.github.jnbp.nextstop.data.shortDestinationName
+import io.github.jnbp.nextstop.data.changeRatingsByLeg
+import io.github.jnbp.nextstop.data.ChangePositions
+import io.github.jnbp.nextstop.data.watchJourneys
+import io.github.jnbp.nextstop.data.watchSearchCount
 import io.github.jnbp.nextstop.data.shortStopName
 import io.github.jnbp.nextstop.data.upcomingAppointments
 import io.github.jnbp.nextstop.ui.ACTION_OPEN_TRIP
 import io.github.jnbp.nextstop.ui.StepKind
+import io.github.jnbp.nextstop.ui.TripStep
 import io.github.jnbp.nextstop.ui.TripState
+import io.github.jnbp.nextstop.ui.ConnectionRescue
+import io.github.jnbp.nextstop.ui.LiveFreshness
+import io.github.jnbp.nextstop.ui.LiveSource
+import io.github.jnbp.nextstop.data.rescueKey
+import io.github.jnbp.nextstop.data.spliceJourney
 import io.github.jnbp.nextstop.ui.boardingHint
 import io.github.jnbp.nextstop.ui.inStation
 import io.github.jnbp.nextstop.ui.boardingPositionOf
@@ -82,6 +102,13 @@ import io.github.jnbp.nextstop.ui.badgeLine
 import io.github.jnbp.nextstop.ui.startTripService
 import io.github.jnbp.nextstop.ui.stepDelay
 import io.github.jnbp.nextstop.ui.tripStep
+import io.github.jnbp.nextstop.ui.BatterySaver
+import io.github.jnbp.nextstop.ui.SunSideSetting
+import io.github.jnbp.nextstop.ui.RailTunnelAsset
+import io.github.jnbp.nextstop.ui.legSunShinesKept
+import io.github.jnbp.nextstop.ui.legSunSide
+import io.github.jnbp.nextstop.data.SunSide
+import io.github.jnbp.nextstop.data.shownSunSide
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -117,6 +144,9 @@ object PhoneBridge {
     const val MSG_SYNC = "/nextstop/sync"
     const val MSG_START_TRIP = "/nextstop/start-trip"
     const val MSG_STOP_TRIP = "/nextstop/stop-trip"
+
+    /** "Wechseln" on the watch's rescue card: `{"key"}` of the offer it showed (see [rescueJson]). */
+    const val MSG_RESCUE_SWITCH = "/nextstop/rescue-switch"
     const val MSG_MAP_IMAGE = "/nextstop/map-image"
     const val PATH_MAP_IMAGE = "/nextstop/mapimg"
 
@@ -132,6 +162,18 @@ object PhoneBridge {
      */
     const val PATH_WATCH_SETTINGS = "/nextstop/watch-settings"
     const val PATH_WATCH_SETTINGS_WATCH = "/nextstop/watch-settings-w"
+
+    /**
+     * The wake-up alarm of the phone (see [io.github.jnbp.nextstop.ui.WakeAlarm]):
+     * `{"ringing": true, "key", "stop", "arrival" (ISO time), "ring" (a count, new with every
+     * ring), "updated"}` while it rings, `{"ringing": false}` once it stops. The watch rings with
+     * it and sends [MSG_WAKE_OK] for "Ich bin wach". Older watches ignore both.
+     */
+    const val PATH_WAKE = "/nextstop/wake"
+    const val MSG_WAKE_OK = "/nextstop/wake-ok"
+
+    /** The test of the developer options: the watch opens its companion as for a trip started here. No payload. */
+    const val MSG_COMPANION_TEST = "/nextstop/companion-test"
     private const val KEY_JSON = "json"
 
     // Pushes to the watch run here, apart from any screen, and never take the app down.
@@ -199,12 +241,25 @@ object PhoneBridge {
      * Mirrors the followed trip to the watch for as long as it runs: at once, then every 15
      * seconds where the step or the progress changed, and as soon as a real way on foot came
      * in (see [FootPaths.version]). Called by [io.github.jnbp.nextstop.ui.TripService];
-     * when it ends, the watch learns that the trip is over.
+     * when it ends, the watch learns that the trip is over. Also called by the app while the
+     * service does not run (notifications of the phone off): there with [endWithNone] false, so
+     * a hand-over to the service (or a recreated activity) does not end the trip on the watch
+     * for a moment; a trip ended in the app still goes to the watch as "no trip".
      */
-    suspend fun mirrorTrip(context: Context) {
+    suspend fun mirrorTrip(context: Context, endWithNone: Boolean = true) {
         val app = context.applicationContext
         try {
-            syncPlaces(app)
+            // The places must never keep the trip from the watch: they go alongside, the trip
+            // state is written at once (it is what opens the companion on the watch).
+            scope.launch {
+                try {
+                    syncPlaces(app)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    DiagLog.w(LOG_TAG) { "watch: places not written: ${e.javaClass.simpleName}" }
+                }
+            }
             TripState.journey.collectLatest { journey ->
                 // The real ways on foot of its walks for the watch's sketches, also while no
                 // page of the phone shows the trip, before the ways of other journeys: each
@@ -214,25 +269,108 @@ object PhoneBridge {
                 while (true) {
                     publishTrip(app, journey)
                     if (journey == null) return@collectLatest
-                    val ways = FootPaths.version.value
-                    withTimeoutOrNull(MIRROR_MILLIS) { FootPaths.version.first { it != ways } }
+                    // A new way on foot or a new rescue offer (#98) goes to the watch at once.
+                    val seen = FootPaths.version.value to ConnectionRescue.suggestion.value
+                    withTimeoutOrNull(MIRROR_MILLIS) {
+                        combine(FootPaths.version, ConnectionRescue.suggestion) { ways, rescue -> ways to rescue }.first { it != seen }
+                    }
                 }
             }
         } finally {
-            withContext(NonCancellable) { publishTrip(app, null) }
+            if (endWithNone) withContext(NonCancellable) { publishTrip(app, null) }
+        }
+    }
+
+    /**
+     * The rescue offer of the moment for the followed [journey] (see ConnectionRescue), as the
+     * watch shows it: the first ride of the offered connection with its line, departure,
+     * platform and colour, the change's stop, and its [rescueKey]. Null while the chosen
+     * connection works or the offer belongs to another trip.
+     */
+    private fun rescueJson(journey: Journey): JSONObject? {
+        val found = ConnectionRescue.suggestion.value?.takeIf { it.journeyId == journey.id } ?: return null
+        val ride = found.option.rides.firstOrNull() ?: return null
+        return JSONObject().apply {
+            put("key", rescueKey(found.journeyId, found.keepLegs, found.option.id))
+            put("line", ride.line ?: JSONObject.NULL)
+            put("product", ride.product)
+            put("dep", ride.departure.toInstant().toEpochMilli())
+            put("platform", ride.departurePlatform ?: JSONObject.NULL)
+            put("stop", found.stop)
+            put("color", lineColor(ride).toArgb())
+        }
+    }
+
+    /**
+     * "Wechseln" on the watch: the followed trip goes on with the offered connection from the
+     * change on, as the button of the phone's card does. Only while the phone's offer of the
+     * moment is the one the watch showed ([key]) and still belongs to the followed trip.
+     */
+    fun switchToRescue(context: Context, key: String) {
+        val followed = TripState.journey.value ?: return
+        val found = ConnectionRescue.suggestion.value ?: return
+        if (found.journeyId != followed.id || rescueKey(found.journeyId, found.keepLegs, found.option.id) != key) {
+            DiagLog.i(LOG_TAG) { "watch: rescue switch ignored, the offer changed meanwhile" }
+            return
+        }
+        TripState.journey.value = spliceJourney(followed, found.keepLegs, found.option)
+        ConnectionRescue.update(context, null)
+    }
+
+    /** What came of [testCompanionOnWatch]. */
+    enum class CompanionTest { Sent, NoWatch, NoAppOnWatch, Failed }
+
+    /**
+     * The test of the developer options ("Test: Begleiter auf der Uhr öffnen"): asks the watch
+     * with Next Stop to open its companion now, the same way as for a trip started here. What
+     * the watch made of it shows under its option "Begleiter öffnen" in its settings.
+     */
+    suspend fun testCompanionOnWatch(context: Context): CompanionTest {
+        val app = context.applicationContext
+        val status = WatchLink.check(app)
+        val node = when (status.state) {
+            WatchState.None -> return CompanionTest.NoWatch
+            WatchState.NoApp -> return CompanionTest.NoAppOnWatch
+            WatchState.Connected -> status.nodeId ?: return CompanionTest.Failed
+        }
+        return try {
+            Wearable.getMessageClient(app).sendMessage(node, MSG_COMPANION_TEST, ByteArray(0)).await()
+            CompanionTest.Sent
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DiagLog.w(LOG_TAG) { "watch: companion test not sent: ${e.javaClass.simpleName}" }
+            CompanionTest.Failed
         }
     }
 
     /**
      * Writes the next step of [journey] (or "no trip") for the watch, when it differs from the
-     * last one or the last one is older than [HEARTBEAT_MILLIS]. Called from the trip service
-     * and the listener of the watch's messages at once, hence [lock].
+     * last one or the last one is older than [HEARTBEAT_MILLIS], or always with [force] (the
+     * watch asked: a fresh write is what tells it, as a change of the item). Called from the
+     * trip service and the listener of the watch's messages at once, hence [lock].
      */
-    suspend fun publishTrip(context: Context, journey: Journey?) {
+    suspend fun publishTrip(context: Context, journey: Journey?, force: Boolean = false) {
         val now = System.currentTimeMillis()
+        // Never waits for the forecast: a kept one or none (asked in the background for the next state).
+        val sun = try {
+            boardingSunSide(context, journey)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
         val (content, written) = synchronized(lock) {
-            val text = tripJson(context, journey, follow(journey, now), OffsetDateTime.now()).toString()
-            if (text == lastTrip && (journey == null || now - lastTripAt < HEARTBEAT_MILLIS)) return
+            val followed = follow(journey, now)
+            val stamp = OffsetDateTime.now()
+            // A state the full form cannot be made of still reaches the watch, in its plain form.
+            val text = try {
+                tripJson(context, journey, followed, stamp, sun)
+            } catch (e: Exception) {
+                DiagLog.w(LOG_TAG) { "watch: full trip state failed: ${e.javaClass.simpleName}" }
+                plainTripJson(journey, followed, stamp)
+            }.toString()
+            if (!force && text == lastTrip && (journey == null || now - lastTripAt < HEARTBEAT_MILLIS)) return
             text to lastTripAt
         }
         if (!put(context, PATH_TRIP, JSONObject(content).put("updated", now).toString())) return
@@ -287,8 +425,13 @@ object PhoneBridge {
         root.put("recent", recent)
         // The change time the phone's own searches outside the open page use, for the watch's searches.
         root.put("transferComfort", prefs.searchOptionsInUse.comfort.name)
+        // The walking pace ("Langsamer unterwegs"), step-free ways and products of those searches:
+        // a search of the watch itself (no phone in reach) asks the same (PhoneSearchOptions there).
+        root.put("searchOptions", watchSearchOptionsJson(prefs.searchOptionsInUse))
         // The get-off reminder setting; the watch follows it until it is switched there.
         root.put("alightReminders", prefs.alightReminders)
+        // How delays are shown ("Verspätungen", #227b): the watch shows its times the same way.
+        root.put("delayDisplay", prefs.delayDisplay.name)
         lastLocation(context)?.let { root.put("location", it) }
         appointmentsJson(context)?.let { root.put("appointments", it) }
         contactsJson(context)?.let { root.put("contacts", it) }
@@ -296,6 +439,15 @@ object PhoneBridge {
     }
 
     /** The next appointments with a location, only when the calendar may be read already; null otherwise. */
+    /** [options] as the watch reads them (PhoneSearchOptions there). */
+    private fun watchSearchOptionsJson(options: SearchOptions): JSONObject = JSONObject().apply {
+        put("walkingSpeed", options.walkingSpeed.apiValue)
+        // "Eigener Faktor" of "Langsamer unterwegs" (#198): the watch asks Transitous at that pace.
+        if (options.ownWalkFactor != null) put("walkFactor", options.walkFactorInUse)
+        options.accessibility.apiValue?.let { put("accessibility", it) }
+        put("products", JSONArray(options.products.toList()))
+    }
+
     private suspend fun appointmentsJson(context: Context): JSONArray? {
         if (!hasCalendarPermission(context)) return null
         return try {
@@ -343,6 +495,19 @@ object PhoneBridge {
     /** Writes the phone's copy of the watch's settings ([json], see WatchSettings); false without Wear OS. */
     suspend fun putWatchSettings(context: Context, json: String): Boolean = put(context, PATH_WATCH_SETTINGS, json)
 
+    /** Writes the state of the wake-up alarm for the watch: [target] rings (the [ring]th time), or null: it stopped. */
+    suspend fun publishWake(context: Context, target: io.github.jnbp.nextstop.data.WakeTarget?, journey: Journey?, ring: Int) {
+        val json = JSONObject().put("ringing", target != null).put("updated", System.currentTimeMillis())
+        if (target != null) {
+            json.put("key", target.key)
+                .put("stop", target.stop.plainStopName())
+                .put("arrival", target.arrival.toString())
+                .put("ring", ring)
+            journey?.legs?.getOrNull(target.legIndex)?.line?.let { json.put("line", it) }
+        }
+        put(context.applicationContext, PATH_WAKE, json.toString())
+    }
+
     private suspend fun put(context: Context, path: String, json: String): Boolean = try {
         val request = PutDataMapRequest.create(path).apply { dataMap.putString(KEY_JSON, json) }
             .asPutDataRequest()
@@ -358,6 +523,7 @@ object PhoneBridge {
 
     private fun placeJson(place: Stop, label: String, icon: PlaceIcon?): JSONObject = JSONObject().apply {
         put("id", place.id)
+        StationIdentity.stationKey(place)?.let { put("key", it) }
         put("name", place.name)
         put("label", label)
         place.latitude?.let { put("lat", it) }
@@ -394,8 +560,57 @@ object PhoneBridge {
         return JSONObject().put("lat", location.latitude).put("lon", location.longitude).put("time", location.time)
     }
 
+    /**
+     * The trip state with the keys every watch app reads and nothing that could fail: the step,
+     * its place and time, the arrival and the trip's key. Only when [tripJson] fails.
+     */
+    private fun plainTripJson(journey: Journey?, followed: Followed?, now: OffsetDateTime): JSONObject {
+        if (journey == null || followed == null) return JSONObject().put("active", false)
+        val step = try {
+            tripStep(journey, now, null)
+        } catch (e: Exception) {
+            null
+        }
+        val kind = step?.kind ?: if (now.isBefore(journey.departure)) StepKind.Board else StepKind.WalkToEnd
+        return JSONObject()
+            .put("active", true)
+            .put("kind", kind.name)
+            .put("line", step?.leg?.line ?: JSONObject.NULL)
+            .put("product", step?.leg?.product ?: "")
+            .put("place", step?.let { shownRideStop(it.leg, it.place) } ?: journey.legs.last().to.plainStopName())
+            .put("time", (step?.time ?: journey.arrival).toInstant().toEpochMilli())
+            .put("arrival", journey.arrival.toInstant().toEpochMilli())
+            .put("destination", shortDestinationName(journey.legs.last()))
+            .put("fromPhone", true)
+            .put("tripKey", followed.key)
+            .put("started", followed.started)
+    }
+
+    /**
+     * The sunny side of the ride to board now, as the phone's hint shows it (#176): the setting,
+     * a clear side of a ride long enough, and the sun really shining; null else. Never waits for
+     * the network (the state for the watch must not, it may hang up to ~18 s without one): only a
+     * kept forecast counts, and where none is kept it is asked in the background while the trip
+     * is followed (rounded area, at most every 30 min, none at the battery saver's "Extrem"), so
+     * the next state carries it. The watch asks for no weather itself. The rail tunnels are read
+     * off the main thread the first time (see RailTunnelAsset.ensure).
+     */
+    private suspend fun boardingSunSide(context: Context, journey: Journey?): SunSide? {
+        if (journey == null) return null
+        val step = tripStep(journey, OffsetDateTime.now())
+        val leg = step.leg?.takeIf { step.kind == StepKind.Board && !it.walking && !it.cancelled } ?: return null
+        SunSideSetting.load(context)
+        if (!SunSideSetting.on) return null
+        // publishTrip may run on the main thread (the trip service, the app): the tunnels are read
+        // on an IO thread, and waited for here, so the watch never gets a hint through a tunnel.
+        RailTunnelAsset.ensure(context)
+        val side = legSunSide(leg)
+        val shines = !SunSideSetting.test && side != null && legSunShinesKept(leg, mayAsk = !BatterySaver.extreme, scope)
+        return shownSunSide(SunSideSetting.on, SunSideSetting.test, side, shines)
+    }
+
     /** The trip state as the watch reads it (see TripSnapshot there), without the time it is written. */
-    private fun tripJson(context: Context, journey: Journey?, followed: Followed?, now: OffsetDateTime): JSONObject {
+    private fun tripJson(context: Context, journey: Journey?, followed: Followed?, now: OffsetDateTime, sun: SunSide? = null): JSONObject {
         if (journey == null || followed == null) return JSONObject().put("active", false)
         val step = tripStep(journey, now)
         val leg = step.leg
@@ -406,13 +621,21 @@ object PhoneBridge {
         var stopsLeft = -1
         var alert = false
         if (step.kind == StepKind.GetOff && leg != null) {
-            val ahead = leg.stopovers.drop(1).count { (it.arrival ?: it.departure)?.isAfter(now) == true }
+            // The stops ahead by position where the companion has one on this ride, else by the times.
+            val fix = io.github.jnbp.nextstop.data.CompanionPosition.fixFor(journey, now.toInstant().toEpochMilli())
+                ?.takeIf { it.nextStop >= 0 && journey.legs.getOrNull(it.legIndex) === leg }
+            val ahead = if (fix != null) {
+                leg.stopovers.size - fix.nextStop
+            } else {
+                leg.stopovers.drop(1).count { (it.arrival ?: it.departure)?.isAfter(now) == true }
+            }
             if (leg.stopovers.size >= 2) {
                 stopsLeft = ahead.coerceAtLeast(1)
                 // On a long last hop the watch buzzes only within the last minutes, not hours ahead.
-                alert = stopsLeft <= 1 && getOffSoon(leg.arrival, now)
+                // By the time of the step: on board by position the blended arrival (see RideState).
+                alert = stopsLeft <= 1 && getOffSoon(step.time, now)
             } else {
-                alert = Duration.between(now, leg.arrival).toMinutes() < ALERT_FALLBACK_MINUTES
+                alert = Duration.between(now, step.time).toMinutes() < ALERT_FALLBACK_MINUTES
             }
         }
         val hint = try {
@@ -435,8 +658,20 @@ object PhoneBridge {
             put("product", leg?.product ?: "")
             // The colour of the very ride (its provider's, where it runs): the watch knows no places.
             leg?.takeIf { !it.walking }?.let { put("color", lineColor(it).toArgb()) }
-            put("direction", leg?.direction ?: JSONObject.NULL)
-            put("place", step.place.plainStopName())
+            put("direction", leg?.direction?.let { railwayDirection(leg, it) } ?: JSONObject.NULL)
+            // Railway style on a long-distance ride (#93): the watch shows the names as sent.
+            put("place", shownRideStop(leg, step.place))
+            // The ride state (see RideState): at the stop waiting for the ride, or on board in a standing vehicle.
+            put("waiting", step.waiting)
+            put("standing", step.standing)
+            // #277: the time is the app's estimate from the position ("ca.", blue); not for the
+            // ride's departure sent in place of the time to set off. Older watches ignore it.
+            put("estimated", step.estimated && !step.leave)
+            // The ride has probably gone without the traveller ("Verpasst?"); older watches ignore it.
+            put("missed", step.missed)
+            // When the vehicle waited for is due here (#184): the watch says "kommt jeden Moment" and
+            // "überfällig" by the same rule (waitPhaseOf there); older watches ignore it.
+            if (step.waiting) step.dueAt?.let { put("dueAt", it.toInstant().toEpochMilli()) }
             put("platform", (if (step.kind == StepKind.Board) leg?.departurePlatform else leg?.arrivalPlatform) ?: JSONObject.NULL)
             // Before the walk to the first ride: "time" stays the ride's departure (as older watches
             // read it), "leaveAt" is when to set off; the delay is the ride's.
@@ -452,7 +687,7 @@ object PhoneBridge {
             put("hint", hint ?: JSONObject.NULL)
             put("progress", progress)
             put("arrival", journey.arrival.toInstant().toEpochMilli())
-            put("destination", journey.legs.last().to.plainStopName())
+            put("destination", shortDestinationName(journey.legs.last()))
             put("stopsLeft", stopsLeft)
             put("alert", alert)
             put("alertKey", if (leg == null) "" else "${leg.tripId ?: leg.line}|${leg.to}")
@@ -464,6 +699,13 @@ object PhoneBridge {
             put("change", step.kind == StepKind.GetOff && index >= 0 && journey.legs.drop(index + 1).any { !it.walking })
             // The destination as a place, so "Missed it" on the watch can search again from there.
             journey.legs.last().toPlace?.let { put("target", placeJson(it, it.name, null)) }
+            // The chosen change ahead broke by a delay (#98): the phone's offer, for the watch's card.
+            rescueJson(journey)?.let { put("rescue", it) }
+            // How fresh the times are (#70 on the watch): the ride of this step live or not, and
+            // when live times of the trip last came in. Changes with each refresh (about every
+            // 30 s), so the watch's "Live · vor 25 s" is never more than one mirror round off.
+            if (leg?.realtime == true) put("realtime", true)
+            LiveFreshness.at(LiveSource.Trip).takeIf { it > 0 }?.let { put("liveAt", it) }
             // What the trip page of the watch shows besides the step: where this ride ends, the
             // next ride of a change, and the walk of this step for its sketch.
             val legs = journey.legs
@@ -474,7 +716,9 @@ object PhoneBridge {
                 emptyList()
             }
             if (step.kind == StepKind.Board && leg != null) {
-                put("rideTo", leg.to.plainStopName())
+                // The sunny side of this ride in its direction of travel (#176); older watches ignore it.
+                sun?.let { put("sunSide", it.name) }
+                put("rideTo", shownRideStop(leg, leg.to))
                 put("rideArrival", leg.arrival.toInstant().toEpochMilli())
             }
             if (index >= 0) nextRideJson(legs, index, changes)?.let { put("next", it) }
@@ -532,9 +776,11 @@ object PhoneBridge {
     /** The stops of [ride] from boarding to getting off with their times, for the progress line of the watch; null without them. */
     private fun stopsJson(ride: Leg): JSONArray? {
         if (ride.stopovers.size < 2 || ride.stopovers.size > WATCH_MAX_STOPS) return null
+        // Never two different stops alike in the list (#278).
+        val names = distinctStopNames(ride.stopovers.map { it.name }, ride.stopovers.map { shownRideStop(ride, it.name) })
         return JSONArray().apply {
-            ride.stopovers.forEach { stop ->
-                put(JSONObject().put("name", stop.name.plainStopName()).put("time", stop.time?.toInstant()?.toEpochMilli() ?: 0L))
+            ride.stopovers.forEachIndexed { index, stop ->
+                put(JSONObject().put("name", names[index]).put("time", stop.time?.toInstant()?.toEpochMilli() ?: 0L))
             }
         }
     }
@@ -559,14 +805,15 @@ object PhoneBridge {
                     .put("line", badgeLine(leg.line) ?: JSONObject.NULL)
                     .put("product", leg.product)
                     .put("color", lineColor(leg).toArgb())
-                    .put("direction", leg.direction ?: JSONObject.NULL)
-                    .put("from", leg.from.plainStopName())
-                    .put("to", leg.to.plainStopName())
+                    .put("direction", leg.direction?.let { railwayDirection(leg, it) } ?: JSONObject.NULL)
+                    .put("from", shownRideStop(leg, leg.from))
+                    .put("to", shownRideStop(leg, leg.to))
                     .put("dep", leg.departure.toInstant().toEpochMilli())
                     .put("arr", leg.arrival.toInstant().toEpochMilli())
                     .put("depPlatform", leg.departurePlatform ?: JSONObject.NULL)
                     .put("arrPlatform", leg.arrivalPlatform ?: JSONObject.NULL)
                     .put("walkBefore", walk)
+                    .put("live", leg.realtime)
                     .apply {
                         change?.let {
                             put("rating", it.tightness.name)
@@ -662,8 +909,8 @@ object PhoneBridge {
             .put("line", badgeLine(next.line) ?: JSONObject.NULL)
             .put("product", next.product)
             .put("color", lineColor(next).toArgb())
-            .put("direction", next.direction ?: JSONObject.NULL)
-            .put("stop", next.from.plainStopName())
+            .put("direction", next.direction?.let { railwayDirection(next, it) } ?: JSONObject.NULL)
+            .put("stop", shownRideStop(next, next.from))
             .put("platform", next.departurePlatform ?: JSONObject.NULL)
             .put("time", next.departure.toInstant().toEpochMilli())
             .put("walkMinutes", walk)
@@ -786,7 +1033,7 @@ object PhoneBridge {
      */
     private fun showStartedNotification(context: Context, pendingToken: String?) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(WATCH_CHANNEL) == null) ensureChannel(context, AppChannel.Watch)
+        if (manager.getNotificationChannel(WATCH_CHANNEL) == null) ensureChannel(context, AppChannel.of(NotifyFeature.WatchStarted))
         val open = PendingIntent.getActivity(
             context,
             WATCH_NOTIFICATION,
@@ -824,6 +1071,9 @@ object PhoneBridge {
     private const val WATCH_MAX_STOPS = 80
     private const val WATCH_PATH_POINTS = 30
     private const val HEARTBEAT_MILLIS = 60_000L
+
+    // The logcat tag of the bridge to the watch (no trip contents are logged).
+    private const val LOG_TAG = "PhoneBridge"
     private const val RECENT_COUNT = 8
     private const val APPOINTMENT_DAYS = 7
     private const val APPOINTMENT_COUNT = 4
@@ -832,7 +1082,7 @@ object PhoneBridge {
     private const val CONTACT_COUNT = 100
     private const val PUSH_DEBOUNCE_MILLIS = 1_500L
     private const val ALERT_FALLBACK_MINUTES = 2L
-    private val WATCH_CHANNEL = AppChannel.Watch.id
+    private val WATCH_CHANNEL = AppChannel.of(NotifyFeature.WatchStarted).id
     private const val WATCH_NOTIFICATION = 4711
     private const val ACTION_FOLLOW_WATCH_TRIP = "io.github.jnbp.nextstop.FOLLOW_WATCH_TRIP"
     private const val EXTRA_TOKEN = "token"
@@ -844,7 +1094,7 @@ class PhoneBridgeService : WearableListenerService() {
         super.onCreate()
         // Says in the log whether a request of the watch found the process running or started it.
         val age = android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime()
-        Log.i(WatchMapImages.TAG, "phone: listener service created, process ${age / 1000} s old")
+        DiagLog.i(WatchMapImages.TAG) { "phone: listener service created, process ${age / 1000} s old" }
     }
 
     override fun onDataChanged(events: DataEventBuffer) {
@@ -874,7 +1124,7 @@ class PhoneBridgeService : WearableListenerService() {
             val job = WatchMapImages.answer(applicationContext, event.data) ?: return
             runBlocking {
                 if (withTimeoutOrNull(MAP_IMAGE_WAIT_MILLIS) { job.join() } == null) {
-                    Log.w(WatchMapImages.TAG, "phone: listener stopped waiting for the map picture")
+                    DiagLog.w(WatchMapImages.TAG) { "phone: listener stopped waiting for the map picture" }
                 }
             }
             return
@@ -891,16 +1141,23 @@ class PhoneBridgeService : WearableListenerService() {
                     when (event.path) {
                         PhoneBridge.MSG_SYNC -> {
                             PhoneBridge.syncPlaces(applicationContext)
-                            PhoneBridge.publishTrip(applicationContext, TripState.journey.value)
+                            // Written even when unchanged: the watch asked, maybe after it dropped the trip.
+                            PhoneBridge.publishTrip(applicationContext, TripState.journey.value, force = true)
                         }
                         PhoneBridge.MSG_START_TRIP -> {
                             val token = JSONObject(String(event.data)).optString("token", "")
                             if (token.isNotEmpty()) PhoneBridge.startFromWatch(applicationContext, token)
                         }
+                        PhoneBridge.MSG_RESCUE_SWITCH -> {
+                            val key = JSONObject(String(event.data)).optString("key", "")
+                            if (key.isNotEmpty()) PhoneBridge.switchToRescue(applicationContext, key)
+                        }
+                        // "Ich bin wach" on the watch: the phone stops ringing as well.
+                        PhoneBridge.MSG_WAKE_OK -> io.github.jnbp.nextstop.ui.WakeAlarm.confirm(applicationContext)
                         PhoneBridge.MSG_STOP_TRIP -> {
                             // The trip service and the companion of the app end with the journey;
-                            // the watch learns it from the trip state written right away.
-                            TripState.journey.value = null
+                            // the watch learns it from the trip state written right away. As the app ends it.
+                            io.github.jnbp.nextstop.ui.endFollowedTrip(applicationContext)
                             PhoneBridge.dropWatchTrip(applicationContext)
                             PhoneBridge.publishTrip(applicationContext, null)
                         }
@@ -927,7 +1184,7 @@ class PhoneBridgeService : WearableListenerService() {
  * the watch finds journeys and departures wherever the phone does (Transitous outside Berlin,
  * the backends the user chose). The answer goes to the watch that asked as the message
  * [PhoneBridge.MSG_ANSWER] with the "id" of the question: `{"id", "ok": true}` with "journeys",
- * "departures" or "places", or `{"id", "ok": false, "error"}`. The watch side reads it in
+ * "departures" or "places", or `{"id", "ok": false, "error", "down"}` ("down": no source reached). The watch side reads it in
  * wear/src/main/java/io/github/jnbp/nextstop/wear/data/PhoneQuery.kt: keep both in step.
  */
 internal object WatchQueries {
@@ -950,11 +1207,13 @@ internal object WatchQueries {
         val answer = try {
             withTimeout(QUERY_TIMEOUT_MILLIS) { lookUp(context, request) }.put("ok", true)
         } catch (e: TimeoutCancellationException) {
-            JSONObject().put("ok", false).put("error", "timeout")
+            JSONObject().put("ok", false).put("error", "timeout").put("down", true)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            // "down": none of the sources could be reached, so the watch says so, not "nothing found" (#196).
             JSONObject().put("ok", false).put("error", e.javaClass.simpleName + ": " + (e.message ?: ""))
+                .put("down", servicesUnreachable(e))
         }
         answer.put("id", id)
         var bytes = answer.toString().toByteArray(Charsets.UTF_8)
@@ -995,15 +1254,21 @@ internal object WatchQueries {
                     val comfort = TransferComfort.entries.firstOrNull { it.name == request.optString("comfort") }
                     if (comfort == null) options else options.copy(comfort = comfort)
                 }
-                val page = source.journeys(from, to, options, results, null, null)
-                // The first [results] by the time to set off, as the phone's search list shows them.
-                JSONObject().put("journeys", JSONArray().apply { page.journeys.sortedWith(searchOrder).take(results).forEach { put(journeyJson(it)) } })
+                val page = source.journeys(from, to, options, watchSearchCount(results, options.comfort, MAX_RESULTS), null, null)
+                // Where to board each ride (see boardingJson) asks the dataset of change positions.
+                if (!ChangePositions.loaded) ChangePositions.load(context)
+                // As the phone's search list offers them at the level: none with a tighter change,
+                // the first [results] by the time to set off.
+                JSONObject().put("journeys", JSONArray().apply { watchJourneys(page.journeys, options.comfort, results).forEach { put(journeyJson(context, it)) } })
             }
             "departures" -> {
                 val stop = placeOf(request.optJSONObject("stop")) ?: throw IOException("no stop")
                 val count = request.optInt("results", 12).coerceIn(1, 20)
                 val list = source.departures(stop.id, count)
-                JSONObject().put("departures", JSONArray().apply { list.take(count).forEach { put(departureJson(it)) } })
+                // The directions as the phone's board names them: with their town where it is
+                // another than the stop's (townedStopName, "Kirchstr. · Zagelsdorf").
+                val town = townOf(stop.name)
+                JSONObject().put("departures", JSONArray().apply { list.take(count).forEach { put(departureJson(it, town)) } })
             }
             "search" -> {
                 val query = request.optString("query", "").trim()
@@ -1024,6 +1289,7 @@ internal object WatchQueries {
         val id = json.optString("id", "")
         val name = json.optString("name", "")
         if (id.isEmpty() || name.isEmpty()) return null
+        StationIdentity.noteStored(id, json.optString("key", ""))
         return Stop(
             id = id,
             name = name,
@@ -1040,6 +1306,7 @@ internal object WatchQueries {
 
     private fun placeJson(place: Stop): JSONObject = JSONObject().apply {
         put("id", place.id)
+        StationIdentity.stationKey(place)?.let { put("key", it) }
         put("name", place.name)
         place.latitude?.let { put("lat", it) }
         place.longitude?.let { put("lon", it) }
@@ -1054,9 +1321,95 @@ internal object WatchQueries {
     }
 
     /** A journey in the compact form of the watch (parseJourneyJson there). */
-    private fun journeyJson(journey: Journey): JSONObject = JSONObject().apply {
+    private fun journeyJson(context: Context, journey: Journey): JSONObject = JSONObject().apply {
         journey.refreshToken?.let { put("token", it) }
-        put("legs", JSONArray().apply { journey.legs.forEach { put(legJson(it)) } })
+        // The rating of each change by the phone's rule: the watch rates and filters by it.
+        val ratings = try {
+            changeRatingsByLeg(journey)
+        } catch (e: Exception) {
+            emptyMap()
+        }
+        put(
+            "legs",
+            JSONArray().apply {
+                journey.legs.forEachIndexed { index, leg ->
+                    put(
+                        legJson(leg).apply {
+                            shownNamesJson(leg, last = index == journey.legs.lastIndex, json = this)
+                            changeWalkJson(journey.legs, index, this)
+                            ratings[index]?.let { put("rating", it.name) }
+                            boardingJson(context, journey, leg, this)
+                        },
+                    )
+                }
+            },
+        )
+    }
+
+    /**
+     * Where to board [leg] of [journey], into [json]: the hint text ("boardHint") and the third
+     * of the train ("boardPart", "boardEstimated"), worked out as for the trip state of a trip the
+     * phone follows (see tripJson). So a trip the watch follows itself (started there, before or
+     * without the phone taking it over) shows the same hint on its boarding page. Nothing for a
+     * walk, nor where the setting is off or no hint is known.
+     */
+    private fun boardingJson(context: Context, journey: Journey, leg: Leg, json: JSONObject) {
+        if (leg.walking) return
+        val hint = try {
+            boardingHint(context, TripStep(StepKind.Board, leg.departure, leg, leg.from), journey)
+        } catch (e: Exception) {
+            null
+        } ?: return
+        json.put("boardHint", hint)
+        val position = try {
+            rideAfter(journey, leg)?.let { boardingPositionOf(leg, it) }
+        } catch (e: Exception) {
+            null
+        }
+        if (position != null && !position.samePlatform) {
+            json.put("boardPart", position.part)
+            json.put("boardEstimated", position.estimated)
+        }
+    }
+
+    /**
+     * The names of [leg] as the trip state of the phone shows them, where they differ from the
+     * provider's: its stops and direction ("fromShown", "toShown", "dirShown"; railway style on a
+     * long-distance ride, the railway's short words on a regional train, see shownRideStop), and
+     * for the [last] leg the destination as short as the trip state names it (shortDestinationName).
+     * So the watch names a journey it shows, or a trip it follows itself, as after the phone took
+     * the trip over; "from" and "to" stay the provider's names for matching.
+     */
+    private fun shownNamesJson(leg: Leg, last: Boolean, json: JSONObject) {
+        if (!leg.walking) {
+            shownRideStop(leg, leg.from).takeIf { it != leg.from }?.let { json.put("fromShown", it) }
+            if (!last) shownRideStop(leg, leg.to).takeIf { it != leg.to }?.let { json.put("toShown", it) }
+            leg.direction?.let { railwayDirection(leg, it) }?.takeIf { it != leg.direction }?.let { json.put("dirShown", it) }
+        }
+        if (last) shortDestinationName(leg).takeIf { it != leg.to }?.let { json.put("toShown", it) }
+    }
+
+    /**
+     * For a walk of a change (between two rides) the minutes it takes as the phone counts them
+     * ("changeWalk", see changeWalkMinutes), where they are fewer than the provider's: a walk the
+     * provider stretched over the wait for the next ride. The trip state's next ride sends the same
+     * minutes, so the change card of a trip the watch follows itself says the same walk.
+     */
+    private fun changeWalkJson(legs: List<Leg>, index: Int, json: JSONObject) {
+        val walk = legs[index]
+        if (!walk.walking) return
+        var before = index - 1
+        while (before >= 0 && legs[before].walking) before--
+        var after = index + 1
+        while (after < legs.size && legs[after].walking) after++
+        val arriving = legs.getOrNull(before) ?: return
+        val next = legs.getOrNull(after) ?: return
+        val minutes = try {
+            changeWalkMinutes(walk, arriving, next)
+        } catch (e: Exception) {
+            return
+        }
+        if (minutes < Duration.between(walk.departure, walk.arrival).toMinutes().coerceAtLeast(0)) json.put("changeWalk", minutes)
     }
 
     private fun legJson(leg: Leg): JSONObject = JSONObject().apply {
@@ -1072,10 +1425,16 @@ internal object WatchQueries {
         put("arr", leg.arrival.toInstant().toEpochMilli())
         put("depDelay", leg.plannedDeparture?.let { Duration.between(it, leg.departure).toMinutes() } ?: 0L)
         put("arrDelay", leg.plannedArrival?.let { Duration.between(it, leg.arrival).toMinutes() } ?: 0L)
+        // Live times or the timetable: the watch colours its times by it (#227b).
+        if (leg.realtime) put("realtime", true)
         leg.departurePlatform?.let { put("platform", it) }
         leg.arrivalPlatform?.let { put("arrPlatform", it) }
         leg.direction?.let { put("dir", it) }
         put("cancelled", leg.cancelled)
+        // The colour of the very ride, as the phone shows it (its provider's, where it runs): the
+        // watch knows only Berlin's network map, so a tram of another town or a Hamburg U1 would
+        // differ from the phone (and from the trip state, which sends it too).
+        if (!leg.walking) put("color", lineColor(leg).toArgb())
         // The stops after boarding, the last one being where the ride is left.
         val times = leg.stopovers.drop(1).mapNotNull { it.time?.toInstant()?.toEpochMilli() }
         if (!leg.walking && times.isNotEmpty() && times.size <= MAX_STOPS) {
@@ -1091,10 +1450,11 @@ internal object WatchQueries {
         }
     }
 
-    private fun departureJson(departure: Departure): JSONObject = JSONObject().apply {
+    private fun departureJson(departure: Departure, boardTown: String?): JSONObject = JSONObject().apply {
         put("line", badgeLine(departure.line) ?: departure.line)
         put("product", departure.product)
         put("dir", departure.direction)
+        townedStopName(departure.direction, boardTown).takeIf { it.isNotBlank() && it != departure.direction }?.let { put("dirShown", it) }
         departure.time?.let { put("time", it.toInstant().toEpochMilli()) }
         departure.plannedTime?.let { put("planned", it.toInstant().toEpochMilli()) }
         departure.delaySeconds?.let { put("delay", it / 60) }
@@ -1102,5 +1462,7 @@ internal object WatchQueries {
         put("cancelled", departure.cancelled)
         if (departure.additional) put("additional", true)
         departure.replaces?.let { put("replaces", it) }
+        // The colour of the run's line as the phone's board shows it (see legJson).
+        put("color", lineColor(departure).toArgb())
     }
 }

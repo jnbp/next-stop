@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r6c_dest_icon">Ziel</string>
+    <string name="r6c_mark_earliest">frühester</string>
+    <string name="r6c_mark_sprint">Sprint</string>
+    <string name="r6c_pickers_title">Anschlusswahl</string>
+    <string name="r6c_pickers_text">Wie die Wahl des Anschlusses an den Umstiegen erscheint – in der Live-Fahrt und in den Verbindungsdetails.</string>
+    <string name="r6c_pickers_folded">Eingeklappt</string>
+    <string name="r6c_pickers_all">Alle offen</string>
+    <string name="r6c_pickers_next">Nur der nächste</string>
+    <string name="r6c_pickers_folded_text">Jeder Umstieg bietet die Wahl als kleinen Link an; ein Tipp öffnet sie.</string>
+    <string name="r6c_pickers_all_text">Die Wahl ist an jedem Umstieg offen. In der Live-Fahrt werden ihre Abfahrten für einen Umstieg zur Zeit geladen (den nächsten); ein Tipp auf einen anderen Umstieg lädt sie dort.</string>
+    <string name="r6c_pickers_next_text">Die Wahl am nächsten wichtigen Umstieg öffnet sich von selbst (in den Verbindungsdetails am ersten Umstieg); du kannst sie einklappen. Die anderen öffnen sich auf Tipp.</string>
+    <string name="r6c_faster_preview">Vorschau</string>
+    <string name="r6c_preview_title">Vorschau des schnelleren Wegs</string>
+    <string name="r6c_hero_at_arrival">an</string>
+    <string name="r6c_hero_at_departure">um</string>
+    <string name="r6c_hero_spoken_arrival">Ankunft um %1$s</string>
+    <string name="r6c_hero_spoken_departure">Abfahrt um %1$s</string>
+    <string name="r6c_next_change">ab %1$s · %2$s Umstieg</string>
+    <string name="r6c_plan_b">Plan B</string>
+    <string name="r6c_change_short">Ändern</string>
+    <string name="r6c_other_connection">Anderen Anschluss wählen</string>
+    <string name="r6c_missed_change">Anschluss verpasst</string>
+    <string name="r6c_train_late">Mein Zug ist zu spät / fällt aus</string>
+    <string name="r6c_wrong_train">Ich sitze im falschen Zug</string>
+    <string name="r6c_menu_shortcuts">Abkürzungen melden</string>
+    <string name="r6c_end_ask">Beenden?</string>
+    <string name="r6c_other_ways">Andere Wege ab hier</string>
+    <string name="r6c_other_ways_change">Andere Wege ab Umstieg</string>
+    <string name="r6c_other_ways_loading">Suche andere Wege …</string>
+    <string name="r6c_other_ways_none">Keine anderen Wege gefunden</string>
+    <string name="r6c_other_ways_failed">Suche fehlgeschlagen – nochmal tippen</string>
+    <string name="r6c_way_earlier">%1$d′ früher</string>
+    <string name="r6c_way_later">%1$d′ später</string>
+    <string name="r6c_way_same">gleiche Ankunft</string>
+    <plurals name="r6c_way_fewer">
+        <item quantity="one">%d Umstieg weniger</item>
+        <item quantity="other">%d Umstiege weniger</item>
+    </plurals>
+    <plurals name="r6c_way_more">
+        <item quantity="one">%d Umstieg mehr</item>
+        <item quantity="other">%d Umstiege mehr</item>
+    </plurals>
+</resources>

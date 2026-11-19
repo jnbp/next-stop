@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Map, round 3: the compass of the map and picking a start or destination on the map. -->
+<resources>
+    <string name="r3map_compass_north">Turn the map to north</string>
+    <string name="r3map_pick_on_map">Choose on the map</string>
+    <string name="r3map_pick_title_origin">Choose the start on the map</string>
+    <string name="r3map_pick_title_destination">Choose the destination on the map</string>
+    <string name="r3map_pick_hint">Move the map, the pin stays in the middle</string>
+    <string name="r3map_pick_point">Point on the map</string>
+    <string name="r3map_pick_point_near">Point on the map near %1$s</string>
+    <string name="r3map_pick_use">Use this place</string>
+    <string name="r3map_pick_use_stop">Take the stop %1$s</string>
+    <string name="r3map_pick_looking">Looking up the place…</string>
+</resources>

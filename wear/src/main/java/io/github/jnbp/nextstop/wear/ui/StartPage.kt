@@ -71,7 +71,6 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyListScope
 import androidx.wear.compose.foundation.lazy.itemsIndexed
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material3.Button
-import androidx.wear.compose.material3.CompactButton
 import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.MaterialTheme
@@ -102,6 +101,7 @@ import io.github.jnbp.nextstop.wear.data.hasLocationPermission
 import io.github.jnbp.nextstop.wear.data.liveBoard
 import io.github.jnbp.nextstop.wear.data.locationGrants
 import io.github.jnbp.nextstop.wear.data.nextCatchable
+import io.github.jnbp.nextstop.wear.data.placeSubline
 import io.github.jnbp.nextstop.wear.data.stopNameParts
 import io.github.jnbp.nextstop.wear.data.upcomingDepartures
 
@@ -398,17 +398,11 @@ private fun LiveHeader(glance: NearbyGlance, onClick: () -> Unit, modifier: Modi
     )
 }
 
-/** The small button under the stop of the live departures that opens the list of stops nearby. */
+/** The button under the stop of the live departures that opens the list of stops nearby. */
 @Composable
 private fun OtherStopButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val press = rememberWatchPress()
-    CompactButton(
-        onClick = onClick,
-        modifier = modifier.then(press.modifier),
-        interactionSource = press.source,
-        colors = brandTonalButtonColors(),
-        label = { Text(stringResource(R.string.other_stop), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-    )
+    // A full-width tonal action as the other actions of the watch (#145).
+    WatchAction(stringResource(R.string.other_stop), onClick = onClick, icon = R.drawable.ic_place, modifier = modifier)
 }
 
 /** The live departures could not be loaded: a full-size button that says so and loads them again. */
@@ -435,7 +429,7 @@ private fun NearbyButton(hint: Int?, onClick: () -> Unit, modifier: Modifier = M
         interactionSource = press4.source,
         colors = brandTonalButtonColors(),
         icon = { Icon(painterResource(R.drawable.ic_schedule), contentDescription = null) },
-        label = { Text(stringResource(R.string.nearby_departures), maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        label = { WordSafeLabel(stringResource(R.string.nearby_departures)) },
         secondaryLabel = if (hint != null) {
             { Text(stringResource(hint), maxLines = 2, overflow = TextOverflow.Ellipsis) }
         } else {
@@ -764,10 +758,11 @@ private fun FavoriteButton(
     modifier: Modifier = Modifier,
 ) {
     val time = departure?.time
+    val subline = placeSubline(favorite.label, favorite.place)
     val secondary: (@Composable RowScope.() -> Unit)? = when {
         departure != null && time != null -> {
             {
-                LineBadge(departure.line, departure.product)
+                LineBadge(departure.line, departure.product, color = departure.color)
                 Spacer(Modifier.width(4.dp))
                 Text(
                     departure.direction,
@@ -787,8 +782,8 @@ private fun FavoriteButton(
                 }
             }
         }
-        favorite.label != favorite.place.name -> {
-            { Text(favorite.place.name, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        subline != null -> {
+            { Text(subline, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
         else -> null
     }

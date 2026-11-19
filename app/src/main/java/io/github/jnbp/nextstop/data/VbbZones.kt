@@ -136,8 +136,8 @@ object VbbZones {
         52.488627 to 13.300242, // Hohenzollerndamm
         52.480046 to 13.312160, // Heidelberger Platz
         52.477653 to 13.329024, // Bundesplatz
-        52.478547 to 13.342607, // Innsbrucker Platz
-        52.479349 to 13.351918, // Schöneberg
+        52.478547 to 13.342607,
+        52.479349 to 13.351918,
         52.476255 to 13.365417, // Südkreuz
         52.470258 to 13.385036, // Tempelhof
         52.467448 to 13.431353, // Hermannstraße

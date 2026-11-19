@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The countdown of the last minute in seconds, as on the watch. -->
+    <string name="r9_in_seconds">in %1$d s</string>
+    <!-- The unit of the seconds of the big counter of the trip in its last minute. -->
+    <string name="r9_seconds_unit">s</string>
+</resources>

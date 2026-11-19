@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The companion views of release 0.2: calm (no map), with map, classic (ui/companion). -->
+<resources>
+    <string name="companion_layout_title">Live-Fahrt-Ansicht</string>
+    <string name="companion_layout_text">Wie die Live-Fahrt unterwegs aussieht.</string>
+    <string name="companion_layout_auto">Automatisch</string>
+    <string name="companion_layout_map">Mit Karte</string>
+    <string name="companion_layout_classic">Klassisch</string>
+    <string name="companion_layout_auto_text">Ruhig im Fahrzeug und beim Warten; zu Fuß kommt die Karte von selbst. Der Karten-Knopf gilt bis zum nächsten Abschnitt.</string>
+    <string name="companion_layout_map_text">Immer mit Karte, die Halte in einem Blatt unten.</string>
+    <string name="companion_layout_classic_text">Die bisherige Ansicht: Karte mit schwebenden Karten.</string>
+    <string name="setup_companion_title">Während der Fahrt</string>
+    <string name="setup_companion_short">Wie soll die Live-Fahrt unterwegs aussehen? Jederzeit änderbar unter Einstellungen › Darstellung.</string>
+
+    <string name="companion_map_show">Karte zeigen</string>
+    <string name="companion_map_hide">Karte ausblenden</string>
+    <string name="companion_more">Mehr</string>
+    <string name="companion_change_trip">Fahrt ändern</string>
+    <string name="companion_your_exit">Dein Ausstieg · an %1$s</string>
+    <string name="companion_riding_now">Du fährst gerade</string>
+    <string name="companion_next_ride">Deine nächste Fahrt</string>
+    <string name="companion_after">Danach</string>
+    <string name="companion_later">Später</string>
+    <string name="companion_stops_open">aufgeklappt</string>
+    <string name="companion_stops_folded">eingeklappt</string>
+    <string name="companion_departs_at">ab %1$s</string>
+    <string name="companion_minutes">%1$d′</string>
+    <string name="companion_wake_at">Wecker %1$s</string>
+    <string name="companion_source_location">Laut Standort</string>
+    <string name="companion_source_location_speed">Aus Standort · %1$d km/h</string>
+    <string name="companion_source_live">Laut Echtzeit</string>
+    <string name="companion_source_timetable">Laut Fahrplan</string>
+    <string name="companion_source_standing">Stau · steht seit %1$d′</string>
+    <string name="companion_reach_safe">sicher · %1$d′</string>
+    <string name="companion_reach_tight">knapp · %1$d′</string>
+    <string name="companion_reach_late">zu spät</string>
+    <string name="companion_then">dann %1$s %2$s</string>
+    <string name="companion_walk_show">%1$d′ Fußweg · zeigen</string>
+    <plurals name="companion_more_stops">
+        <item quantity="one">%d weiterer Halt</item>
+        <item quantity="other">%d weitere Halte</item>
+    </plurals>
+    <plurals name="companion_stops_left">
+        <item quantity="one">noch %d Halt</item>
+        <item quantity="other">noch %d Halte</item>
+    </plurals>
+</resources>

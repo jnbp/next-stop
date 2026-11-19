@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #183: the action of the alert to get off or change: opens the live trip on the watch. -->
+    <string name="r6live_open_live_trip">Open live trip</string>
+</resources>

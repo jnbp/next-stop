@@ -1,5 +1,9 @@
 package io.github.jnbp.nextstop.ui
 
+import io.github.jnbp.nextstop.data.shownTime
+import io.github.jnbp.nextstop.data.shownRideStopNames
+import androidx.compose.runtime.CompositionLocalProvider
+import io.github.jnbp.nextstop.data.StopAction
 import androidx.compose.runtime.Stable
 import kotlinx.coroutines.CoroutineScope
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -31,11 +35,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.AnimatedContent
@@ -62,6 +68,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -76,6 +83,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
@@ -90,6 +98,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -181,8 +190,10 @@ import kotlinx.coroutines.launch
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.shownWalkMinutes
 import io.github.jnbp.nextstop.data.ChartTotalTime
+import io.github.jnbp.nextstop.data.rideEndsWithoutOverlap
 import io.github.jnbp.nextstop.data.ChartShortLegs
 import io.github.jnbp.nextstop.data.ChangeMapKind
+import io.github.jnbp.nextstop.data.PlannedTrips
 import io.github.jnbp.nextstop.data.Journey
 import io.github.jnbp.nextstop.data.ALT_CHANGE_SWITCH
 import io.github.jnbp.nextstop.data.switchToAltChange
@@ -193,6 +204,9 @@ import io.github.jnbp.nextstop.data.Leg
 import io.github.jnbp.nextstop.data.railReplacement
 import io.github.jnbp.nextstop.data.rideTown
 import io.github.jnbp.nextstop.data.townedStopName
+import io.github.jnbp.nextstop.data.railwayNames
+import io.github.jnbp.nextstop.data.rideStopName
+import io.github.jnbp.nextstop.data.shownRideStop
 import io.github.jnbp.nextstop.data.OsmStations
 import io.github.jnbp.nextstop.data.Stop
 import io.github.jnbp.nextstop.data.Tightness
@@ -223,6 +237,7 @@ import io.github.jnbp.nextstop.ui.theme.AppColors
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.foundation.gestures.scrollBy
@@ -266,6 +281,8 @@ class ConnectionsState {
     var listViewport = 0
     // What was in view when another transfer level was chosen; taken once the new list is laid out.
     var levelHold: LevelHold? = null
+    // True once "Frühere Verbindungen" was tapped in the list: journeys that left show too (#150).
+    var listEarlier by mutableStateOf(false)
 }
 
 /**
@@ -406,7 +423,7 @@ private fun levelColors(level: TransferComfort): Pair<Color, Color> = when (leve
 @Composable
 private fun levelName(level: TransferComfort): String = stringResource(levelNameRes(level))
 
-/** The string of the name of [level] ("Entspannt", "Normal", "Knapp", "Sprint"). */
+/** The string of the name of [level] ("Relaxed", "Normal", "Knapp", "Sprint"). */
 internal fun levelNameRes(level: TransferComfort): Int = when (level) {
     TransferComfort.Relaxed -> R.string.comfort_relaxed
     TransferComfort.Normal -> R.string.comfort_normal
@@ -426,7 +443,7 @@ fun levelStrongColor(level: TransferComfort): Color = tightnessColor(
 
 /**
  * The single choice how tight changes may be, as a slim bar of four equal segments without gaps
- * (Entspannt, Normal, Knapp, Sprint) with the four names centred below them. The choice is
+ * (Relaxed, Normal, Knapp, Sprint) with the four names centred below them. The choice is
  * additive: a journey is shown when its category is the picked [level] or a more relaxed one,
  * so the bar fills from the left up to the picked segment, each segment in the strong colour of
  * its level (the colour its changes have in the chart), and stays pale glass beyond. The fill
@@ -461,7 +478,7 @@ fun LevelSelector(
     val currentPick by rememberUpdatedState(pick)
     val offerLevel = tighterLevel ?: entries.getOrNull(level.ordinal + 1)
     val label = stringResource(R.string.transfer_filter_question)
-    // How far the bar is filled, in segments: 1 for Entspannt up to 4 for Sprint. It sweeps.
+    // How far the bar is filled, in segments: 1 for Relaxed up to 4 for Sprint. It sweeps.
     val fill by animateFloatAsState(
         targetValue = (level.ordinal + 1).toFloat(),
         animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow),
@@ -709,6 +726,8 @@ fun ConnectionsScreen(
     onPickOrigin: () -> Unit,
     onLoadEarlier: () -> Unit,
     onLoadLater: () -> Unit,
+    // Pages on their way at the edges of the chart and how the last ones ended (see ChartEdges.kt).
+    edges: EdgeStatus = EdgeStatus(),
     routeSaved: Boolean,
     onToggleRoute: () -> Unit,
     stopsFailedId: String?,
@@ -735,6 +754,8 @@ fun ConnectionsScreen(
     patternNote: String? = null,
     onClearPattern: () -> Unit = {},
     refreshing: Boolean = false,
+    // Asking again for the journeys shown failed: they stay, with a note and a retry (#59).
+    stale: Boolean = false,
     onRefresh: (asked: Boolean) -> Job? = { null },
     // False while the app is not on screen: a failed search is not asked again meanwhile.
     active: Boolean = true,
@@ -863,7 +884,15 @@ fun ConnectionsScreen(
                     // The start, and a place on the way set for the search right after it in the
                     // same line: no row of its own.
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
+                        // The address of "Aktueller Standort" is looked up (#207): the train of the search.
+                        if (HereAddress.fromResolving.value) LoadingRow(
+                            text = stringResource(R.string.r5search_contact_resolving),
+                            compact = true,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .clickable(onClick = onPickOrigin)
+                                .padding(top = 2.dp, end = 8.dp),
+                        ) else Text(
                             text = stringResource(R.string.from_label, fromName),
                             color = AppColors.Blue,
                             fontWeight = FontWeight.Bold,
@@ -885,7 +914,10 @@ fun ConnectionsScreen(
                             )
                         }
                     }
-                    Text(
+                    if (HereAddress.toResolving.value) LoadingRow(
+                        text = stringResource(R.string.r5search_contact_resolving),
+                        compact = true,
+                    ) else Text(
                         text = toName,
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
@@ -917,11 +949,24 @@ fun ConnectionsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    // How old the live times of the journeys found are, first so it is always in
+                    // view over the chart and the list (#12); a tap asks for the journeys again,
+                    // as a pull does.
+                    if (!loading && !journeys.isNullOrEmpty()) {
+                        FreshnessChip(source = LiveSource.Journeys, onRefresh = { onRefresh(true) }, refreshing = refreshing, minHeight = 36.dp)
+                    }
                     // The same order as on the map with the options.
                     TimeChip(choice = time, onClick = onTime, minHeight = 36.dp)
                     EveryMinuteChip(active = everyMinute, onToggle = onEveryMinute, minHeight = 36.dp)
                     // Kinds of transport, Deutschlandticket and bicycle; kept for the next searches.
                     if (searchOptions != null) SearchOptionsChip(options = searchOptions, onClick = onSearchOptions, minHeight = 36.dp)
+                    // Kinds of transport that are off: easy to forget, and otherwise it looks as if
+                    // the provider had found no feeder bus. A compact chip in this row, no row of its own.
+                    ProductsOffChip(off = productsOff, onUseAll = onAllProducts, minHeight = 36.dp)
+                    // Deutschlandticket, bicycle: also easy to forget while on.
+                    searchOptions?.let { ticketFilters(it) }.orEmpty().forEach { filter ->
+                        TicketFilterChip(filter = filter, onOff = { onTicketOff(filter) }, minHeight = 36.dp)
+                    }
                 }
                 // The tightest level shown; the next tighter one with hidden journeys shows how many it would add.
                 // Without the setting "choose transfer times" the page shows normal and relaxed journeys and asks nothing.
@@ -939,14 +984,6 @@ fun ConnectionsScreen(
                         TransferRatingInfoButton()
                     }
                 }
-                // Kinds of transport that are off: easy to forget, and otherwise it looks as if
-                // the provider had found no feeder bus.
-                SearchLimits(
-                    productsOff = productsOff,
-                    onAllProducts = onAllProducts,
-                    tickets = searchOptions?.let { ticketFilters(it) }.orEmpty(),
-                    onTicketOff = onTicketOff,
-                )
             }
 
             // A remembered connection: its name, what the search found for it, and a way back to all journeys.
@@ -958,6 +995,7 @@ fun ConnectionsScreen(
             // Pulled down at its top, the chart or the list (or the message of a failed search)
             // asks for the journeys again; not under the page of one journey.
             val pullState = rememberPullToRefreshState()
+            val pullTicks = rememberTicks()
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -966,22 +1004,29 @@ fun ConnectionsScreen(
                         isRefreshing = refreshing,
                         state = pullState,
                         enabled = !loading && !detailPage && (pagewise || error != null),
-                        onRefresh = { onRefresh(true) },
+                        onRefresh = {
+                            pullTicks.refresh()
+                            onRefresh(true)
+                        },
                     ),
             ) {
             Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // A failed search is asked again by itself while it is shown: after 5 s, 15 s, then
-            // every 30 s, each once the one before has ended. Any answer clears the message.
-            // Only while the app is on screen: back on it, the retries start over.
-            if (error != null && !loading && active) {
-                LaunchedEffect(Unit) {
-                    var attempt = 0
-                    while (true) {
-                        delay(SEARCH_RETRY_MILLIS[attempt.coerceAtMost(SEARCH_RETRY_MILLIS.lastIndex)])
-                        attempt++
-                        onRefresh(false)?.join()
-                    }
-                }
+            // A failed search is asked again by itself while it is shown: after 5 s, 15 s, 30 s,
+            // then every minute, each once the one before has ended (see screenRetryWaitMillis). Any
+            // answer clears the message. Only while the app is on screen: back on it, the retries
+            // start over.
+            AutoRetry(enabled = error != null && !loading && active) { onRefresh(false) }
+            // A search through a place on the way that found nothing soon says so (#35a).
+            if (!loading && error == null) ViaDayNoteCard()
+            // Asking again failed on a flaky network: the journeys shown stay, with a note and a
+            // button; it is asked again by itself as the failed search is (#59).
+            if (stale && !loading && error == null && !journeys.isNullOrEmpty()) {
+                AutoRetry(enabled = active) { onRefresh(false) }
+                RetryCard(
+                    text = stringResource(R.string.r5search_refresh_failed),
+                    onRetry = { onRefresh(true) },
+                    compact = true,
+                )
             }
             when {
                 loading -> GlassSurface(modifier = Modifier.fillMaxWidth()) {
@@ -998,9 +1043,9 @@ fun ConnectionsScreen(
                 ) {
                     GlassSurface(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Text(text = error, color = AppColors.Muted)
+                            Text(text = problemText(error), color = AppColors.Muted)
                             SecondaryButton(
-                                text = stringResource(R.string.try_again),
+                                text = stringResource(R.string.r5search_retry),
                                 onClick = { onRefresh(true) },
                                 minHeight = 44.dp,
                             )
@@ -1067,7 +1112,7 @@ fun ConnectionsScreen(
                         delay(OFFER_SETTLE_MILLIS)
                         loadOffers(picked, false)
                         while (true) {
-                            delay(OFFER_REFRESH_MILLIS)
+                            delay(BatterySaver.pace(OFFER_REFRESH_MILLIS))
                             loadOffers(picked, true)
                         }
                     }
@@ -1089,6 +1134,7 @@ fun ConnectionsScreen(
                                 onSelect = onPick,
                                 onLoadEarlier = onLoadEarlier,
                                 onLoadLater = onLoadLater,
+                                edges = edges,
                                 modifier = overviewModifier,
                                 // The journey opens on its own page: the chart stays as it is under it,
                                 // from the tap on (see ConnectionsState.opening).
@@ -1099,12 +1145,13 @@ fun ConnectionsScreen(
                             // The list starts with the next departure; earlier ones live in the chart.
                             // A picked journey stays in the list after it has left, so the pick is never lost.
                             // A search at a picked time shows all it found, whatever the clock says.
-                            val upcoming = if (time != null) {
-                                journeys
-                            } else {
-                                journeys.filter { !it.departure.isBefore(now) || it.id == current.id }
-                            }
+                            val upcoming = listedJourneys(journeys, timed = time != null, earlierShown = state.listEarlier, now = now, currentId = current.id)
                             JourneyList(
+                                // The row on top asks for earlier ones, as the chart's edge does (#150, see loadEarlier).
+                                earlier = ListEarlier(loading = edges.loadingEarlier) {
+                                    state.listEarlier = true
+                                    onLoadEarlier()
+                                },
                                 journeys = upcoming,
                                 selected = upcoming.indexOf(current),
                                 levels = levels,
@@ -1122,8 +1169,13 @@ fun ConnectionsScreen(
                         // pageOrigin is in the box of the page (see growFromColumn), pageBox where that box lies in the root.
                         val pageOrigin = remember { arrayOfNulls<Rect>(1) }
                         val pageBox = remember { arrayOfNulls<Rect>(1) }
+                        // The jank meter follows this change of page too (see JankTransitions.kt).
+                        JankMeter.noteShown("journey", if (detailPage) "Detail" else "Connections")
+                        DisposableEffect(Unit) { onDispose { JankMeter.forgetShown("journey") } }
                         // A back gesture seeks the change to the overview as it goes (see rememberBackSeek).
-                        rememberBackSeek(detailPage, detailBack, backTarget = false, label = "journeyPage").AnimatedContent(
+                        val journeyPageSeek = rememberBackSeek(detailPage, detailBack, backTarget = false, label = "journeyPage")
+                        JankTransitionProbe(journeyPageSeek)
+                        journeyPageSeek.AnimatedContent(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
@@ -1132,7 +1184,8 @@ fun ConnectionsScreen(
                                 when {
                                     // The page stays opaque while held and fades by itself once let go (backFront).
                                     detailBack.active -> backContentTransform(detailBack, hold = true)
-                                    pageOrigin[0] == null -> fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+                                    // Not clipped: a page that closes is drawn above its box while the chips come back (headerReturnLift).
+                                    pageOrigin[0] == null -> fadeIn(tween(180)) togetherWith fadeOut(tween(120)) using SizeTransform(clip = false)
                                     // The page grows out of its column and fades in as it does (see
                                     // growFromColumn); the chart stays under it, still, and goes once
                                     // the page covers it.
@@ -1141,13 +1194,22 @@ fun ConnectionsScreen(
                                     // Closing, the page shrinks above the overview that is back underneath.
                                     else -> (
                                         fadeIn(tween(PAGE_SHRINK_MILLIS / 2)) togetherWith
-                                            fadeOut(tween(PAGE_SHRINK_MILLIS / 3, delayMillis = PAGE_SHRINK_MILLIS * 2 / 3))
+                                            fadeOut(tween(PAGE_SHRINK_MILLIS / 3, delayMillis = PAGE_SHRINK_MILLIS * 2 / 3)) using
+                                            SizeTransform(clip = false)
                                         )
                                         .apply { targetContentZIndex = -1f }
                                 }
                             },
                         ) { open ->
                             if (open) {
+                                // A back gesture that was let go fades the page by itself (backFront) and
+                                // ends (detailBack.active false) a frame or two before the transition has
+                                // taken the page away: without the gesture's look in those frames the page
+                                // stood there whole again, over the overview, for a frame (#112). It stays
+                                // hidden until it is gone; a gesture called off leaves it as it was.
+                                val backSeen = remember { BooleanArray(1) }
+                                backSeen[0] = backLeftSeen(detailBack.active, closed = !detailPage, seenBefore = backSeen[0])
+                                val goneAfterBack = backLeftHidden(detailBack.active, backSeen[0])
                                 JourneyDetail(
                                     journey = current,
                                     fromName = fromName,
@@ -1172,6 +1234,7 @@ fun ConnectionsScreen(
                                     handle = false,
                                     modifier = Modifier
                                         .fillMaxSize()
+                                        .jankPageDrawn("Detail")
                                         // Where the page lies, before any shrinking (see BackProbe).
                                         .then(if (BackLog.on) Modifier.onGloballyPositioned { BackProbe.top("layer:journeyPage", it) } else Modifier)
                                         // Under a back gesture the page shrinks with it instead.
@@ -1187,14 +1250,22 @@ fun ConnectionsScreen(
                                                 Modifier
                                                     .backFront(detailBack, CARD_CORNER.value)
                                                     .background(AppColors.PlainGround, CARD_SHAPE)
+                                            } else if (goneAfterBack) {
+                                                Modifier.graphicsLayer { alpha = 0f }
                                             } else {
-                                                Modifier.growFromColumn(this, pageOrigin[0])
+                                                // Closing, the overview below stands still (#249): the page
+                                                // comes down with the chips by itself (headerReturnLift).
+                                                Modifier
+                                                    .graphicsLayer {
+                                                        translationY = headerReturnLift(headPlace.intValue, headerOut.value, closing = !detailPage && !side)
+                                                    }
+                                                    .growFromColumn(this, pageOrigin[0])
                                             },
                                         ),
                                 )
                             } else {
                                 // The overview alone; a tap opens the journey on its own page.
-                                overview(Modifier.fillMaxSize().then(if (headBack) Modifier.underHead(headPlace).backUnder(detailBack) else Modifier)) { id ->
+                                overview(Modifier.fillMaxSize().jankPageDrawn("Connections").then(if (headBack) Modifier.underHead(headPlace).backUnder(detailBack) else Modifier)) { id ->
                                     // The column as it lies in the box of the page right now, before the
                                     // header above goes: the page grows out of it wherever the box slides.
                                     val box = pageBox[0]
@@ -1405,9 +1476,6 @@ fun ConnectionsScreen(
     }
 }
 
-// How long a failed search waits before it is asked again by itself: the first, the second and every further time.
-private val SEARCH_RETRY_MILLIS = longArrayOf(5_000L, 15_000L, 30_000L)
-
 /**
  * The overview above the detail card, sharing the height as a column with weights would: the
  * card gets [share] of the height left after [gap], the overview the rest, but never less than
@@ -1530,10 +1598,11 @@ private fun SplitOrStack(
 
 /**
  * [top], [header] and [rest] one above the other, 12 dp apart; [rest] takes the height left.
- * While [header] goes ([collapsed], [headerOut] running from 0 to 1) or comes back (1 to 0) it
- * only fades and [rest] only slides over it: [rest] is measured once for the height it ends
- * with and then just placed anew each frame, so no frame of the way measures the chart or the
- * page of a journey again. What [rest] has too much below while it slides up is cut off at
+ * While [header] goes ([collapsed], [headerOut] running from 0 to 1) it only fades and [rest]
+ * only slides up over it: [rest] is measured once for the height it ends with and then just
+ * placed anew each frame, so no frame of the way measures the chart or the page of a journey
+ * again. Coming back (1 to 0) [rest] is in its place at once and the header fades in above it
+ * (see headerRestOffset, #249). What [rest] has too much below while it slides up is cut off at
  * the bottom. With [headerUnder] (collapsed, under a back gesture) the header is drawn whole
  * in its place behind [rest], which keeps its room and place: nothing is laid out anew; it
  * grows and fades in with the gesture of [headerGrow] about the centre of the card below it,
@@ -1606,7 +1675,8 @@ private fun StackedHeader(
                     if (headerUnder && headerGrow != null) backUnder(headerGrow, pivot)
                 }
             }
-            restPlace.place(0, restTop + kotlin.math.round(headerRoom * (1f - out)).toInt())
+            // Coming back the overview is in its place at once (#249, see headerRestOffset).
+            restPlace.place(0, restTop + headerRestOffset(headerRoom, out, collapsed))
         }
     }
 }
@@ -1832,7 +1902,8 @@ internal class ColumnPart(
  * axis rules. [starts] and [ends] are the times of its legs in minutes of the chart. Each
  * stretch runs from its departure to its arrival, however short: a short ride is drawn smaller
  * (without the minutes of the change, then without its name, at last as a thin bar, see
- * [ColumnLook]), never pushing what follows down. A walk between two rides is part of the
+ * [ColumnLook]), never pushing what follows down, and never running into the next ride (it
+ * ends where that one leaves, see rideEndsWithoutOverlap). A walk between two rides is part of the
  * change and has no stretch of its own. With [combine], two or more short rides in a row (each,
  * and the changes between them, lower than MIN_BLOCK) are one stretch from the departure of
  * the first to the arrival of the last. [pillsBefore] is no longer needed for the room and kept
@@ -1842,13 +1913,16 @@ internal class ColumnPart(
 internal fun columnParts(
     legs: List<Leg>,
     starts: FloatArray,
-    ends: FloatArray,
+    times: FloatArray,
     windowStart: Float,
     perMinute: Dp,
     pillsBefore: Set<Int> = emptySet(),
     top: Dp = CHART_TOP,
     combine: Boolean = false,
 ): List<ColumnPart> {
+    // No ride runs into the next one, whatever times its legs carry (#57): a ride that has
+    // missed the next one ends where that one leaves (see rideEndsWithoutOverlap).
+    val ends = rideEndsWithoutOverlap(legs, starts, times)
     val firstRide = legs.indexOfFirst { !it.walking }
     val lastRide = legs.indexOfLast { !it.walking }
     val parts = ArrayList<ColumnPart>(legs.size)
@@ -2091,9 +2165,13 @@ internal fun columnGeometry(
     val lastBottom = parts.lastOrNull()?.let { it.top + it.height } ?: firstTop
     // The dashed outline of the planned part of a late ride, by its place among the parts.
     // It needs room above its block: below the times for the first ride, below the block before for the others.
+    // Only above a block of its own that is tall enough to read as one, and only where the delay
+    // itself is a visible stretch of time: above a short ride drawn small, a thin bar or a run
+    // of combined rides, an outline of at least 6 dp stood alone as an empty dashed block, a
+    // ghost after the ride before (#35d: after an IC 55, a late RB48 of 3 minutes to Köln Messe/Deutz).
     val dashes = parts.mapIndexed { index, part ->
         val delay = part.leg.departureDelayMinutes.toInt()
-        if (part.leg.walking || cancelled || delay <= 0) {
+        if (!showsPlannedOutline(part, delay, perMinute, cancelled)) {
             0.dp
         } else {
             val room = if (index == 0) part.top - labelHeight else part.top - (parts[index - 1].top + parts[index - 1].height)
@@ -2111,6 +2189,18 @@ internal fun columnGeometry(
         cancelTagPart = tagPart,
     )
 }
+
+/**
+ * True when the stretch [part], [delay] minutes late at its departure, shows its planned
+ * departure as a dashed outline above it (see columnGeometry): a ride of its own (no walk, not
+ * combined, not cancelled) at least NAMED_BLOCK high, late by at least MIN_DASH at [perMinute].
+ */
+internal fun showsPlannedOutline(part: ColumnPart, delay: Int, perMinute: Dp, cancelled: Boolean): Boolean =
+    !part.leg.walking && !cancelled && delay > 0 && part.members == null &&
+        part.height >= NAMED_BLOCK && perMinute * delay >= MIN_DASH
+
+// Below this height of the delay itself no dashed outline of the planned departure is drawn.
+private val MIN_DASH = 3.dp
 
 /** Axis labels every 10, 20, 30 or 60 minutes at [perMinute], whatever still has room. */
 internal fun axisStep(perMinute: Dp): Int = when {
@@ -2207,6 +2297,7 @@ private fun JourneyChart(
     onSelect: (String) -> Unit,
     onLoadEarlier: () -> Unit,
     onLoadLater: () -> Unit,
+    edges: EdgeStatus = EdgeStatus(),
     modifier: Modifier = Modifier,
     still: Boolean = false,
 ) {
@@ -2221,6 +2312,11 @@ private fun JourneyChart(
     // lambda, so a column whose journey did not change skips when the page composes again.
     val select by rememberUpdatedState(onSelect)
     val glide = rememberAnimationsOn()
+    // A column held down shows its connection in a peek card until it is let go.
+    val peek = remember { PeekState() }
+    val ticks = rememberTicks()
+    val peekLabel = stringResource(R.string.connection_peek)
+    ConnectionPeek(peek, now)
 
     // Minutes are counted from a fixed full hour, so axis labels fall on round times.
     val base = remember { journeys.first().departure.withMinute(0).withSecond(0).withNano(0) }
@@ -2331,33 +2427,143 @@ private fun JourneyChart(
         }
     }
 
-    // Reaching an end loads more. Earlier journeys load once up front and then only
-    // while the user scrolls, so the chart never walks into the past by itself.
-    // Keys, not positions, are compared: positions are stale right after a page was added.
-    LaunchedEffect(journeys.size, listState) {
-        val firstId = journeys.first().id
-        val lastIds = journeys.takeLast(2).map { it.id }
-        // Three flags in one small number (boxed from the cache of small integers): no object
-        // for each frame of a scroll, and the flow goes on only when one of them changes.
-        snapshotFlow {
-            val items = listState.layoutInfo.visibleItemsInfo
-            val lastKey = items.lastOrNull()?.key
-            (if (lastIds.any { it == lastKey }) 1 else 0) or
-                (if (items.firstOrNull()?.key == firstId) 2 else 0) or
-                (if (listState.isScrollInProgress) 4 else 0)
-        }.collect { flags ->
-            val atEnd = flags and 1 != 0
-            val atStart = flags and 2 != 0
+    // Reaching an end loads more, by a drag or a fling alike, once per reach (see EdgeTrigger);
+    // a pull at an edge the row cannot scroll past loads the next page, also after a page that
+    // brought nothing or failed. Earlier journeys load once up front and then only while the
+    // user scrolls, so the chart never walks into the past by itself.
+    // The journeys at the edges are read as they are now, not as they were when this started:
+    // a page that leaves the count as it was (past journeys dropped, a filter) still moves them.
+    val shownList by rememberUpdatedState(journeys)
+    val edgeTriggers = remember(listState) { arrayOf(EdgeTrigger(onlyWhileScrolling = true), EdgeTrigger(onlyWhileScrolling = false)) }
+    // The journey at an edge when the user asked for a page there (null: not asked), to tell a
+    // page whose journeys all stay hidden from one that shows new ones. Only a page the user
+    // asked for shows at its edge: the ones loaded up front come quietly, as before.
+    val askedEarlier = remember(listState) { mutableStateOf<String?>(null) }
+    val askedLater = remember(listState) { mutableStateOf<String?>(null) }
+    val askEarlier: (Boolean) -> Unit = remember(listState) {
+        { byUser ->
+            if (byUser) askedEarlier.value = shownList.first().id
+            loadEarlier()
+        }
+    }
+    val askLater: (Boolean) -> Unit = remember(listState) {
+        { byUser ->
+            if (byUser) askedLater.value = shownList.last().id
+            loadLater()
+        }
+    }
+    // Three flags in one small number (boxed from the cache of small integers): no object
+    // for each frame of a scroll, and the flow goes on only when one of them changes.
+    val edgeFlags: () -> Int = remember(listState) {
+        {
+            val list = shownList
+            val info = listState.layoutInfo
+            val items = info.visibleItemsInfo
+            // The first and the last column that show in the row at all: an item the row keeps
+            // laid out beyond its edge (pinned, say) does not count as one in view.
+            var firstKey: Any? = null
+            var lastKey: Any? = null
+            for (i in items.indices) {
+                val item = items[i]
+                if (item.offset + item.size > info.viewportStartOffset && item.offset < info.viewportEndOffset) {
+                    if (firstKey == null) firstKey = item.key
+                    lastKey = item.key
+                }
+            }
+            val atEnd = chartAtEnd(lastKey, list.lastOrNull()?.id, list.getOrNull(list.size - 2)?.id)
+            val atStart = chartAtStart(firstKey, list.firstOrNull()?.id)
+            (if (atEnd) 1 else 0) or (if (atStart) 2 else 0) or (if (listState.isScrollInProgress) 4 else 0)
+        }
+    }
+    val onEdges: (Int) -> Unit = remember(listState) {
+        { flags ->
+            val list = shownList
             val scrolling = flags and 4 != 0
-            if (atEnd) loadLater()
-            if (atStart && (scrolling || !earlierPrimed.value)) {
+            if (edgeTriggers[1].edge(flags and 1 != 0, scrolling, list.lastOrNull()?.id)) askLater(scrolling)
+            if (edgeTriggers[0].edge(flags and 2 != 0, scrolling, list.firstOrNull()?.id, earlierPrimed.value)) {
                 earlierPrimed.value = true
-                loadEarlier()
+                askEarlier(scrolling)
             }
         }
     }
-
+    LaunchedEffect(listState) {
+        snapshotFlow { edgeFlags() }.collect { onEdges(it) }
+    }
+    // A page that changed the journeys at an edge while the flags stayed the same (still at the
+    // end, say): looked at again once the row is laid out with them.
+    val tailId = journeys.last().id
+    LaunchedEffect(headId, tailId, listState) {
+        withFrameNanos { }
+        onEdges(Snapshot.withoutReadObservation { edgeFlags() })
+    }
+    // A pull at an edge: the part of a drag the row could not take because it is there already.
     val density = LocalDensity.current
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val edgePull = remember(density) { EdgePull(with(density) { EDGE_PULL.toPx() }) }
+    val pullAtEdges = remember(edgePull, listState, rtl) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput) return Offset.Zero
+                val scrolling = listState.isScrollInProgress
+                when (edgePull.drag(if (rtl) -available.x else available.x)) {
+                    1 -> if (edgeTriggers[0].pull(scrolling)) {
+                        earlierPrimed.value = true
+                        askEarlier(true)
+                    }
+                    -1 -> if (edgeTriggers[1].pull(scrolling)) askLater(true)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                edgePull.release()
+                return Velocity.Zero
+            }
+        }
+    }
+    // The note at an edge after a page that showed nothing new there, for a few seconds.
+    val earlierNote = remember(listState) { mutableStateOf<EdgeNote?>(null) }
+    val laterNote = remember(listState) { mutableStateOf<EdgeNote?>(null) }
+    LaunchedEffect(edges.earlier) {
+        val result = edges.earlier ?: return@LaunchedEffect
+        val before = askedEarlier.value ?: return@LaunchedEffect
+        askedEarlier.value = null
+        val note = edgeNoteOf(result.outcome, before, shownList.first().id)
+        earlierNote.value = note
+        if (note == null) return@LaunchedEffect
+        delay(EDGE_NOTE_MILLIS)
+        earlierNote.value = null
+    }
+    LaunchedEffect(edges.later) {
+        val result = edges.later ?: return@LaunchedEffect
+        val before = askedLater.value ?: return@LaunchedEffect
+        askedLater.value = null
+        val note = edgeNoteOf(result.outcome, before, shownList.last().id)
+        laterNote.value = note
+        if (note == null) return@LaunchedEffect
+        delay(EDGE_NOTE_MILLIS)
+        laterNote.value = null
+    }
+    // A new page on its way replaces the note of the one before. A load that ended without a
+    // result (cancelled by a new search or a refresh) forgets that it was asked for, a frame
+    // later, so the result of one that did end is seen first (see above).
+    LaunchedEffect(edges.loadingEarlier) {
+        if (edges.loadingEarlier) {
+            earlierNote.value = null
+        } else {
+            withFrameNanos { }
+            askedEarlier.value = null
+        }
+    }
+    LaunchedEffect(edges.loadingLater) {
+        if (edges.loadingLater) {
+            laterNote.value = null
+        } else {
+            withFrameNanos { }
+            askedLater.value = null
+        }
+    }
+
     // The clock moves the line of "now": it is read while drawing, so a new minute composes nothing.
     val nowAt = rememberUpdatedState(nowMinute)
     // Where the row of columns lies on the screen (left, top, height), for the tap of the auto test.
@@ -2390,7 +2596,7 @@ private fun JourneyChart(
         }
     }
     AllocProbe.end(AllocProbe.CHART_COMPOSE)
-    GlassSurface(modifier = modifier, shape = RoundedCornerShape(32.dp)) {
+    GlassSurface(modifier = modifier.then(rememberFirstFrameTrace("NS chart first frame")), shape = RoundedCornerShape(32.dp)) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
@@ -2543,6 +2749,10 @@ private fun JourneyChart(
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
+                            // A pull at an edge loads the next page there (see pullAtEdges).
+                            .nestedScroll(pullAtEdges)
+                            // A held column's peek follows the finger across the columns (see PeekScrub.kt).
+                            .peekScrub(peek, vertical = false) { ticks.tick() }
                             .then(
                                 // Lab builds, or the lab opened in an unlocked release: nothing extra otherwise.
                                 if (PerfLab.labBuild || PerfLab.shown) {
@@ -2570,6 +2780,7 @@ private fun JourneyChart(
                             // Where the column lies is asked for at the tap only: working out its bounds for
                             // every frame of a scroll made a Rect per column and frame.
                             val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
+                            PeekScrubTarget(peek, journey, placed)
                             // When live times move a journey past another (see searchOrder), its
                             // column slides to its new place; pages that come in appear as before.
                             val moves = if (glide) {
@@ -2590,7 +2801,15 @@ private fun JourneyChart(
                                     .fillMaxHeight()
                                     .onPlaced { placed[0] = it }
                                     .clip(RoundedCornerShape(20.dp))
-                                    .clickable {
+                                    .closePeekOnRelease(peek)
+                                    .combinedClickable(
+                                        onLongClickLabel = peekLabel,
+                                        onLongClick = {
+                                            ticks.tick()
+                                            peek.show(journey, placed[0]?.takeIf { it.isAttached }?.boundsInWindow())
+                                        },
+                                        hapticFeedbackEnabled = false,
+                                    ) {
                                         OpenOrigin.set(placed[0]?.takeIf { it.isAttached }?.boundsInRoot())
                                         select(journey.id)
                                     },
@@ -2613,9 +2832,28 @@ private fun JourneyChart(
                         .height(PINNED_TOTAL_BAND),
                 )
             }
+            // A page on its way at an edge, or how the last one ended there when it showed nothing new.
+            ChartEdgeBadge(
+                start = true,
+                loading = edges.loadingEarlier && askedEarlier.value != null,
+                note = earlierNote.value,
+                modifier = Modifier.align(Alignment.CenterStart).padding(start = AXIS_WIDTH),
+            )
+            ChartEdgeBadge(
+                start = false,
+                loading = edges.loadingLater && askedLater.value != null,
+                note = laterNote.value,
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
         }
     }
 }
+
+// How far a drag has to pull past an edge of the chart to load the next page there.
+private val EDGE_PULL = 28.dp
+
+// How long the note at an edge stays after a page that showed nothing new.
+private const val EDGE_NOTE_MILLIS = 3_000L
 
 /** [first] and [last] (indices, -1 for none) in one number, for a state that changes every frame. */
 private fun packedRange(first: Int, last: Int): Long = (first.toLong() shl 32) or (last.toLong() and 0xffffffffL)
@@ -2803,7 +3041,7 @@ private val OVERLAP_TAG_HEIGHT = 18.dp
 
 /**
  * The minutes of a change between two blocks as plain text without a ground, in the colour of
- * [tightness] (normal: muted grey; knapp: red; Sprint: magenta; entspannt: dark green), with a
+ * [tightness] (normal: muted grey; knapp: red; Sprint: magenta; relaxed: dark green), with a
  * tiny dot before it for the risky ones. The chart keeps room for it (see PILL_GAP).
  */
 @Composable
@@ -2912,7 +3150,7 @@ private fun JourneyColumn(
     val display = LocalDelayDisplay.current
     val firstLeg = legs.first()
     val startDelay = firstLeg.departureDelayMinutes.takeIf { !cancelled && firstLeg.realtime && it > 0 }
-    val startDelayShown = startDelay != null && display.showsDelay
+    val startDelayShown = startDelay != null && (display.showsDelay || display.strikesPlanned)
     // The total time on top takes a line of its own above the departure time in every column.
     val totalTime = LocalChartTotalTime.current
     val labelHeight = (if (startDelayShown) 32.dp else 18.dp) + chartRoomOf(totalTime, top = true)
@@ -2971,7 +3209,10 @@ private fun JourneyColumn(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (totalTime == ChartTotalTime.Above) TotalTimeText(journey, selected)
-            if (startDelayShown && startDelay != null) {
+            val startPlanned = firstLeg.plannedDeparture
+            if (startDelayShown && display.strikesPlanned && startPlanned != null) {
+                StruckTime(startPlanned, modifier = Modifier.height(14.dp))
+            } else if (startDelayShown && startDelay != null) {
                 Text(
                     text = stringResource(R.string.delay_short, startDelay.toInt()),
                     color = AppColors.DelayRed,
@@ -3177,6 +3418,8 @@ private fun JourneyColumn(
                     )
                 }
             } else {
+                val endPlanned = lastLeg.plannedArrival
+                if (arrivalDelay > 0 && display.strikesPlanned && endPlanned != null) StruckTime(endPlanned)
                 if (arrivalDelay > 0 && display.showsDelay) {
                     Text(
                         text = stringResource(R.string.delay_minutes, arrivalDelay.toInt()),
@@ -3209,6 +3452,18 @@ private fun JourneyColumn(
                         lineHeight = 12.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
+                    )
+                }
+                // The variants with only another short last bus or tram it stands for (#57).
+                if (journey.groupedAlternatives > 0) {
+                    Text(
+                        text = pluralStringResource(R.plurals.chart_alternatives, journey.groupedAlternatives, journey.groupedAlternatives),
+                        color = AppColors.Muted,
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
             }
@@ -3328,7 +3583,7 @@ internal fun journeyTotalMinutes(journey: Journey): Long =
 
 /**
  * A total time for people, as [durationLabel] says it: [minutesOnly] below an hour ("48 min"),
- * [wholeHours] on the hour ("2 Std") and [hoursAndMinutes] otherwise ("2 Std 23 min").
+ * [wholeHours] on the hour ("2:00 h") and [hoursAndMinutes] otherwise ("2:23 h").
  */
 internal fun totalTimeText(
     minutes: Long,
@@ -3438,7 +3693,8 @@ private fun ChangeMark(
             ) {
                 if (twoLines) {
                     Text(
-                        text = legs.subList(0, nextIndex).last { !it.walking }.to.briefStopName(),
+                        // A long-distance ride names the change as the railway does (#93).
+                        text = legs.subList(0, nextIndex).last { !it.walking }.let { ride -> if (ride.railwayNames) shownRideStop(ride, ride.to) else ride.to.briefStopName() },
                         color = if (selected) AppColors.OnBlueContainer else AppColors.Muted,
                         fontSize = 10.sp,
                         lineHeight = 12.sp,
@@ -3613,7 +3869,9 @@ private fun BlockLabel(
                 fontWeight = FontWeight.ExtraBold,
                 maxLines = 1,
                 softWrap = false,
-                overflow = TextOverflow.Clip,
+                // A name too wide even at the smallest size ("ICE 1092" in a very narrow column)
+                // ends in "…" instead of being cut mid-letter.
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (tag) {
@@ -3752,12 +4010,51 @@ private fun JourneyList(
     scroll: ScrollState,
     modifier: Modifier = Modifier,
     rowTops: MutableMap<String, Int> = mutableMapOf(),
+    earlier: ListEarlier? = null,
 ) {
+    // The row that is first, and where it lies, while earlier ones are asked for: each time they
+    // come in above it, the list scrolls on so that it stays where it was on screen (#150). Held
+    // from the tap until the loading has ended.
+    var earlierAnchor by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    val firstId = journeys.firstOrNull()?.id
+    LaunchedEffect(firstId) {
+        val (id, before) = earlierAnchor ?: return@LaunchedEffect
+        if (firstId == null || firstId == id) return@LaunchedEffect
+        // Laid out first; the list grows softly (softSize), so its end may come a few frames later.
+        withFrameNanos { }
+        val after = rowTops[id]
+        if (after != null) {
+            val target = scroll.value + earlierScrollShift(before, after)
+            for (frame in 0 until EARLIER_SETTLE_FRAMES) {
+                scroll.scrollTo(minOf(target, scroll.maxValue))
+                if (scroll.value >= target) break
+                withFrameNanos { }
+            }
+        }
+        // The new first row is the one kept in place if still more come in.
+        earlierAnchor = earlierAnchor?.let { firstId to (rowTops[firstId] ?: 0) }
+    }
+    val loadingEarlier = earlier?.loading == true
+    val holdingEarlier = earlierAnchor != null
+    LaunchedEffect(loadingEarlier, holdingEarlier) {
+        if (loadingEarlier || !holdingEarlier) return@LaunchedEffect
+        // Not loading (any more): what came is in place after a moment, and the rows glide again.
+        // Also where no loading started at all, the hold ends by itself.
+        delay(EARLIER_HOLD_MILLIS)
+        earlierAnchor = null
+    }
     // Notices about lifts raise the sign only for step-free travel (see warningAlerts).
     val stepFree = rememberStepFree()
+    // A row held down shows its connection in a peek card until it is let go.
+    val peek = remember { PeekState() }
+    val ticks = rememberTicks()
+    val peekLabel = stringResource(R.string.connection_peek)
+    ConnectionPeek(peek, now)
     GlassSurface(modifier = modifier, shape = RoundedCornerShape(32.dp)) {
         Column(
             modifier = Modifier
+                // A held row's peek follows the finger up and down the rows (see PeekScrub.kt).
+                .peekScrub(peek, vertical = true) { ticks.tick() }
                 .fadeEdges(scroll, horizontal = false)
                 .verticalScroll(scroll)
                 // Earlier or later journeys that come in move the list softly.
@@ -3767,22 +4064,44 @@ private fun JourneyList(
         ) {
             // Each row keyed by its journey: when live times reorder the list, the row and its
             // state go with the journey and glide to the new place (see glideToPlace).
-            val glide = rememberAnimationsOn()
+            // While earlier rows come in above, the rows keep their place on screen instead of gliding.
+            val glide = rememberAnimationsOn() && earlierAnchor == null
+            if (earlier != null) {
+                ListEarlierRow(earlier.loading) {
+                    val first = journeys.firstOrNull()
+                    if (first != null) earlierAnchor = first.id to (rowTops[first.id] ?: 0)
+                    earlier.onClick()
+                }
+            }
             journeys.forEachIndexed { index, journey ->
                 key(journey.id) {
                     // Where the row is, so a journey opened on its own page grows out of it.
                     val bounds = remember { arrayOfNulls<Rect>(1) }
+                    // The row itself, asked for its place in the window only when it is held down.
+                    val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
+                    PeekScrubTarget(peek, journey, placed)
                     Column(
                         modifier = Modifier
                             // Where the row lies in the list, before it glides there (see ConnectionsState.rowTops).
-                            .onPlaced { rowTops[journey.id] = it.positionInParent().y.roundToInt() }
+                            .onPlaced {
+                                rowTops[journey.id] = it.positionInParent().y.roundToInt()
+                                placed[0] = it
+                            }
                             .glideToPlace(glide)
                             .then(appearModifier(index))
                             .fillMaxWidth()
                             .boundsInto(bounds)
                             .clip(groupShape(index, journeys.lastIndex, outer = 24.dp))
                             .background(if (index == selected) AppColors.BlueContainer else AppColors.Card)
-                            .clickable {
+                            .closePeekOnRelease(peek)
+                            .combinedClickable(
+                                onLongClickLabel = peekLabel,
+                                onLongClick = {
+                                    ticks.tick()
+                                    peek.show(journey, placed[0]?.takeIf { it.isAttached }?.boundsInWindow())
+                                },
+                                hapticFeedbackEnabled = false,
+                            ) {
                                 OpenOrigin.set(bounds[0])
                                 onSelect(index)
                             }
@@ -3811,6 +4130,7 @@ private fun JourneyList(
                                 minutes = minutesBetween(now, journey.departure),
                                 live = index == selected,
                                 cancelled = journey.cancelled,
+                                at = journey.departure,
                             )
                         }
                         // The rides as one bar, each as wide as it is long.
@@ -3855,6 +4175,77 @@ private fun JourneyList(
     }
 }
 
+/** The row on top of the list of connections that asks for earlier ones (#150). */
+class ListEarlier(val loading: Boolean, val onClick: () -> Unit)
+
+// How many frames the list may take to grow before it is scrolled to keep its first row in place.
+private const val EARLIER_SETTLE_FRAMES = 40
+
+// How long the list holds its first row in place after earlier ones stopped loading.
+private const val EARLIER_HOLD_MILLIS = 400L
+
+/** "Frühere Verbindungen", with a small spinner while they load. */
+@Composable
+private fun ListEarlierRow(loading: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(enabled = !loading, role = Role.Button, onClick = onClick)
+            .defaultMinSize(minHeight = 48.dp)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+    ) {
+        if (loading) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = AppColors.Blue)
+        } else {
+            Chevron(open = true, color = AppColors.Blue)
+        }
+        Text(
+            text = stringResource(R.string.r6_list_earlier),
+            color = AppColors.Blue,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * The detail of [journey] alone, as a preview (#120, the preview of a shortcut): no route to
+ * keep, no other connections to pick at its changes; starting the trip from it calls [onStart].
+ */
+@Composable
+internal fun JourneyPreview(journey: Journey, now: OffsetDateTime, onStart: () -> Unit, modifier: Modifier = Modifier) {
+    JourneyDetail(
+        journey = journey,
+        fromName = journey.legs.first().from.plainStopName(),
+        toName = journey.legs.last().to.plainStopName(),
+        now = now,
+        routeSaved = false,
+        onToggleRoute = {},
+        stopsFailed = true,
+        onLoadStops = {},
+        onStopAction = { _, _ -> },
+        onStartTrip = onStart,
+        onRememberPattern = {},
+        onHandle = {},
+        offers = emptyMap(),
+        onAdapt = { _, _ -> },
+        adapted = false,
+        onUndo = {},
+        onCourse = {},
+        onFocusWalk = {},
+        onDrag = {},
+        onDragEnd = {},
+        handle = false,
+        // A preview cannot take another way (#243): no "Andere Wege" at its changes.
+        otherWays = false,
+        modifier = modifier,
+    )
+}
+
 @Composable
 private fun JourneyDetail(
     journey: Journey,
@@ -3878,6 +4269,7 @@ private fun JourneyDetail(
     onDrag: (Float) -> Unit,
     onDragEnd: (Float) -> Unit,
     handle: Boolean = true,
+    otherWays: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     AllocProbe.begin(AllocProbe.DETAIL_COMPOSE)
@@ -3907,7 +4299,9 @@ private fun JourneyDetail(
     val context = LocalContext.current
     // The share sheet of this journey (see ShareSheet); another journey starts with it closed.
     var shareOpen by remember(journey.id) { mutableStateOf(false) }
-    GlassSurface(modifier = modifier, shape = RoundedCornerShape(32.dp)) {
+    // Planned trips, for "Fahrt planen" / "Planung aufheben" in the menu.
+    val plannedTrips by PlannedTrips.trips.collectAsState()
+    GlassSurface(modifier = modifier.then(rememberFirstFrameTrace("NS journey page first frame")), shape = RoundedCornerShape(32.dp)) {
         Column(modifier = Modifier.fillMaxSize()) {
             // The head of the card stays in place: pulling it up or down moves the border to the overview.
             // On a page of its own the card has no handle and does not move.
@@ -3954,6 +4348,7 @@ private fun JourneyDetail(
                                 minutes = minutesBetween(now, journey.departure),
                                 live = true,
                                 cancelled = journey.cancelled,
+                                at = journey.departure,
                             )
                         },
                         text = {
@@ -4010,12 +4405,39 @@ private fun JourneyDetail(
                             onCalendar = { addJourneyToCalendar(context, journey, fromName, toName) },
                             // A journey on foot only has no lines to remember.
                             onRememberPattern = if (journey.rides.isEmpty()) null else onRememberPattern,
+                            // Only a journey that has not left yet can be planned.
+                            onPlanTrip = if (journey.departure.isAfter(now)) ({ togglePlannedTrip(context, journey, fromName, toName) }) else null,
+                            planned = plannedTrips.any { it.journey.id == journey.id },
                         )
                         StartPill(onClick = onStartTrip)
                     }
                 }
             }
-            Column(
+            // The body: the Live-Fahrt look (#129, default) or the classic one, as "Verbindungsdetails" says.
+            DetailStyleSetting.install(context)
+            if (DetailStyleSetting.style == DetailStyle.Timeline) {
+                TimelineJourneyBody(
+                    journey = journey,
+                    stopsFailed = stopsFailed,
+                    onLoadStops = onLoadStops,
+                    onStopAction = onStopAction,
+                    offers = offers,
+                    onAdapt = onAdapt,
+                    onCourse = onCourse,
+                    onFocusWalk = onFocusWalk,
+                    top = {
+                        if (adapted) AdaptedBanner(onUndo)
+                        WarningSummary(alertingWarnings(journey.warnings, stepFree))
+                        QuietNotices(quietWarnings(journey.warnings, stepFree))
+                        FareZoneNote(journey)
+                        JourneyLiftWarning(journey)
+                    },
+                    otherWays = otherWays,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                )
+            } else Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -4026,32 +4448,7 @@ private fun JourneyDetail(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 // A journey with a swapped connection says so, and offers the way back.
-                if (adapted) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(AppColors.BlueContainer)
-                            .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.adapted_note),
-                            color = AppColors.OnBlueContainer,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            lineHeight = 16.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        SecondaryButton(
-                            text = stringResource(R.string.undo),
-                            onClick = onUndo,
-                            shape = RoundedCornerShape(14.dp),
-                            minHeight = 40.dp,
-                        )
-                    }
-                }
+                if (adapted) AdaptedBanner(onUndo)
                 WarningSummary(alertingWarnings(journey.warnings, stepFree))
                 QuietNotices(quietWarnings(journey.warnings, stepFree))
                 FareZoneNote(journey)
@@ -4060,6 +4457,8 @@ private fun JourneyDetail(
                 // The stay at a place on the way stands between the legs before and after it.
                 val stay = journey.via?.takeIf { it.minutes > 0 }
                 val stayAt = stay?.afterLegs
+                // "Nur nächste ausgeklappt" (#202): the maps at the first leg that has one start unfolded.
+                val firstMapLeg = remember(journey, stayAt, OsmStations.loaded) { classicFirstMapLeg(legs, stayAt) }
                 legs.forEachIndexed { index, leg ->
                     if (stay != null && stayAt == index && index > 0) {
                         BetweenRow(
@@ -4068,6 +4467,7 @@ private fun JourneyDetail(
                             ink = AppColors.Ink,
                         )
                     }
+                    CompositionLocalProvider(LocalWalkMapNext provides (index == firstMapLeg)) {
                     when {
                         !leg.walking -> {
                             // A bus or tram from a stop of many stop positions: a small map of the stop
@@ -4086,8 +4486,13 @@ private fun JourneyDetail(
                             // Where to board this ride for a short change to the next one, said where it is boarded.
                             val following = rideAfter(journey, leg)
                             RideRow(
-                                boardingHint = following?.let { after ->
-                                    { CarriageHint(arriving = leg, next = after) }
+                                boardingHint = if (following != null) {
+                                    @Composable { CarriageHint(arriving = leg, next = following) }
+                                } else if (leg === journey.rides.lastOrNull() && journey.legs.last().walking) {
+                                    // The last ride to a place: where to board for the shortest way out.
+                                    @Composable { DestinationHint(journey = journey, ride = leg) }
+                                } else {
+                                    null
                                 },
                                 leg = leg,
                                 open = openRide == index,
@@ -4180,21 +4585,48 @@ private fun JourneyDetail(
                                 }
                                 // The walk to the first stop or to the destination as a small map, folded at first.
                                 if (hasWalkMap(leg)) {
-                                    FoldedMap(indent = 84.dp) { WalkMap(leg, onFocusWalk) }
+                                    FoldedMap(indent = 84.dp) { WalkMap(leg, onFocusWalk, walkEndsAtDestination(index, legs.size, leg.walking)) }
                                 }
                             }
                         }
                     }
+                    }
                 }
-                Text(
-                    text = stringResource(R.string.live_hint),
-                    color = AppColors.Muted,
-                    fontSize = 11.sp,
-                )
+                // What the colours of the times mean and where the data comes from (#277b).
+                TimesFooter(journey)
             }
         }
     }
     AllocProbe.end(AllocProbe.DETAIL_COMPOSE)
+}
+
+/** "Verbindung angepasst" with the way back ("Rückgängig"), above the body of a journey whose connection was swapped. */
+@Composable
+private fun AdaptedBanner(onUndo: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(AppColors.BlueContainer)
+            .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.adapted_note),
+            color = AppColors.OnBlueContainer,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.sp,
+            lineHeight = 16.sp,
+            modifier = Modifier.weight(1f),
+        )
+        SecondaryButton(
+            text = stringResource(R.string.undo),
+            onClick = onUndo,
+            shape = RoundedCornerShape(14.dp),
+            minHeight = 40.dp,
+        )
+    }
 }
 
 /**
@@ -4319,6 +4751,8 @@ private fun JourneyMenu(
     onToggleRoute: () -> Unit,
     onCalendar: () -> Unit,
     onRememberPattern: (() -> Unit)? = null,
+    onPlanTrip: (() -> Unit)? = null,
+    planned: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -4338,6 +4772,8 @@ private fun JourneyMenu(
                 ),
                 onRememberPattern?.let { Triple(Glyph.Route, stringResource(R.string.pattern_remember), it) },
                 Triple(Glyph.Calendar, stringResource(R.string.menu_calendar), onCalendar),
+                // A reminder before leaving, and the companion starts by itself (see PlannedTripAlarms).
+                onPlanTrip?.let { Triple(Glyph.Recent, stringResource(if (planned) R.string.plan_trip_cancel else R.string.plan_trip), it) },
             )
             entries.forEach { (glyph, label, action) ->
                 DropdownMenuItem(
@@ -4364,7 +4800,7 @@ private fun JourneyMenu(
  * puts that variant in place of the journey (see switchToAltChange).
  */
 @Composable
-private fun AltChangeOffers(journey: Journey, nextLeg: Int, onAdapt: (Int, Journey) -> Unit) {
+internal fun AltChangeOffers(journey: Journey, nextLeg: Int, onAdapt: (Int, Journey) -> Unit) {
     if (journey.altChanges.isEmpty()) return
     val change = journey.legs.take(nextLeg).count { !it.walking } - 1
     for (alt in journey.altChanges) {
@@ -4389,21 +4825,58 @@ private fun AltChangeOffers(journey: Journey, nextLeg: Int, onAdapt: (Int, Journ
     }
 }
 
+/**
+ * The first leg of [legs] at which the classic detail draws a small map (#202, "Nur nächste
+ * ausgeklappt"), by the same rules as its rows: the stop position before a ride, the map of a
+ * change after a ride, the map of a walk between rides or at the start or end. [stayAt] is the
+ * leg after a stay at a place on the way. Null for none.
+ */
+private fun classicFirstMapLeg(legs: List<Leg>, stayAt: Int?): Int? {
+    legs.forEachIndexed { index, leg ->
+        if (!leg.walking) {
+            val previous = legs.getOrNull(index - 1)
+            val positionMap = hasBoardingPositionMap(leg) && when {
+                previous == null -> true
+                previous.walking -> false
+                else -> stayAt != index && !hasSpotWalkMap(previous, leg) && !OsmStations.samePlatform(previous, leg)
+            }
+            if (positionMap) return index
+            val next = legs.getOrNull(index + 1)
+            if (next != null && !next.walking && stayAt != index + 1 &&
+                (hasSpotWalkMap(leg, next) || (!hasBoardingPositionMap(next) && hasChangeMap(leg, next)))
+            ) {
+                return index
+            }
+        } else {
+            val minutes = minutesBetween(leg.departure, leg.arrival)
+            if (index > 0 && index < legs.lastIndex) {
+                if (changeWalkMapKind(legs[index - 1], legs[index + 1], leg, minutes) != ChangeMapKind.None) return index
+            } else if (minutes > 0 && hasWalkMap(leg)) {
+                return index
+            }
+        }
+    }
+    return null
+}
+
 @Composable
-private fun TransferChoice(
+internal fun TransferChoice(
     journeyId: String,
     change: TripChange?,
     offers: Map<String, Alternatives>,
     onAdapt: (Int, Journey) -> Unit,
+    // Other ways from the change in the same row (#243, detail page with both chips on).
+    extras: List<ChoiceExtraTile> = emptyList(),
 ) {
     if (change == null) return
-    val options = connectionOptions(change, offers[offerKey(journeyId, change.keepLegs)])
-    if (options.size < 2) return
+    // Too few to choose from: the other ways alone, in the same row (#257: never swapped for another one).
+    val options = connectionOptions(change, offers[offerKey(journeyId, change.keepLegs)]).takeIf { it.size >= 2 }.orEmpty()
+    if (options.isEmpty() && extras.isEmpty()) return
     // Keyed by the journey and its change: the choice of another journey comes in with its own
     // appearance, instead of taking over the place (and the finished appearance) of the one before.
     key(journeyId, change.keepLegs) {
         Column(modifier = appearModifier(0), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            ConnectionChips(change = change, options = options, onSwitch = { option -> onAdapt(change.keepLegs, option) })
+            ConnectionChips(change = change, options = options, onSwitch = { option -> onAdapt(change.keepLegs, option) }, extras = extras)
         }
     }
 }
@@ -4448,7 +4921,7 @@ private fun PillBeforeText(
  * and says so); "too late" where the next ride leaves before the arrival.
  */
 @Composable
-private fun TransferRow(time: ChangeTime) {
+internal fun TransferRow(time: ChangeTime) {
     val rating = if (time.possible) toneLabel(time) else stringResource(R.string.choice_gone)
     val color = toneColor(time.tone)
     BetweenRow(text = stringResource(R.string.transfer_rated, time.minutes, rating), dots = color, ink = color)
@@ -4486,11 +4959,21 @@ private fun BetweenRow(text: String, dots: Color = AppColors.Rail, ink: Color = 
  * timetable times are black; "+2" below unless the coloured time stands alone.
  */
 @Composable
-private fun LegTime(time: OffsetDateTime, planned: OffsetDateTime?, delayMinutes: Long, realtime: Boolean, estimated: Boolean = false) {
+internal fun LegTime(time: OffsetDateTime, planned: OffsetDateTime?, delayMinutes: Long, realtime: Boolean, estimated: Boolean = false) {
     val display = LocalDelayDisplay.current
+    // One decision for every view (see shownTime, #227).
+    val decided = shownTime(display, time, planned, realtime, delayMinutes)
     // A refreshed time or delay cross-fades instead of jumping.
     FadeSwap(
-        target = LegTimeShown((if (estimated) time else display.clockOf(time, planned)).clock(), delayMinutes, realtime, estimated),
+        target = LegTimeShown(
+            (if (estimated) time else decided.clock).clock(),
+            delayMinutes,
+            realtime,
+            estimated,
+            struck = decided.struck?.clock(),
+            tone = decided.tone,
+            delay = decided.delay,
+        ),
         contentAlignment = Alignment.TopEnd,
     ) { shown ->
         Column(horizontalAlignment = Alignment.End) {
@@ -4499,18 +4982,27 @@ private fun LegTime(time: OffsetDateTime, planned: OffsetDateTime?, delayMinutes
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
                 maxLines = 1,
-                // A time the app estimated is grey with "ca." and without a delay: it is a guess.
-                color = if (shown.estimated) AppColors.Muted else display.timeColor(shown.realtime, shown.delayMinutes, AppColors.Ink),
+                // A time the app estimated is blue with "ca." and without a delay (#277): it is a guess.
+                color = timeToneColor(if (shown.estimated) io.github.jnbp.nextstop.data.TimeTone.Estimated else shown.tone, AppColors.Ink),
             )
             if (shown.estimated) {
                 EstimatedMark()
-            } else if (display.showsDelay && shown.delayMinutes != 0L) {
+            } else if (shown.struck != null) {
                 Text(
-                    text = stringResource(R.string.delay_short, shown.delayMinutes.toInt()),
+                    text = shown.struck,
+                    color = AppColors.Muted,
+                    textDecoration = TextDecoration.LineThrough,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                )
+            } else if (shown.delay != null) {
+                Text(
+                    text = stringResource(R.string.delay_short, shown.delay.toInt()),
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp,
                     maxLines = 1,
-                    color = if (shown.delayMinutes > 0) AppColors.DelayRed else AppColors.Early,
+                    color = if (shown.delay > 0) AppColors.DelayRed else AppColors.Early,
                 )
             }
         }
@@ -4518,14 +5010,24 @@ private fun LegTime(time: OffsetDateTime, planned: OffsetDateTime?, delayMinutes
 }
 
 /** What a [LegTime] shows, so a change of any of it cross-fades. */
-private data class LegTimeShown(val clock: String, val delayMinutes: Long, val realtime: Boolean, val estimated: Boolean)
+private data class LegTimeShown(
+    val clock: String,
+    val delayMinutes: Long,
+    val realtime: Boolean,
+    val estimated: Boolean,
+    // The timetable time struck through below (see DelayDisplay.StruckPlanned); null for none.
+    val struck: String? = null,
+    // The colour of the time and the "+2" below it, as shownTime decided.
+    val tone: io.github.jnbp.nextstop.data.TimeTone = io.github.jnbp.nextstop.data.TimeTone.Scheduled,
+    val delay: Long? = null,
+)
 
-/** The grey "ca." in front of or below a time the app estimated (see plausible), as in the course of a line. */
+/** The blue "ca." (#277) in front of or below a time the app estimated (see plausible), as in the course of a line. */
 @Composable
-private fun EstimatedMark() {
+internal fun EstimatedMark() {
     Text(
         text = stringResource(R.string.estimated_prefix),
-        color = AppColors.Muted,
+        color = timeToneColor(io.github.jnbp.nextstop.data.TimeTone.Estimated, AppColors.Ink),
         fontWeight = FontWeight.Bold,
         fontSize = 11.sp,
         maxLines = 1,
@@ -4601,8 +5103,9 @@ private fun RideRow(
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             StopLine(
-                name = townedStopName(leg.from, leg.rideTown),
-                note = platformLabel(leg.departurePlatform),
+                name = rideStopName(leg, leg.from, leg.rideTown),
+                note = platformLabel(leg.departurePlatform, leg.product),
+                changed = platformMoved(leg.departurePlatform, leg.plannedDeparturePlatform),
                 place = leg.fromPlace,
                 onStopAction = onStopAction,
             )
@@ -4620,8 +5123,10 @@ private fun RideRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    LineBadge(leg, minWidth = 40.dp)
-                    leg.railReplacement?.let { RailReplacementTag(it) }
+                    // A rail replacement: one calm badge ("RE8" with a small "SEV"), no extra tag,
+                    // so the destination stays readable (it may take a second line).
+                    val replacement = leg.railReplacement
+                    if (replacement != null) PlainReplacementBadge(leg, replacement, minWidth = 40.dp) else LineBadge(leg, minWidth = 40.dp)
                     val direction = leg.direction
                     if (leg.cancelled) {
                         Text(
@@ -4634,15 +5139,17 @@ private fun RideRow(
                     } else {
                         // The whole name with the train number ("FEX 021857") where the badge leaves it out.
                         // An arrow before the destination saves room; read out as "towards …".
-                        val towards = if (direction == null) "" else stringResource(R.string.direction_arrow, direction.plainStopName())
-                        val spokenTowards = if (direction == null) "" else stringResource(R.string.direction, direction.plainStopName())
-                        val whole = fullLineName(leg.line)
+                        val towards = if (direction == null) "" else stringResource(R.string.direction_arrow, shownRideStop(leg, direction))
+                        val spokenTowards = if (direction == null) "" else stringResource(R.string.direction, shownRideStop(leg, direction))
+                        // Not for a replacement: its badge already names the line it stands in for.
+                        val whole = if (replacement != null) null else fullLineName(leg.line)
                         val spoken = if (whole == null) spokenTowards else listOf(whole, spokenTowards).filter { it.isNotEmpty() }.joinToString(" · ")
                         Text(
                             text = if (whole == null) towards else listOf(whole, towards).filter { it.isNotEmpty() }.joinToString(" · "),
                             color = AppColors.Muted,
                             fontSize = 13.sp,
-                            maxLines = 1,
+                            lineHeight = 16.sp,
+                            maxLines = if (replacement != null) 2 else 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f).semantics { contentDescription = spoken },
                         )
@@ -4662,6 +5169,8 @@ private fun RideRow(
                 }
             }
             boardingHint?.invoke()
+            // Occupancy, bicycles, step-free and the sunny side, where known (see RideHints).
+            RideHintsRow(leg)
             if (open) {
                 RideStops(leg = shown, failed = stopsFailed, onStopAction = onStopAction)
                 if (onCourse != null) {
@@ -4678,8 +5187,9 @@ private fun RideRow(
                 }
             }
             StopLine(
-                name = townedStopName(leg.to, leg.rideTown),
-                note = platformLabel(leg.arrivalPlatform),
+                name = rideStopName(leg, leg.to, leg.rideTown),
+                note = platformLabel(leg.arrivalPlatform, leg.product),
+                changed = platformMoved(leg.arrivalPlatform, leg.plannedArrivalPlatform),
                 place = leg.toPlace,
                 onStopAction = onStopAction,
             )
@@ -4718,9 +5228,11 @@ private fun RideStops(leg: Leg, failed: Boolean, onStopAction: (Stop, StopAction
         else -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             // Stops in another town than the ride's say theirs ("Kirchstr. · Zagelsdorf").
             val town = leg.rideTown
-            between.forEach { stop ->
+            // Never two different stops alike in the list, the ends included (#278).
+            val shownNames = remember(leg) { shownRideStopNames(leg, leg.stopovers, town) }
+            between.forEachIndexed { index, stop ->
                 StopLine(
-                    name = townedStopName(stop.name, town),
+                    name = shownNames.getOrNull(index + 1) ?: rideStopName(leg, stop.name, town),
                     note = stop.time?.clock(),
                     place = stop.place,
                     onStopAction = onStopAction,
@@ -4739,6 +5251,10 @@ private const val STOPS_FAILED = 1
 private const val STOPS_NONE = 2
 private const val STOPS_SHOWN = 3
 
+/** True when [now] is another platform than the timetable's [planned] (both known). */
+internal fun platformMoved(now: String?, planned: String?): Boolean =
+    !now.isNullOrBlank() && !planned.isNullOrBlank() && !now.trim().equals(planned.trim(), ignoreCase = true)
+
 /**
  * A stop name with a note at the right edge: the platform, or the time of a stop on the
  * way. A small ⋮ at its end (or, as a shortcut, a long press) opens the menu of what can be
@@ -4752,6 +5268,7 @@ private fun StopLine(
     onStopAction: (Stop, StopAction) -> Unit,
     strong: Boolean = true,
     estimated: Boolean = false,
+    changed: Boolean = false,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val menuLabel = stringResource(R.string.stop_menu)
@@ -4784,7 +5301,26 @@ private fun StopLine(
             if (note != null) {
                 // A time the app estimated: "ca." in front of it.
                 if (estimated) EstimatedMark()
-                Text(text = note, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1)
+                // A platform other than the timetable's: marked like a delay.
+                Text(
+                    text = note,
+                    color = when {
+                        changed -> AppColors.AmberInk
+                        estimated -> timeToneColor(io.github.jnbp.nextstop.data.TimeTone.Estimated, AppColors.Muted)
+                        else -> AppColors.Muted
+                    },
+                    fontWeight = if (changed) FontWeight.ExtraBold else null,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    modifier = if (changed) {
+                        Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(AppColors.AmberContainer)
+                            .padding(horizontal = 5.dp)
+                    } else {
+                        Modifier
+                    },
+                )
             }
             // The menu opens at the dots, on the right (see StopMenu).
             if (place != null) {
@@ -4794,6 +5330,7 @@ private fun StopLine(
                         open = menuOpen,
                         onDismiss = { menuOpen = false },
                         onAction = { action -> onStopAction(place, action) },
+                        place = place,
                     )
                 }
             }

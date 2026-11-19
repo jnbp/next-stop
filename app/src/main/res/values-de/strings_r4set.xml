@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Runde 4 (r4set): Begleiter-Ansichten, Akkusparen, Unterwegs prüfen, Vorschauen. -->
+    <string name="r4_companion_layout_no_map">Ohne Karte</string>
+    <string name="r4_companion_layout_no_map_text">Immer ruhig, ohne Karte. Der Karten-Knopf blendet sie kurz ein; die Wahl wird nicht gemerkt.</string>
+    <string name="r4_companion_layout_saver">Solange Akkusparen an ist, bleibt die Live-Fahrt ohne Karte.</string>
+    <string name="r4_dwatch_period_text">Zusätzlich alle paar Minuten zwischendurch prüfen. Standard aus, braucht mehr Akku.</string>
+    <string name="r4_dwatch_period_paused">Pausiert, solange Akkusparen an ist.</string>
+    <string name="r4_sun_preview_ride">Potsdam Hbf → Brandenburg Hbf</string>
+    <string name="r4_sun_preview_time">10:12 – 10:38 · 26′</string>
+</resources>

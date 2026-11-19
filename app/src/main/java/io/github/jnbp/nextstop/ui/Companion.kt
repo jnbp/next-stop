@@ -1,17 +1,31 @@
 package io.github.jnbp.nextstop.ui
 
+import androidx.compose.ui.semantics.Role
+import io.github.jnbp.nextstop.data.nextWalkKey
+import io.github.jnbp.nextstop.data.shownRideStopNames
+import io.github.jnbp.nextstop.ui.companion.ModernCompanion
+import io.github.jnbp.nextstop.ui.companion.companionModernHere
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import io.github.jnbp.nextstop.data.rowTilesBeforeChosen
+import io.github.jnbp.nextstop.data.connectionTileShown
+import io.github.jnbp.nextstop.data.changeRowOrder
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -49,6 +63,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.ui.unit.lerp
@@ -64,6 +80,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import io.github.jnbp.nextstop.data.FootPaths
+import io.github.jnbp.nextstop.data.routeMeters
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -76,6 +95,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -84,6 +104,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -125,13 +146,34 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import io.github.jnbp.nextstop.R
+import io.github.jnbp.nextstop.data.choiceMarks
+import io.github.jnbp.nextstop.data.tileOrder
+import io.github.jnbp.nextstop.data.platformStep
+import io.github.jnbp.nextstop.data.rescueChoice
+import io.github.jnbp.nextstop.data.withCurrentChoice
+import io.github.jnbp.nextstop.data.distinctChoices
+import io.github.jnbp.nextstop.data.sameChoiceRide
 import io.github.jnbp.nextstop.data.ChangeMapKind
 import io.github.jnbp.nextstop.data.Journey
+import io.github.jnbp.nextstop.data.MapsHandoff
+import io.github.jnbp.nextstop.data.mapsHandoffStep
+import io.github.jnbp.nextstop.data.walkNavigationTarget
+import io.github.jnbp.nextstop.data.offersWalkNavigation
+import io.github.jnbp.nextstop.data.TripMatch
+import io.github.jnbp.nextstop.data.stopTimeBetween
+import io.github.jnbp.nextstop.data.AppPrefs
+import io.github.jnbp.nextstop.data.DEFAULT_SHORTCUT_MINUTES
+import io.github.jnbp.nextstop.data.ShortcutMode
+import io.github.jnbp.nextstop.data.shortcutMode
+import io.github.jnbp.nextstop.data.PlaceKind
 import io.github.jnbp.nextstop.data.Leg
+import io.github.jnbp.nextstop.data.staysSeatedAhead
 import io.github.jnbp.nextstop.data.OsmStations
 import io.github.jnbp.nextstop.data.railReplacement
 import io.github.jnbp.nextstop.data.rideTown
 import io.github.jnbp.nextstop.data.townedStopName
+import io.github.jnbp.nextstop.data.rideStopName
+import io.github.jnbp.nextstop.data.shownRideStop
 import io.github.jnbp.nextstop.data.WalkTarget
 import io.github.jnbp.nextstop.data.WalkTargetKind
 import io.github.jnbp.nextstop.data.Stop
@@ -143,6 +185,7 @@ import io.github.jnbp.nextstop.data.plainStopName
 import io.github.jnbp.nextstop.data.ChangeTime
 import io.github.jnbp.nextstop.data.changeTime
 import io.github.jnbp.nextstop.data.journeyChangesOf
+import io.github.jnbp.nextstop.data.byRide
 import io.github.jnbp.nextstop.data.plausible
 import io.github.jnbp.nextstop.data.Tightness
 import io.github.jnbp.nextstop.data.WaitTone
@@ -165,20 +208,46 @@ data class Alternatives(
     val loading: Boolean = true,
     val failed: Boolean = false,
     val options: List<Journey> = emptyList(),
+    /** The rest of the followed trip from this change: always among the choices (#94). */
+    val current: Journey? = null,
 )
 
 @Composable
-fun stepLabel(step: TripStep): String = when (step.kind) {
-    StepKind.Board -> if (step.leave) stringResource(R.string.step_leave, step.time.clock()) else stringResource(R.string.step_board, shortLine(step.leg?.line) ?: "", step.place.plainStopName())
-    StepKind.GetOff -> stringResource(R.string.step_get_off, step.place.plainStopName())
+fun stepLabel(step: TripStep, names: Set<String> = emptySet()): String = when (step.kind) {
+    StepKind.Board -> when {
+        // The ride has probably gone without the traveller: ask, never plan anew by itself.
+        step.missed -> stringResource(R.string.step_missed)
+        step.leave -> stringResource(R.string.step_leave, step.time.clock())
+        // At the stop by position: waiting for the ride, never "riding" before it is seen leaving.
+        // Due now or late without news (#184): never a counter stuck at "0′".
+        step.waiting && step.wait == WaitPhase.Overdue -> stringResource(R.string.r6live_wait_overdue, shortLine(step.leg?.line) ?: "", step.overdueMinutes.toInt())
+        step.waiting && step.wait == WaitPhase.AnyMoment -> stringResource(R.string.r6live_wait_any_moment, shortLine(step.leg?.line) ?: "")
+        step.waiting && step.estimated -> stringResource(R.string.step_wait_now, shortLine(step.leg?.line) ?: "")
+        step.waiting -> stringResource(R.string.step_wait, shortLine(step.leg?.line) ?: "", step.time.clock())
+        else -> stringResource(R.string.step_board, shortLine(step.leg?.line) ?: "", io.github.jnbp.nextstop.data.pageRideStop(step.leg, step.place, names))
+    }
+    StepKind.GetOff -> stringResource(R.string.step_get_off, io.github.jnbp.nextstop.data.pageRideStop(step.leg, step.place, names)).let {
+        // On board by position and the vehicle stands: the live time holds, and it says so.
+        if (step.standing) stringResource(R.string.trip_join, it, stringResource(R.string.ride_standing)) else it
+    }
     StepKind.WalkToEnd -> stringResource(if (step.cycling) R.string.step_cycle else R.string.step_walk, step.place.plainStopName())
     StepKind.Arrived -> stringResource(R.string.arrived)
 }
 
 /** The same words outside of the interface, for the notification of a followed trip. */
-fun stepLabel(context: Context, step: TripStep): String = when (step.kind) {
-    StepKind.Board -> if (step.leave) context.getString(R.string.step_leave, step.time.clock()) else context.getString(R.string.step_board, shortLine(step.leg?.line) ?: "", step.place.plainStopName())
-    StepKind.GetOff -> context.getString(R.string.step_get_off, step.place.plainStopName())
+fun stepLabel(context: Context, step: TripStep, names: Set<String> = emptySet()): String = when (step.kind) {
+    StepKind.Board -> when {
+        step.missed -> context.getString(R.string.step_missed)
+        step.leave -> context.getString(R.string.step_leave, step.time.clock())
+        step.waiting && step.wait == WaitPhase.Overdue -> context.getString(R.string.r6live_wait_overdue, shortLine(step.leg?.line) ?: "", step.overdueMinutes.toInt())
+        step.waiting && step.wait == WaitPhase.AnyMoment -> context.getString(R.string.r6live_wait_any_moment, shortLine(step.leg?.line) ?: "")
+        step.waiting && step.estimated -> context.getString(R.string.step_wait_now, shortLine(step.leg?.line) ?: "")
+        step.waiting -> context.getString(R.string.step_wait, shortLine(step.leg?.line) ?: "", step.time.clock())
+        else -> context.getString(R.string.step_board, shortLine(step.leg?.line) ?: "", io.github.jnbp.nextstop.data.pageRideStop(step.leg, step.place, names))
+    }
+    StepKind.GetOff -> context.getString(R.string.step_get_off, io.github.jnbp.nextstop.data.pageRideStop(step.leg, step.place, names)).let {
+        if (step.standing) context.getString(R.string.trip_join, it, context.getString(R.string.ride_standing)) else it
+    }
     StepKind.WalkToEnd -> context.getString(if (step.cycling) R.string.step_cycle else R.string.step_walk, step.place.plainStopName())
     StepKind.Arrived -> context.getString(R.string.arrived)
 }
@@ -202,6 +271,11 @@ data class TripChange(
      * [WalkDetour]); every connecting departure is reached no earlier. 0 without one.
      */
     val walkFloor: Long = 0,
+    /**
+     * The arrival at the destination of the journey this change belongs to: the tile of the
+     * chosen departure says it, as the head of the journey does. Null where not known.
+     */
+    val journeyArrival: OffsetDateTime? = null,
 )
 
 /**
@@ -209,7 +283,14 @@ data class TripChange(
  * [legIndex] of the journey still takes [minutes] and ends at [arrival]; [late] when the ride
  * after it leaves before that.
  */
-data class WalkDetour(val legIndex: Int, val minutes: Long, val arrival: OffsetDateTime, val late: Boolean)
+data class WalkDetour(
+    val legIndex: Int,
+    val minutes: Long,
+    val arrival: OffsetDateTime,
+    val late: Boolean,
+    /** The product of the ride after the walk, so the late note names it (#212). */
+    val nextProduct: String? = null,
+)
 
 /**
  * [change] as a re-routed walk ([detour]) changes it, where that walk belongs to it: the walk
@@ -247,6 +328,7 @@ fun journeyChanges(journey: Journey): List<TripChange> {
                 walk = legs.subList(arrivingIndex + 1, nextIndex).firstOrNull { it.walking },
                 rating = rated[nextIndex]?.tightness,
                 time = rated[nextIndex]?.time ?: changeTime(legs[arrivingIndex], legs[nextIndex]),
+                journeyArrival = journey.arrival,
             )
         }
     }
@@ -265,9 +347,7 @@ fun walkBetween(journey: Journey, leg: Leg): Long {
 }
 
 /** Two legs are the same ride when line and planned departure agree. */
-private fun sameRide(first: Leg, second: Leg): Boolean =
-    first.line == second.line &&
-        (first.plannedDeparture ?: first.departure) == (second.plannedDeparture ?: second.departure)
+private fun sameRide(first: Leg, second: Leg): Boolean = sameChoiceRide(first, second)
 
 /**
  * The next step in one blue banner, with the minutes until then in lime.
@@ -286,6 +366,7 @@ fun TripBanner(
     journey: Journey? = null,
     actions: TripActions? = null,
     menuButton: Boolean = true,
+    onMissed: ((Stop) -> Unit)? = null,
 ) {
     if (step.kind == StepKind.Arrived) {
         ArrivedBanner(destination = step.place.plainStopName(), onClick = onClick, onEnd = actions?.onEnd, compact = false, modifier = modifier)
@@ -330,60 +411,17 @@ fun TripBanner(
                 contentAlignment = Alignment.Center,
             ) {
                 // From the clock time to the minutes as the step comes near: a cross-fade.
-                FadeSwap(target = minutes < 100, contentAlignment = Alignment.Center) { near ->
+                // Getting off a long ride keeps hours and minutes; the clock time stands below the step.
+                // From an hour on the clock time ("an 15:17", #148), with a minute of hysteresis.
+                val clockShown = rememberHeroClock(minutes)
+                FadeSwap(target = !clockShown, contentAlignment = Alignment.Center) { near ->
                 if (near) {
-                    Row {
-                        // A time the app estimated (see plausible) is said to be one.
-                        if (step.estimated) {
-                            Text(
-                                text = stringResource(R.string.estimated_prefix),
-                                color = AppColors.OnLime,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                modifier = Modifier
-                                    .alignByBaseline()
-                                    .padding(end = 4.dp),
-                            )
-                        }
-                        // From an hour on in hours and minutes ("1 h 37 min"), never one big number.
-                        val (hours, rest) = durationSpan(minutes)
-                        val parts = if (hours == null) {
-                            listOf(minutes to stringResource(R.string.minutes_unit))
-                        } else {
-                            listOfNotNull(hours to stringResource(R.string.hours_unit), rest?.let { it to stringResource(R.string.minutes_unit) })
-                        }
-                        parts.forEachIndexed { index, (value, unit) ->
-                            CountingText(
-                                value = value.toInt(),
-                                color = AppColors.OnLime,
-                                fontSize = if (hours == null) 30.sp else 26.sp,
-                                slotDigits = if (hours != null && index == 0) 1 else 2,
-                                modifier = Modifier
-                                    .alignByBaseline()
-                                    .padding(start = if (index > 0) 6.dp else 0.dp),
-                            )
-                            Text(
-                                text = unit,
-                                color = AppColors.OnLime,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 15.sp,
-                                maxLines = 1,
-                                modifier = Modifier
-                                    .alignByBaseline()
-                                    .padding(start = 4.dp),
-                            )
-                        }
-                    }
+                    // The digits in the middle of the pill, the prime hanging off to the right (#182);
+                    // a ride due now or late shows that instead of "0′" (#184).
+                    HeroMinutes(step, minutes, COMPANION_HERO_SIZES)
                 } else {
                     // Far ahead, the clock time says more than a large number of minutes.
-                    Text(
-                        text = step.time.clock(),
-                        color = AppColors.OnLime,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 22.sp,
-                        maxLines = 1,
-                    )
+                    HeroClockText(step, fontSize = 22.sp, prefixSize = 13.sp)
                 }
                 }
             }
@@ -400,6 +438,9 @@ fun TripBanner(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // The ride waited for has probably gone (see TripStep.missed): the question leads to
+            // "Missed the train", which looks for the next way; only on a tap.
+            val missedFrom = step.leg?.fromPlace?.takeIf { step.missed && onMissed != null }
             FadeSwap(target = stepLabel(step)) { label ->
                 Text(
                     text = label,
@@ -409,6 +450,27 @@ fun TripBanner(
                     lineHeight = 23.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (missedFrom != null && onMissed != null) {
+                SecondaryButton(
+                    text = stringResource(missedRideRes(rideKindOf(step.leg?.product))),
+                    onClick = { onMissed(missedFrom) },
+                    modifier = Modifier.padding(top = 6.dp),
+                    minHeight = 40.dp,
+                    ground = AppColors.AmberContainer,
+                    ink = AppColors.AmberInk,
+                )
+            }
+            // Getting off a long ride: when, beside how long ("at 03:11").
+            val longRide = step.kind == StepKind.GetOff && minutesBetween(now, step.time) >= 60
+            AnimatedVisibility(visible = longRide, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+                Text(
+                    text = stringResource(R.string.trip_get_off_clock, step.time.clock()),
+                    color = AppColors.OnBlue,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    maxLines = 1,
                 )
             }
             // A bus or tram from one of many stop positions: which one, and how far.
@@ -422,6 +484,10 @@ fun TripBanner(
                     onBlue = true,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+            }
+            // The last ride to a place: where to board for the shortest way out of the station.
+            if (boarding != null && boardingNext == null && journey != null) {
+                DestinationHint(journey = journey, ride = boarding, onBlue = true, modifier = Modifier.padding(top = 4.dp))
             }
             // On board before a change: the same platform.
             if (gettingOff != null && gettingOffNext != null) {
@@ -472,28 +538,23 @@ private enum class RidePhase { Done, Riding, Waiting, Later }
 private enum class NodeState { Passed, Next, Ahead }
 
 /**
- * Where on the whole run of its vehicle [leg] is boarded: the call at its first stop near
- * the time of the ride, as a line can call at one stop twice (a ring). -1 when not found.
+ * Where on the whole run of its vehicle [leg] is boarded: the call at its first stop nearest
+ * the time of the ride, as a line can call at one stop twice (a ring, see TripMatch). -1 when not found.
  */
-private fun boardingIndex(leg: Leg, trip: List<Stopover>): Int {
-    val timed = trip.indexOfFirst { stop ->
-        val departure = stop.departure
-        stop.name == leg.from && departure != null && abs(minutesBetween(departure, leg.departure)) <= 5
-    }
-    return if (timed >= 0) timed else trip.indexOfFirst { it.name == leg.from }
-}
+private fun boardingIndex(leg: Leg, trip: List<Stopover>): Int = TripMatch.boardIndex(trip, leg)
 
 /**
  * All stops of a ride from boarding to getting off: those the journey brought, else the
  * part of the whole run of the vehicle ([course]) the ride takes, else only its two ends.
  */
-private fun rideStops(leg: Leg, course: TripCourse?): List<Stopover> {
+internal fun rideStops(leg: Leg, course: TripCourse?): List<Stopover> {
     leg.stopovers.takeIf { it.size >= 2 }?.let { return it }
     val trip = course?.stops.orEmpty()
     val board = boardingIndex(leg, trip)
     if (board >= 0) {
-        val alight = (board + 1 until trip.size).firstOrNull { trip[it].name == leg.to }
-        if (alight != null) return trip.subList(board, alight + 1)
+        // On a ring the stop of getting off comes round more than once: the call at the time of the ride.
+        val alight = TripMatch.alightIndex(trip, board, leg)
+        if (alight > board) return trip.subList(board, alight + 1)
     }
     return listOf(
         Stopover(leg.from, null, leg.departure, place = leg.fromPlace),
@@ -512,7 +573,7 @@ private fun runNeighbour(leg: Leg, course: TripCourse?, after: Boolean): Stopove
     val board = boardingIndex(leg, trip)
     if (board < 0) return null
     if (!after) return trip.getOrNull(board - 1)
-    val alight = (board + 1 until trip.size).firstOrNull { trip[it].name == leg.to } ?: return null
+    val alight = TripMatch.alightIndex(trip, board, leg).takeIf { it > board } ?: return null
     return trip.getOrNull(alight + 1)
 }
 
@@ -600,69 +661,75 @@ private fun StopRow(
     strong: Boolean,
     color: Color,
     estimated: Boolean = false,
+    place: Stop? = null,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(STOP_ROW)
-            .drawBehind {
-                val spot = Offset(RAIL_WIDTH.toPx() / 2f, size.height / 2f)
-                when {
-                    state == NodeState.Next -> {
-                        drawCircle(AppColors.Lime, radius = 8.dp.toPx(), center = spot)
-                        drawCircle(AppColors.OnLime, radius = 8.dp.toPx(), center = spot, style = Stroke(2.dp.toPx()))
-                    }
+    // A tap on the stop opens its menu (#139); on a stop between a long press does too (#186).
+    StopMenuBox(place = place, modifier = Modifier.fillMaxWidth(), longPress = !strong) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(STOP_ROW)
+                .drawBehind {
+                    val spot = Offset(RAIL_WIDTH.toPx() / 2f, size.height / 2f)
+                    when {
+                        state == NodeState.Next -> {
+                            drawCircle(AppColors.Lime, radius = 8.dp.toPx(), center = spot)
+                            drawCircle(AppColors.OnLime, radius = 8.dp.toPx(), center = spot, style = Stroke(2.dp.toPx()))
+                        }
 
-                    state == NodeState.Passed -> drawCircle(color, radius = (if (strong) 7 else 5).dp.toPx(), center = spot)
+                        state == NodeState.Passed -> drawCircle(color, radius = (if (strong) 7 else 5).dp.toPx(), center = spot)
 
-                    strong -> {
-                        drawCircle(AppColors.Card, radius = 9.dp.toPx(), center = spot)
-                        drawCircle(AppColors.Ink, radius = 6.5.dp.toPx(), center = spot, style = Stroke(5.dp.toPx()))
-                    }
+                        strong -> {
+                            drawCircle(AppColors.Card, radius = 9.dp.toPx(), center = spot)
+                            drawCircle(AppColors.Ink, radius = 6.5.dp.toPx(), center = spot, style = Stroke(5.dp.toPx()))
+                        }
 
-                    else -> {
-                        drawCircle(AppColors.Card, radius = 6.dp.toPx(), center = spot)
-                        drawCircle(color, radius = 4.5.dp.toPx(), center = spot, style = Stroke(3.dp.toPx()))
+                        else -> {
+                            drawCircle(AppColors.Card, radius = 6.dp.toPx(), center = spot)
+                            drawCircle(color, radius = 4.5.dp.toPx(), center = spot, style = Stroke(3.dp.toPx()))
+                        }
                     }
                 }
-            }
-            .padding(start = RAIL_WIDTH, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = name,
-            color = if (state == NodeState.Passed) AppColors.Muted else AppColors.Ink,
-            fontWeight = when {
-                state == NodeState.Next -> FontWeight.ExtraBold
-                strong -> FontWeight.Bold
-                state == NodeState.Passed -> FontWeight.Normal
-                else -> FontWeight.SemiBold
-            },
-            fontSize = if (strong || state == NodeState.Next) 15.sp else 13.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        if (platform != null) {
-            Text(text = platform, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1)
-        }
-        if (time != null) {
-            // A time the app estimated is grey with "ca.": it is a guess, not the provider's prognosis.
-            val display = LocalDelayDisplay.current
+                .padding(start = RAIL_WIDTH, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(
-                text = when {
-                    estimated -> AnnotatedString(stringResource(R.string.estimated_prefix) + " " + time.clock())
-                    state == NodeState.Passed -> AnnotatedString(display.clockOf(time, live.planned).clock())
-                    else -> buildAnnotatedString {
-                        appendDelayedTime(display, time, live.planned, live.delayMinutes, live.realtime, AppColors.Muted)
-                    }
+                text = name,
+                color = if (state == NodeState.Passed) AppColors.Muted else AppColors.Ink,
+                fontWeight = when {
+                    state == NodeState.Next -> FontWeight.ExtraBold
+                    strong -> FontWeight.Bold
+                    state == NodeState.Passed -> FontWeight.Normal
+                    else -> FontWeight.SemiBold
                 },
-                color = AppColors.Muted,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
+                fontSize = if (strong || state == NodeState.Next) 15.sp else 13.sp,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            if (platform != null) {
+                Text(text = platform, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1)
+            }
+            if (time != null) {
+                // A time the app estimated is blue with "ca." (#277): it is a guess, not the provider's prognosis.
+                val display = LocalDelayDisplay.current
+                val about = stringResource(R.string.estimated_prefix)
+                Text(
+                    text = when {
+                        estimated && state != NodeState.Passed -> buildAnnotatedString { appendEstimatedTime(about, time) }
+                        estimated -> AnnotatedString(stringResource(R.string.estimated_prefix) + " " + time.clock())
+                        state == NodeState.Passed -> AnnotatedString(display.clockOf(time, live.planned).clock())
+                        else -> buildAnnotatedString {
+                            appendDelayedTime(display, time, live.planned, live.delayMinutes, live.realtime, AppColors.Muted)
+                        }
+                    },
+                    color = AppColors.Muted,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -710,15 +777,18 @@ private fun RideHead(
             stringResource(R.string.time_range, leg.departure.clock(), leg.arrival.clock()),
         )
     }
+    val headState = stringResource(if (open) R.string.companion_stops_open else R.string.companion_stops_folded)
     Row(
         modifier = modifier
             .fillMaxWidth()
             // On the white of the timeline card, so stops that scroll beneath it do not show through.
             .background(AppColors.Card)
             .clip(RoundedCornerShape(16.dp))
+            .then(if (foldable) Modifier.semantics { stateDescription = headState } else Modifier)
             .clickable(
                 enabled = foldable,
                 onClickLabel = stringResource(if (open) R.string.stops_hide else R.string.stops_show),
+                role = Role.Button,
                 onClick = onToggle,
             )
             .padding(top = 10.dp, bottom = 6.dp, end = 4.dp),
@@ -828,6 +898,8 @@ private fun RideSection(
     val reached = if (phase == RidePhase.Riding) progress.toInt() else -1
     val standing = phase == RidePhase.Riding && progress - reached < AT_STOP
     val middle = stops.subList(1, stops.size - 1)
+    // Never two different stops alike in the list (#278).
+    val shownNames = remember(leg, stops) { shownRideStopNames(leg, stops, leg.rideTown) }
     // Folded to its two ends in every phase, also on board: the traveller unfolds the stops himself.
     var open by remember(phase) { mutableStateOf(false) }
     var blockHeight by remember { mutableIntStateOf(0) }
@@ -869,6 +941,8 @@ private fun RideSection(
                 },
             )
             if (phase == RidePhase.Waiting) boardingHint?.invoke()
+            // Occupancy, bicycles, step-free and the sunny side of this ride, where known (see RideHints).
+            if (phase != RidePhase.Done) RideHintsRow(leg, modifier = Modifier.padding(start = RAIL_WIDTH, bottom = 2.dp))
             // Where the app estimated times of this ride, it says so once, below its head.
             if (phase != RidePhase.Done && (leg.arrivalEstimated || stops.any { it.estimated })) {
                 Text(
@@ -936,13 +1010,14 @@ private fun RideSection(
                         }
                     }
                     StopRow(
-                        name = townedStopName(leg.from, leg.rideTown),
-                        platform = platformLabel(leg.departurePlatform),
+                        name = shownNames.firstOrNull() ?: rideStopName(leg, leg.from, leg.rideTown),
+                        platform = platformLabel(leg.departurePlatform, leg.product),
                         time = leg.departure,
                         live = LiveTime(leg.plannedDeparture, leg.realtime, leg.departureDelayMinutes),
                         state = state(0),
                         strong = true,
                         color = color,
+                        place = leg.fromPlace,
                     )
                     if (middle.isNotEmpty()) {
                         AnimatedVisibility(
@@ -974,30 +1049,33 @@ private fun RideSection(
                         ) {
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 middle.forEachIndexed { place, stop ->
-                                    val delay = stop.delaySeconds
+                                    // Its departure with the delay of that same time, as everywhere (#226).
+                                    val between = stopTimeBetween(stop)
                                     StopRow(
-                                        name = townedStopName(stop.name, leg.rideTown),
+                                        name = shownNames.getOrNull(place + 1) ?: rideStopName(leg, stop.name, leg.rideTown),
                                         platform = null,
-                                        time = stop.time,
-                                        live = LiveTime(if (stop.arrival != null) stop.plannedArrival else stop.plannedDeparture, delay != null, ((delay ?: 0) / 60).toLong()),
+                                        time = between?.actual,
+                                        live = LiveTime(between?.planned, between?.realtime == true, between?.delayMinutes ?: 0L),
                                         state = state(place + 1),
                                         strong = false,
                                         color = color,
                                         estimated = stop.estimated,
+                                        place = stop.place,
                                     )
                                 }
                             }
                         }
                     }
                     StopRow(
-                        name = townedStopName(leg.to, leg.rideTown),
-                        platform = platformLabel(leg.arrivalPlatform),
+                        name = shownNames.lastOrNull() ?: rideStopName(leg, leg.to, leg.rideTown),
+                        platform = platformLabel(leg.arrivalPlatform, leg.product),
                         time = leg.arrival,
                         live = LiveTime(leg.plannedArrival, leg.realtime, leg.arrivalDelayMinutes),
                         state = state(stops.lastIndex),
                         strong = true,
                         color = color,
                         estimated = leg.arrivalEstimated,
+                        place = leg.toPlace,
                     )
                 }
                 if (phase == RidePhase.Riding) {
@@ -1067,7 +1145,7 @@ private fun RideSection(
  * Opens walking directions to a place in Google Maps, or in whatever app shows the link;
  * a device that has none for it gets the place handed over as a plain position instead.
  */
-private fun openWalkNavigation(context: Context, target: Pair<Double, Double>, cycling: Boolean = false) {
+internal fun openWalkNavigation(context: Context, target: Pair<Double, Double>, cycling: Boolean = false) {
     val place = "${target.first},${target.second}"
     val mode = if (cycling) "bicycling" else "walking"
     val directions = Uri.parse("https://www.google.com/maps/dir/?api=1&destination=$place&travelmode=$mode")
@@ -1084,6 +1162,18 @@ private fun openWalkNavigation(context: Context, target: Pair<Double, Double>, c
     }
 }
 
+/** How the cards of walks look in the new companion views (#81); null for the classic blue cards. */
+enum class WalkCardStyle {
+    /** The calm view: a tap on the card opens its small map in place. */
+    Calm,
+
+    /** Over the big map: a tap shows the walk there ("Weg zeigen ›"). */
+    Map,
+}
+
+/** The look of the walk cards below it (see [WalkCardStyle]); the new companion views set it. */
+val LocalWalkCardStyle = staticCompositionLocalOf<WalkCardStyle?> { null }
+
 /**
  * A walk in one line; a tap on it shows it on the map. Below it, where given: the button
  * that unfolds its small [map] (folded unless the setting unfolds it) and, with
@@ -1098,49 +1188,110 @@ private fun WalkCard(
     modifier: Modifier = Modifier,
     map: (@Composable () -> Unit)? = null,
     cycling: Boolean = false,
+    mapStartsOpen: Boolean? = null,
+    detail: String? = null,
+    // The new views: a walk that is over turns grey (B1), softly as it happens.
+    done: Boolean = false,
 ) {
-    var mapOpen by rememberWalkMapOpen()
+    val settingOpen = rememberWalkMapOpen()
+    val ownOpen = remember { mutableStateOf(mapStartsOpen ?: false) }
+    var mapOpen by if (mapStartsOpen != null) ownOpen else settingOpen
+    // The new companion views (#81): a clear sign of what a tap does. Walks are blue cards there too.
+    val style = LocalWalkCardStyle.current
+    val inPlace = style == WalkCardStyle.Calm && map != null
+    val cardInk = AppColors.OnBlueContainer
+    // On the blue ground the marks take its ink: the main blue on it is too faint in the dark theme.
+    val markInk = if (style != null) AppColors.OnBlueContainer else AppColors.Blue
+    // Over the map the whole card shows the way, with its ripple over all of it (#161).
+    val wholeCard = style == WalkCardStyle.Map
+    val showLabel = stringResource(R.string.show_on_map)
+    val walkGround by animateColorAsState(
+        if (done && style != null) AppColors.Chip else AppColors.BlueContainer,
+        if (rememberAnimationsOn()) spring(stiffness = Spring.StiffnessMediumLow) else snap(),
+        label = "walkGround",
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(AppColors.BlueContainer),
+            // Everything walked is a blue card, in every view (B1): the walk tint the classic cards always had.
+            .background(walkGround)
+            .then(if (wholeCard) Modifier.clickable(onClickLabel = showLabel, onClick = onClick) else Modifier),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClickLabel = stringResource(R.string.show_on_map), onClick = onClick)
+                .then(
+                    when {
+                        inPlace -> Modifier.clickable(onClickLabel = stringResource(if (mapOpen) R.string.walk_map_hide else R.string.walk_map_show)) { mapOpen = !mapOpen }
+                        wholeCard -> Modifier
+                        else -> Modifier.clickable(onClickLabel = showLabel, onClick = onClick)
+                    },
+                )
                 .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            GlyphIcon(if (cycling) Glyph.Bike else Glyph.Walk, color = AppColors.Blue, size = if (cycling) 22.dp else 20.dp)
-            Text(
-                text = text,
-                color = AppColors.OnBlueContainer,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            GlyphIcon(if (cycling) Glyph.Bike else Glyph.Walk, color = markInk, size = if (cycling) 22.dp else 20.dp)
+            Column(
                 modifier = Modifier
                     .weight(1f)
                     .padding(vertical = 6.dp),
-            )
+            ) {
+                Text(
+                    text = text,
+                    color = cardInk,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // A second line in the new views (#161): from which platform to which.
+                if (detail != null && style != null) {
+                    Text(text = detail, color = cardInk.copy(alpha = 0.8f), fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
+                }
+            }
+            when {
+                inPlace -> Chevron(open = mapOpen, color = markInk)
+                // The whole card shows the way (#161): only a small chevron at the edge says so, the
+                // text keeps the width ("Weg zeigen" is its click label for screen readers).
+                style == WalkCardStyle.Map -> Chevron(open = false, color = markInk, modifier = Modifier.graphicsLayer { rotationZ = -90f })
+                else -> Unit
+            }
         }
-        if (map != null || onNavigate != null) {
+        if (style != null) {
+            // The new views (#191): "Karte zeigen ▾", "Karte öffnen" (what a tap on the card over
+            // the map does) and Google Maps, visible in every blue card while the walk lies ahead.
+            if (!done) {
+                BlueWalkActions(
+                    mapOpen = mapOpen,
+                    onToggleMap = if (map != null) ({ mapOpen = !mapOpen }) else null,
+                    onOpenMap = onClick,
+                    onNavigate = onNavigate,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                )
+            }
+        } else if (map != null || onNavigate != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = if (map != null) Arrangement.SpaceBetween else Arrangement.End,
+                // In the new views a compact row under the text, from the left (#161); the classic keeps its places.
+                horizontalArrangement = when {
+                    style != null -> Arrangement.spacedBy(8.dp)
+                    map != null -> Arrangement.SpaceBetween
+                    else -> Arrangement.End
+                },
             ) {
                 if (map != null) {
                     MapFoldButton(
                         open = mapOpen,
                         onToggle = { mapOpen = !mapOpen },
                         ground = AppColors.Card,
-                        ink = AppColors.OnBlueContainer,
+                        ink = if (style != null) AppColors.Ink else cardInk,
                         modifier = Modifier.padding(end = 8.dp),
                     )
                 }
@@ -1150,17 +1301,18 @@ private fun WalkCard(
                         modifier = Modifier
                             .weight(1f, fill = false)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(AppColors.Blue)
+                            .background(if (style != null) AppColors.Card else AppColors.Blue)
                             .clickable(onClick = onNavigate)
-                            .defaultMinSize(minHeight = 40.dp)
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                            .defaultMinSize(minHeight = if (style != null) 34.dp else 40.dp)
+                            .padding(horizontal = if (style != null) 10.dp else 12.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        GlyphIcon(Glyph.Navigate, color = AppColors.OnBlue, size = 16.dp)
+                        val navInk = if (style != null) AppColors.Ink else AppColors.OnBlue
+                        GlyphIcon(Glyph.Navigate, color = navInk, size = 16.dp)
                         Text(
                             text = stringResource(R.string.navigate),
-                            color = AppColors.OnBlue,
+                            color = navInk,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             lineHeight = 16.sp,
@@ -1192,16 +1344,44 @@ private fun WalkEntry(
     onFocusWalk: (Leg) -> Unit,
     modifier: Modifier = Modifier,
     detour: WalkDetour? = null,
+    endsTrip: Boolean = false,
+    maps: Boolean = true,
+    // The last leg of the journey: its small map ends in the destination flag (#181b).
+    toDestination: Boolean = false,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    // The last way: Google Maps takes over, so the trip may end with it (#143): asked in a sheet,
+    // or as remembered there or in the settings (see MapsHandoffSetting).
+    var askEnd by remember { mutableStateOf(false) }
+    val end = walkNavigationTarget(leg)
+    fun handOff(choice: MapsHandoff) {
+        if (end == null) return
+        openWalkNavigation(context, end, leg.cycling)
+        // The app and the service end the trip with it (see AppRoot and TripService).
+        if (choice == MapsHandoff.OpenAndEnd) endFollowedTrip(context)
+    }
+    if (askEnd && end != null) {
+        MapsHandoffSheet(
+            onChoice = { choice ->
+                askEnd = false
+                handOff(choice)
+            },
+            onDismiss = { askEnd = false },
+        )
+    }
     val dots = remember(density) { PathEffect.dashPathEffect(floatArrayOf(0.1f, with(density) { 7.dp.toPx() }), 0f) }
-    // The stop position or entrance from OpenStreetMap where known, else the stop itself.
-    val end = leg.walkTarget?.position ?: leg.toPlace?.position ?: leg.path.lastOrNull()
+    // Pale once over; in the new views it fades there once (B1), the classic view keeps its step.
+    val newViews = LocalWalkCardStyle.current != null
+    val walkAlpha by animateFloatAsState(
+        if (over) PAST_ALPHA else 1f,
+        if (newViews && rememberAnimationsOn()) spring(stiffness = Spring.StiffnessMediumLow) else snap(),
+        label = "walkDone",
+    )
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .alpha(if (over) PAST_ALPHA else 1f)
+            .graphicsLayer { alpha = walkAlpha }
             .drawBehind {
                 val x = RAIL_WIDTH.toPx() / 2f
                 drawLine(AppColors.Rail, Offset(x, 0f), Offset(x, size.height), strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round, pathEffect = dots)
@@ -1220,14 +1400,23 @@ private fun WalkEntry(
                     )
                 },
                 onClick = { onFocusWalk(leg) },
-                onNavigate = if (end == null || over) null else ({ openWalkNavigation(context, end, leg.cycling) }),
-                map = if (over || !hasWalkMap(leg)) null else ({ WalkMap(leg, onFocusWalk) }),
+                onNavigate = when {
+                    end == null || !offersWalkNavigation(end, over) -> null
+                    else -> ({
+                        when (val step = mapsHandoffStep(endsTrip, MapsHandoffSetting.load(context))) {
+                            MapsHandoff.Ask -> askEnd = true
+                            else -> handOff(step)
+                        }
+                    })
+                },
+                map = if (!maps || over || !hasWalkMap(leg)) null else ({ WalkMap(leg, onFocusWalk, toDestination) }),
                 cycling = leg.cycling,
+                done = over,
             )
             // The new way takes too long for the ride after it: as a missed ride, "Missed it" searches on.
             if (detour?.late == true) {
                 Text(
-                    text = stringResource(R.string.walk_rerouted_late),
+                    text = stringResource(R.string.walk_rerouted_late, stringResource(missedRideRes(rideKindOf(detour.nextProduct)))),
                     color = AppColors.DelayRed,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
@@ -1239,14 +1428,18 @@ private fun WalkEntry(
 
 /** Where a walk leads by OpenStreetMap: "Pos. 3", "Eingang H" or "Zugang über …"; null where it is not known. */
 @Composable
-private fun walkTargetText(target: WalkTarget?): String? {
+internal fun walkTargetText(target: WalkTarget?): String? {
     target ?: return null
     val label = target.label
     return when {
-        target.kind == WalkTargetKind.StopPosition -> stringResource(R.string.walk_target_pos, label ?: "")
+        // Never "Pos." without its number (#239): no text then, the caller says the platform or the stop.
+        target.kind == WalkTargetKind.StopPosition ->
+            io.github.jnbp.nextstop.data.shownPositionLabel(label)?.let { stringResource(R.string.walk_target_pos, it) }
         target.throughBuilding && label != null -> stringResource(R.string.walk_target_building, label)
         target.throughBuilding -> stringResource(R.string.walk_target_building_plain)
-        label != null -> stringResource(R.string.walk_target_entrance, label)
+        // OSM names often start with the word themselves ("Eingang Nord"): said once (#240).
+        label != null && io.github.jnbp.nextstop.data.doorLabelWithoutWord(label).isNotEmpty() ->
+            stringResource(R.string.walk_target_entrance, io.github.jnbp.nextstop.data.doorLabelWithoutWord(label))
         else -> stringResource(R.string.walk_target_entrance_plain)
     }
 }
@@ -1256,20 +1449,23 @@ private fun walkTargetText(target: WalkTarget?): String? {
  * null where it has no name or letter.
  */
 @Composable
-private fun walkExitText(exit: WalkTarget?): String? {
+internal fun walkExitText(exit: WalkTarget?): String? {
     if (exit?.kind == WalkTargetKind.Elevator) return stringResource(R.string.walk_exit_lift)
     val label = exit?.label ?: return null
-    return if (exit.throughBuilding) stringResource(R.string.walk_exit_building, label) else stringResource(R.string.walk_exit, label)
+    if (exit.throughBuilding) return stringResource(R.string.walk_exit_building, label)
+    // OSM names often start with the word themselves ("Ausgang Richtung …"): said once (#240).
+    val name = io.github.jnbp.nextstop.data.doorLabelWithoutWord(label)
+    return if (name.isEmpty()) stringResource(R.string.r8fix_walk_exit_plain) else stringResource(R.string.walk_exit, name)
 }
 
 /** [text] with the exit [exitText] the walk leaves its station by, where known. */
-private fun withExit(text: String, exitText: String?): String = if (exitText == null) text else "$text, $exitText"
+internal fun withExit(text: String, exitText: String?): String = if (exitText == null) text else "$text, $exitText"
 
 /**
  * The stop and platform a walk leads to for the timeline: [name], then the stop position the
  * walk ends at (in place of the platform the provider names) or the platform and the entrance.
  */
-private fun walkTargetName(name: String, platform: String?, target: WalkTarget?, targetText: String?): String =
+internal fun walkTargetName(name: String, platform: String?, target: WalkTarget?, targetText: String?): String =
     when {
         target == null || targetText == null -> listOfNotNull(name, platform)
         target.kind == WalkTargetKind.StopPosition -> listOf(name, targetText)
@@ -1310,6 +1506,172 @@ private fun PositionWalkEntry(ride: Leg, onFocusWalk: (Leg) -> Unit, modifier: M
     }
 }
 
+/*
+ * The parts of the classic timeline the new companion views reuse between their ride cards
+ * (see ui/companion/CompanionJourney.kt): a walk at the start or the end, a change with its
+ * walk, hints, small map and connection picker, and the walk to one of many stop positions.
+ * [maps] false leaves the small maps out (the companion with the big map shows them there).
+ */
+
+/** A walk of [journey] at [index] before the first ride or after the last, as the classic timeline shows it. */
+@Composable
+internal fun CompanionWalkPart(
+    journey: Journey,
+    index: Int,
+    over: Boolean,
+    endsTrip: Boolean,
+    onFocusWalk: (Leg) -> Unit,
+    maps: Boolean,
+    detour: WalkDetour?,
+    modifier: Modifier = Modifier,
+) {
+    val legs = journey.legs
+    val leg = legs.getOrNull(index) ?: return
+    val rideAfter = legs.drop(index + 1).firstOrNull { !it.walking }
+    // One station, one name on the page (#157).
+    val railwayNames = remember(journey) { io.github.jnbp.nextstop.data.railwayNamesOf(journey) }
+    val name = if (rideAfter == null) {
+        io.github.jnbp.nextstop.data.pageStopName(leg.to, railwayNames)
+    } else {
+        walkTargetName(
+            io.github.jnbp.nextstop.data.pageStopName(rideAfter.from, railwayNames),
+            platformLabel(rideAfter.departurePlatform, rideAfter.product),
+            leg.walkTarget,
+            walkTargetText(leg.walkTarget),
+        )
+    }
+    WalkEntry(
+        leg = leg,
+        target = withExit(name, walkExitText(leg.walkExit)),
+        over = over && detour?.legIndex != index,
+        onFocusWalk = onFocusWalk,
+        modifier = modifier,
+        detour = detour?.takeIf { it.legIndex == index },
+        endsTrip = endsTrip,
+        maps = maps,
+        toDestination = walkEndsAtDestination(index, legs.size, leg.walking),
+    )
+}
+
+/** The change [change] of [journey] as the classic timeline shows it, with the runs of the rides from [courses]. */
+@Composable
+internal fun CompanionChangePart(
+    journey: Journey,
+    change: TripChange,
+    courses: Map<String, TripCourse>,
+    offer: Alternatives?,
+    over: Boolean,
+    onFocusWalk: (Leg) -> Unit,
+    onSwitch: (Journey) -> Unit,
+    maps: Boolean,
+    detour: WalkDetour?,
+    modifier: Modifier = Modifier,
+    // The new views: under the blue card, on the page ground (see BlueChangeEntry).
+    below: (@Composable () -> Unit)? = null,
+) {
+    val nextIndex = journey.legs.indexOfFirst { it === change.next }
+    val arrivingCourse = change.arriving.tripId?.let { courses[it] }
+    val nextCourse = change.next.tripId?.let { courses[it] }
+    ChangeEntry(
+        change = detouredChange(change, nextIndex, detour),
+        detourMinutes = detour?.takeIf { it.legIndex >= change.keepLegs && it.legIndex < nextIndex }?.minutes,
+        arrivingStops = remember(change.arriving, arrivingCourse) { rideStops(change.arriving, arrivingCourse) },
+        nextStops = remember(change.next, nextCourse) { rideStops(change.next, nextCourse) },
+        arrivingBeyond = remember(change.arriving, arrivingCourse) { runNeighbour(change.arriving, arrivingCourse, after = true) },
+        nextBefore = remember(change.next, nextCourse) { runNeighbour(change.next, nextCourse, after = false) },
+        offer = offer,
+        over = over,
+        onFocusWalk = onFocusWalk,
+        onSwitch = onSwitch,
+        modifier = modifier,
+        maps = maps,
+        // One station, one name on the page (#157).
+        railwayNames = remember(journey) { io.github.jnbp.nextstop.data.railwayNamesOf(journey) },
+        // The rest of the journey from this change on: the connection now taken (#94).
+        current = remember(journey, change.keepLegs) { journey.legs.drop(change.keepLegs).takeIf { rest -> rest.any { !it.walking } }?.let { Journey(it) } },
+        below = below,
+    )
+}
+
+/**
+ * The connecting departures to choose from at [change] of [journey] in the new Live-Fahrt views,
+ * under the blue change card (B3); [offer] as loaded for the change, as the classic part shows them.
+ */
+@Composable
+internal fun CompanionConnectionChoice(
+    journey: Journey,
+    change: TripChange,
+    // Null while the departures are loaded for no change (or another one): the other ways alone.
+    offer: Alternatives?,
+    onSwitch: (Journey) -> Unit,
+    extras: List<ChoiceExtraTile> = emptyList(),
+) {
+    val current = remember(journey, change.keepLegs) { journey.legs.drop(change.keepLegs).takeIf { rest -> rest.any { !it.walking } }?.let { Journey(it) } }
+    ConnectionChoice(change = change, offer = offer, onSwitch = onSwitch, current = current, extras = extras)
+}
+
+/** Before the first ride from one of many stop positions: the short walk to its position, with its small map. */
+@Composable
+internal fun CompanionPositionWalkPart(ride: Leg, onFocusWalk: (Leg) -> Unit, modifier: Modifier = Modifier) {
+    if (!hasBoardingPositionMap(ride)) return
+    PositionWalkEntry(ride = ride, onFocusWalk = onFocusWalk, modifier = modifier)
+}
+
+/**
+ * Before the first ride from a station (#87): the way inside it from where the station is
+ * entered to the platform of the ride, by the platforms OpenStreetMap knows ("Weg zum Gleis 9"),
+ * on the dotted rail with its small map folded at first ([maps]; over the big map a tap shows it
+ * there). Nothing where the platform is not known or lies right at the stop's point.
+ */
+@Composable
+internal fun PlatformWalkPart(ride: Leg, onFocusWalk: (Leg) -> Unit, maps: Boolean, modifier: Modifier = Modifier) {
+    if (ride.walking || ride.product in PLATFORM_WALK_SKIP) return
+    val station = ride.fromPlace?.position ?: return
+    // From the own position where it is recent and near the station, else from the station (#87).
+    // Taken once for the ride, so a moving position does not ask for a new way at every step.
+    val start = remember(ride, station) {
+        val own = io.github.jnbp.nextstop.ui.companion.RecentOwnPosition.position
+        val ownAge = android.os.SystemClock.elapsedRealtime() - io.github.jnbp.nextstop.ui.companion.RecentOwnPosition.atMillis
+        io.github.jnbp.nextstop.ui.companion.platformWalkStart(station, own, ownAge)
+    }
+    val end = remember(ride) {
+        OsmStations.ridePlatforms(ride, boarding = true).firstOrNull()?.let { (it.a.first + it.b.first) / 2 to (it.a.second + it.b.second) / 2 }
+    } ?: return
+    if (routeMeters(listOf(station, end)) < PLATFORM_WALK_MIN_METERS) return
+    val footVersion by FootPaths.version.collectAsState()
+    val path = remember(start, end, footVersion) { FootPaths.wayBetween(start, end) }
+    LaunchedEffect(start, end) { FootPaths.wantWay(start, end) }
+    val walk = remember(ride, path) { boardingWalk(ride, path.ifEmpty { listOf(start, end) }).copy(walkTarget = null) }
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val dots = remember(density) { PathEffect.dashPathEffect(floatArrayOf(0.1f, with(density) { 7.dp.toPx() }), 0f) }
+    val label = platformLabel(ride.departurePlatform, ride.product)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val x = RAIL_WIDTH.toPx() / 2f
+                drawLine(AppColors.Rail, Offset(x, 0f), Offset(x, size.height), strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round, pathEffect = dots)
+            }
+            .padding(start = RAIL_WIDTH, top = 6.dp, bottom = 6.dp),
+    ) {
+        WalkCard(
+            text = if (label != null) stringResource(R.string.r5c_platform_walk, label) else stringResource(R.string.r5c_platform_walk_plain),
+            onClick = { onFocusWalk(walk) },
+            // The way to the platform leads to a point too: Google Maps can walk it (#131).
+            onNavigate = { openWalkNavigation(context, end) },
+            map = if (!maps) null else ({ WalkMap(walk, onFocusWalk) }),
+            mapStartsOpen = false,
+        )
+    }
+}
+
+// Rides that leave from a stop in the street, not from a platform of a station.
+private val PLATFORM_WALK_SKIP = setOf("bus", "coach", "tram", "ferry")
+
+// The way to the platform is offered from this far between the stop's point and the platform.
+private const val PLATFORM_WALK_MIN_METERS = 40.0
+
 // Things of the trip that are over are drawn this pale.
 private const val PAST_ALPHA = 0.55f
 
@@ -1332,7 +1694,32 @@ private fun ChangeEntry(
     nextStops: List<Stopover> = change.next.stopovers,
     arrivingBeyond: Stopover? = null,
     nextBefore: Stopover? = null,
+    maps: Boolean = true,
+    current: Journey? = null,
+    railwayNames: Set<String> = emptySet(),
+    // The new views only: what stands under the blue card (the link and tiles of the connections).
+    below: (@Composable () -> Unit)? = null,
 ) {
+    // The new views (B1-B5): a blue card like every walk, the picker below it (see BlueChange.kt).
+    val style = LocalWalkCardStyle.current
+    if (style != null) {
+        BlueChangeEntry(
+            change = change,
+            over = over,
+            onFocusWalk = onFocusWalk,
+            style = style,
+            modifier = modifier,
+            detourMinutes = detourMinutes,
+            arrivingStops = arrivingStops,
+            nextStops = nextStops,
+            arrivingBeyond = arrivingBeyond,
+            nextBefore = nextBefore,
+            maps = maps,
+            railwayNames = railwayNames,
+            below = below,
+        )
+        return
+    }
     val context = LocalContext.current
     val density = LocalDensity.current
     val dots = remember(density) { PathEffect.dashPathEffect(floatArrayOf(0.1f, with(density) { 7.dp.toPx() }), 0f) }
@@ -1361,11 +1748,11 @@ private fun ChangeEntry(
     )
     val rating = if (made) madeGreen else toneColor(time.tone)
     // The number of the stop position the next bus or tram leaves from, where the provider names no platform.
-    val spotText = change.next.boardingSpot?.label?.let { stringResource(R.string.walk_target_pos, it) }
+    val spotText = io.github.jnbp.nextstop.data.shownPositionLabel(change.next.boardingSpot?.label)?.let { stringResource(R.string.walk_target_pos, it) }
     val target = withExit(
         walkTargetName(
-            change.next.from.plainStopName(),
-            platformLabel(change.next.departurePlatform) ?: spotText,
+            io.github.jnbp.nextstop.data.pageStopName(change.next.from, railwayNames),
+            platformLabel(change.next.departurePlatform, change.next.product) ?: spotText,
             walk?.walkTarget,
             walkTargetText(walk?.walkTarget),
         ),
@@ -1407,30 +1794,58 @@ private fun ChangeEntry(
             .padding(start = RAIL_WIDTH, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // Line 1 the station over the full width, line 2 the rating in its colour and the step from
+        // platform to platform; at the right the minutes, large, across both lines (#169).
+        val title = stringResource(R.string.transfer_at, io.github.jnbp.nextstop.data.pageStopName(change.stop.name, railwayNames))
+        val ratingText = when {
+            made -> stringResource(R.string.change_made)
+            time.possible -> toneLabel(time)
+            else -> stringResource(R.string.choice_gone)
+        }
+        val minutesShown = time.possible && !made
+        val platforms = platformStep(
+            platformLabel(change.arriving.arrivalPlatform, change.arriving.product),
+            platformLabel(change.next.departurePlatform, change.next.product),
+        )
+        val spoken = listOfNotNull(title, if (minutesShown) spokenDuration(time.minutes) else null, ratingText).joinToString(", ")
         Row(
-            modifier = Modifier.heightIn(min = 24.dp),
+            modifier = Modifier
+                .heightIn(min = 24.dp)
+                .clearAndSetSemantics { contentDescription = spoken },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = stringResource(R.string.transfer_at, change.stop.name.plainStopName()),
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = when {
-                    made -> stringResource(R.string.change_made)
-                    time.possible -> changeLabel(time.minutes)
-                    else -> stringResource(R.string.choice_gone)
-                },
-                color = rating,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 14.sp,
-                maxLines = 1,
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(text = ratingText, color = rating, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
+                    if (platforms != null) {
+                        Text(
+                            text = platforms,
+                            color = AppColors.Muted,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            if (minutesShown) {
+                Text(
+                    text = stringResource(R.string.companion_minutes, time.minutes.coerceAtLeast(0)),
+                    color = rating,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 22.sp,
+                    maxLines = 1,
+                )
+            }
         }
         // A change inside one station takes no walking time: name the line to change to instead.
         val way = if (walk != null && detourMinutes != null) {
@@ -1445,14 +1860,15 @@ private fun ChangeEntry(
             val mapKind = remember(change.arriving, change.next, walk, walkMinutes, OsmStations.loaded) {
                 changeWalkMapKind(change.arriving, change.next, walk, walkMinutes)
             }
-            val end = walk.walkTarget?.position ?: change.next.fromPlace?.position ?: walk.toPlace?.position ?: walk.path.lastOrNull()
+            val end = walkNavigationTarget(walk, change.next)
             WalkCard(
                 text = way,
                 onClick = { onFocusWalk(walk) },
-                onNavigate = if (end == null || walkMinutes <= 0 || over) null else ({ openWalkNavigation(context, end, walk.cycling) }),
+                // Also a walk of 0 minutes to another stop position of the station (#131).
+                onNavigate = if (end == null || !offersWalkNavigation(end, over)) null else ({ openWalkNavigation(context, end, walk.cycling) }),
                 // The walk's own map, else (a walk of no minutes or without a way, as to another stop
                 // position of the same stop) the map of the change (see changeMapKind).
-                map = if (over || mapKind == ChangeMapKind.None) {
+                map = if (!maps || over || mapKind == ChangeMapKind.None) {
                     null
                 } else {
                     ({ ChangeMapOf(mapKind, change.arriving, change.next, walk, onFocusWalk) })
@@ -1462,7 +1878,9 @@ private fun ChangeEntry(
         } else {
             Text(text = way, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
             // Two stop positions of buses or trams apart: both and the way between them, folded at first.
-            if (!over && hasSpotWalkMap(change.arriving, change.next)) {
+            if (!maps) {
+                // The big map behind shows the change (the companion with the map).
+            } else if (!over && hasSpotWalkMap(change.arriving, change.next)) {
                 FoldedMap { SpotWalkMap(change.arriving, change.next, onFocusWalk) }
             } else if (!over && change.arriving.boardingSpot == null && change.arriving.alightingSpot == null &&
                 hasBoardingPositionMap(change.next)
@@ -1487,7 +1905,7 @@ private fun ChangeEntry(
                 nextBefore = nextBefore,
             )
         }
-        if (offer != null) ConnectionChoice(change = change, offer = offer, onSwitch = onSwitch)
+        if (offer != null) ConnectionChoice(change = change, offer = offer, onSwitch = onSwitch, current = current)
     }
 }
 
@@ -1500,25 +1918,101 @@ internal fun changeMade(over: Boolean, tightness: Tightness): Boolean =
 
 /** The connecting departures to choose from at the change ahead, or a line that says they are on their way. */
 @Composable
-private fun ConnectionChoice(change: TripChange, offer: Alternatives, onSwitch: (Journey) -> Unit) {
-    // Switched off in the settings: no choice and no line about it.
-    if (!connectionChoiceOn.value) return
-    // An offer that was loaded for another change of the trip says nothing about this one.
-    if (offer.keepLegs != change.keepLegs) return
-    if (offer.loading) {
+private fun ConnectionChoice(
+    change: TripChange,
+    offer: Alternatives?,
+    onSwitch: (Journey) -> Unit,
+    current: Journey? = null,
+    extras: List<ChoiceExtraTile> = emptyList(),
+) {
+    // #257: whatever the connections are doing (switched off, loaded for another change, loading,
+    // failed, too few), the tiles go to the one row of ConnectionChips, the other ways alone too:
+    // so the row is never swapped for another one while the departures come in, and every tile
+    // that comes or goes does so softly.
+    // Switched off in the settings, or an offer that was loaded for another change of the trip:
+    // no choice and no line about it (other ways in the row still show).
+    val forHere = connectionChoiceOn.value && offer != null && offer.keepLegs == change.keepLegs
+    // The lines of the connections belong to the chip "Anschluss" and fold with it (#257).
+    val tileShow = LocalChangeTileShow.current
+    MapFold(open = tileShow.connections && forHere && offer?.loading == true) {
         LoadingRow(text = stringResource(R.string.searching_connections), compact = true)
-        return
     }
-    if (offer.failed) {
+    MapFold(open = tileShow.connections && forHere && offer != null && !offer.loading && offer.failed) {
         Text(
             text = stringResource(R.string.alternatives_failed),
             color = AppColors.Muted,
             fontSize = 12.sp,
         )
-        return
     }
-    val options = connectionOptions(change, offer)
-    if (options.size >= 2) ConnectionChips(change = change, options = options, onSwitch = onSwitch)
+    // The connection now taken is always among them, as the chosen one (#94; [current] in the companion).
+    val found = if (forHere && offer != null && !offer.loading && !offer.failed) {
+        io.github.jnbp.nextstop.ui.companion.withCurrentChoice(connectionOptions(change, offer), current) {
+            it.rides.firstOrNull()?.let { ride -> sameRide(ride, change.next) } == true
+        }
+    } else {
+        emptyList()
+    }
+    // The connection followed now is always among them (#94): never an empty row (#97).
+    val chosen = found.indexOfFirst { sameRide(it.rides.first(), change.next) }
+    val options = if (chosen < 0 && found.size < 2) emptyList() else found
+    // The chosen one can no longer be reached: the best one that still works, one tap away (#98).
+    val rescue = if (options.isEmpty()) null else rescueChoice(chosen, optionTimes(change, options))?.let { options[it] }
+    // The new companion views show it at the top, by the hero (see ModernCompanion).
+    if (!io.github.jnbp.nextstop.ui.companion.CompanionLayout.modern) {
+        // While it folds away it keeps showing what it offered.
+        val lastRescue = remember { arrayOfNulls<Journey>(1) }
+        if (rescue != null) lastRescue[0] = rescue
+        MapFold(open = rescue != null && tileShow.connections) { lastRescue[0]?.let { RescueOffer(it, onSwitch) } }
+    }
+    ConnectionChips(change = change, options = options, onSwitch = onSwitch, extras = extras)
+}
+
+/**
+ * The change time of each of [options] at [change], by the live times (plausible ones where the
+ * provider's prognosis of the arriving ride is not): for the chosen one the change itself.
+ */
+fun optionTimes(change: TripChange, options: List<Journey>): List<ChangeTime> {
+    val arriving = change.arriving.plausible()
+    return options.map { option ->
+        if (sameRide(option.rides.first(), change.next)) {
+            change.time
+        } else {
+            // A re-routed walk gets there no earlier, whichever departure is taken.
+            changeTime(arriving, option.rides.first(), maxOf(option.walkBeforeMinutes, change.walkFloor))
+        }
+    }
+}
+
+/** "The connection no longer works – take the S7 at 16:06?" with one tap to switch to [option] (#98). */
+@Composable
+internal fun RescueOffer(option: Journey, onSwitch: (Journey) -> Unit) {
+    val ride = option.rides.first()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(AppColors.DelayRed.copy(alpha = 0.12f))
+            .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.r5_rescue, shortLine(ride.line) ?: "", ride.departure.clock()),
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = stringResource(R.string.r5_rescue_take),
+            color = AppColors.Blue,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { onSwitch(option) }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+    }
 }
 
 /**
@@ -1531,18 +2025,22 @@ private fun ConnectionChoice(change: TripChange, offer: Alternatives, onSwitch: 
 fun connectionOptions(change: TripChange, offer: Alternatives?): List<Journey> {
     if (offer == null || offer.loading || offer.failed || offer.keepLegs != change.keepLegs) return emptyList()
     val arrivingTrip = change.arriving.tripId
-    return offer.options
+    // The connection followed now, also where the search did not find it (#94).
+    return withCurrentChoice(offer.options, offer.current, change.next)
         .filter { option ->
             val ride = option.rides.firstOrNull()
-            // Staying on the vehicle the traveller arrives with is no change.
-            // A cancelled ride is no connection to choose.
-            ride != null && !ride.cancelled && (arrivingTrip == null || ride.tripId != arrivingTrip)
+            // Staying on the vehicle the traveller arrives with is no change, and neither is
+            // a later vehicle of the same line and direction: staying seated is no slower (#34).
+            // A cancelled ride is no connection to choose. The chosen one always stays.
+            ride != null && !ride.cancelled && (arrivingTrip == null || ride.tripId != arrivingTrip) &&
+                (sameRide(ride, change.next) || !staysSeatedAhead(change.arriving, ride))
         }
-        .distinctBy { option ->
-            val ride = option.rides.first()
-            "${ride.line}|${ride.plannedDeparture ?: ride.departure}"
-        }
+        // Of the ways on after one departure the one that arrives first stands for it, so the
+        // tile of the chosen departure says the arrival of the journey shown above it. Every run
+        // once, also where two providers name or time it a little apart (#275): the key of the
+        // line and the time as text before ("3|09:19+01:00" and "STR 3|08:19Z") made two tiles.
         .sortedWith(optionOrder)
+        .let { distinctChoices(it) }
 }
 
 /** False: the settings hide the choice of connecting departures at changes, wherever it is drawn. */
@@ -1560,22 +2058,59 @@ private val CHOICE_CHECK = 18.dp
 /** The walking figure or clock before the minutes of a tile. */
 private val CHOICE_GLYPH = 12.dp
 
+/** Every tile but the chosen connection stands back this much. */
+private const val CHOICE_BACK_SCALE = 0.95f
+
+/** The least width of a tile of other ways (as before #243). */
+private val CHOICE_EXTRA_MIN_WIDTH = 104.dp
+
+/** How a tile comes into the row of a change: it opens its room, fades and grows in; at once with animations off. */
+private fun choiceTileEnter(animate: Boolean): EnterTransition = if (animate) {
+    expandHorizontally(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) +
+        fadeIn() + scaleIn(initialScale = 0.8f)
+} else {
+    EnterTransition.None
+}
+
+/** How a tile leaves the row of a change: it fades out while its room closes; at once with animations off. */
+private fun choiceTileExit(animate: Boolean): ExitTransition = if (animate) {
+    shrinkHorizontally(spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut()
+} else {
+    ExitTransition.None
+}
+
+/**
+ * A tile of another kind in the row of the connection tiles (#243): one of the other ways from
+ * the change ("Andere Wege"), with when it arrives at the destination and when its first ride
+ * leaves, drawn by [content] at the width and height of the row's tiles.
+ */
+class ChoiceExtraTile(
+    val key: String,
+    val arrival: OffsetDateTime,
+    val departure: OffsetDateTime,
+    val content: @Composable (width: Dp, height: Dp) -> Unit,
+)
+
 /**
  * The question which connection to take, and the connecting departures around the chosen
- * one as chips of one size, in the order of [options] (by arrival: sooner ones before it,
- * later ones after it), each in
+ * one as chips of one size: the window around it is taken in the order of [options] (by
+ * arrival), the chips stand by their departure at the change, the chosen one at its place
+ * ([tileOrder], #215), each in
  * the colour of how tight the change to it is. Only departures that can be reached by the
  * live times are shown; one that becomes reachable or is lost slides in or out, and a
  * change of how tight it is changes its colour softly. Three chips fit the width, the
  * others are reached by pushing the row sideways.
  */
 @Composable
-fun ConnectionChips(change: TripChange, options: List<Journey>, onSwitch: (Journey) -> Unit) {
-    if (!connectionChoiceOn.value) return
-    val chosen = options.indexOfFirst { sameRide(it.rides.first(), change.next) }
+fun ConnectionChips(change: TripChange, options: List<Journey>, onSwitch: (Journey) -> Unit, extras: List<ChoiceExtraTile> = emptyList()) {
+    // Switched off in the settings: no connections; other ways given still show, in this same row
+    // (#257: with no connections, as while they load, the row holds the other ways alone).
+    val choices = if (connectionChoiceOn.value) options else emptyList()
+    if (choices.isEmpty() && extras.isEmpty()) return
+    val chosen = choices.indexOfFirst { sameRide(it.rides.first(), change.next) }
     val from = (chosen - CHOICE_BEFORE).coerceAtLeast(0)
-    val until = minOf(options.size, chosen.coerceAtLeast(0) + CHOICE_AFTER + 1)
-    val offered = options.subList(from, until)
+    val until = minOf(choices.size, chosen.coerceAtLeast(0) + CHOICE_AFTER + 1)
+    val offered = choices.subList(from, until)
     // The time of each change as every screen shows it (see changeTime), by the live times,
     // plausible ones where the provider's prognosis of the arriving ride is not (as the change
     // row itself is rated). The chosen one is the change itself: exactly the numbers of its row.
@@ -1592,12 +2127,33 @@ fun ConnectionChips(change: TripChange, options: List<Journey>, onSwitch: (Journ
     val about = if (arriving.arrivalEstimated) stringResource(R.string.estimated_prefix) + " " else ""
     // Reachable: the ride leaves after the traveller got there and walked to it.
     val reachable = times.map { it.possible }
-    // The chips in front of the chosen one; the row is pushed so that one of them stays in view.
-    val shownBefore = offered.indices.count { it < chosen - from && reachable[it] }
     val scroll = rememberScrollState()
     val settle = spring<Color>(stiffness = Spring.StiffnessMediumLow)
     // The arrival at the destination of the chosen connection, which the other tiles count from.
-    val chosenArrival = offered.getOrNull(chosen - from)?.takeIf { chosen >= 0 }?.legs?.lastOrNull()?.arrival
+    // That of the journey followed where known, so the tile and the head of the journey say the same.
+    val chosenArrival = offered.getOrNull(chosen - from)?.takeIf { chosen >= 0 }
+        ?.let { change.journeyArrival ?: it.legs.lastOrNull()?.arrival }
+    // The order of the tiles (#215): by the departure at the change, the chosen one at its place.
+    // With other ways in the same row (#243, both chips on) every tile goes by its arrival, the
+    // chosen one at its place too; the indices from offered.size on stand for [extras].
+    // #257: the row keeps all its tiles whichever chip is on; the chips only hide a kind of them
+    // (LocalChangeTileShow), so they leave and come in softly and the others glide to their places.
+    val tileShow = LocalChangeTileShow.current
+    val order = changeRowOrder(
+        connectionDepartures = offered.map { it.rides.first().departure },
+        connectionArrivals = offered.mapIndexed { index, option ->
+            (if (index == chosen - from) chosenArrival else null) ?: option.legs.last().arrival
+        },
+        wayArrivals = extras.map { it.arrival },
+        wayDepartures = extras.map { it.departure },
+        waysShown = tileShow.ways,
+    )
+    // The chips in front of the chosen one; the row is pushed so that one of them stays in view.
+    val shownBefore = if (offered.isEmpty()) 0 else rowTilesBeforeChosen(order, chosen - from, offered.size, tileShow) { reachable[it] }
+    // Tiles there when the row first shows are simply there; those that come later (found by a
+    // search, loaded, reachable again) come in softly, as those that leave go softly (#257).
+    val rowShown = remember { booleanArrayOf(false) }
+    SideEffect { rowShown[0] = true }
     // What every tile says, worked out first, so that all tiles can be made wide enough for the
     // longest of them: no tile cuts its text off, also on a small phone with large text.
     val lineTexts = offered.map { badgeLine(it.rides.first().line) ?: "?" }
@@ -1608,15 +2164,16 @@ fun ConnectionChips(change: TripChange, options: List<Journey>, onSwitch: (Journ
             choiceDelta(option.legs.lastOrNull()?.arrival, chosenArrival)?.let { choiceDeltaLabel(it) }
         }
     }
-    val arrivalTexts = offered.map { option ->
-        option.legs.lastOrNull()?.arrival?.let { stringResource(R.string.arrival_at, it.clock()) }
+    val arrivalTexts = offered.mapIndexed { index, option ->
+        val arrival = if (index == chosen - from) chosenArrival else option.legs.lastOrNull()?.arrival
+        arrival?.let { stringResource(R.string.arrival_at, it.clock()) }
     }
     // Short on the tile ("5 min" after a small walking figure), in full for accessibility services.
     val minuteTexts = times.mapIndexed { index, time ->
         when {
             !reachable[index] -> stringResource(R.string.choice_gone)
             time.minutes < 0 -> about + stringResource(R.string.delay_minutes, time.minutes.toInt())
-            // From an hour on in hours and minutes ("1 h 37 min").
+            // From an hour on in hours and minutes ("1:37 h").
             time.minutes >= 60 -> about + durationLabel(time.minutes)
             else -> about + stringResource(R.string.choice_change_minutes, time.minutes)
         }
@@ -1629,15 +2186,38 @@ fun ConnectionChips(change: TripChange, options: List<Journey>, onSwitch: (Journ
         }
     }
     val chosenLabel = stringResource(R.string.choice_chosen)
+    // The earliest one that can be made without running, and an earlier one at a run (#94), as
+    // marks on their tiles (#115): "frühester" and a quieter "Sprint".
+    val marks = remember(times, offered) { choiceMarks(times, offered.map { it.rides.first().departure }) }
+    val earliestMark = stringResource(R.string.r6c_mark_earliest)
+    val sprintMark = stringResource(R.string.r6c_mark_sprint)
+    val markTexts = offered.indices.map { index ->
+        when (tileMark(index, marks)) {
+            TileMark.Earliest -> earliestMark
+            TileMark.Sprint -> sprintMark
+            null -> null
+        }
+    }
+    // Read out in full: which line leaves when.
+    val markSpoken = offered.mapIndexed { index, option ->
+        val ride = option.rides.first()
+        when (tileMark(index, marks)) {
+            TileMark.Earliest -> stringResource(R.string.r5_choice_earliest, shortLine(ride.line) ?: "", ride.departure.clock())
+            TileMark.Sprint -> stringResource(R.string.r5_choice_sprint, ride.departure.clock())
+            null -> null
+        }
+    }
+    val animationsOn = rememberAnimationsOn()
     val baseStyle = LocalTextStyle.current
     val badgeStyle = baseStyle.merge(TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, lineHeight = 14.sp))
     val deltaStyle = baseStyle.merge(TextStyle(fontWeight = FontWeight.Bold, fontSize = 11.sp, lineHeight = 13.sp))
     val arrivalStyle = baseStyle.merge(TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, lineHeight = 19.sp))
     val minuteStyle = baseStyle.merge(TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 12.sp, lineHeight = 14.sp))
+    val markStyle = baseStyle.merge(TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 10.sp, lineHeight = 12.sp))
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     // The width the widest tile needs: its longest line, the padding and a little slack.
-    val neededWidth = remember(lineTexts, deltaTexts, arrivalTexts, minuteTexts, baseStyle, density) {
+    val neededWidth = remember(lineTexts, deltaTexts, arrivalTexts, minuteTexts, markTexts, baseStyle, density) {
         val measure = { text: String, style: TextStyle ->
             with(density) { measurer.measure(text, style).size.width.toDp() }
         }
@@ -1648,20 +2228,31 @@ fun ConnectionChips(change: TripChange, options: List<Journey>, onSwitch: (Journ
             badge + 6.dp + end
         } ?: 0.dp
         val arrival = arrivalTexts.maxOfOrNull { text -> text?.let { measure(it, arrivalStyle) } ?: 0.dp } ?: 0.dp
-        val minutes = minuteTexts.maxOfOrNull { measure(it, minuteStyle) + CHOICE_GLYPH + 3.dp } ?: 0.dp
+        val minutes = offered.indices.maxOfOrNull { index ->
+            measure(minuteTexts[index], minuteStyle) + CHOICE_GLYPH + 3.dp +
+                (markTexts[index]?.let { measure(it, markStyle) + 10.dp + 4.dp } ?: 0.dp)
+        } ?: 0.dp
         maxOf(top, arrival, minutes) + 20.dp + 4.dp
     }
     // Larger text gets a taller tile, so the three lines keep their air.
     val tileHeight = CHOICE_HEIGHT + 56.dp * (density.fontScale - 1f).coerceAtLeast(0f)
-    Text(
-        text = stringResource(R.string.transfer_choice),
-        color = AppColors.Muted,
-        fontWeight = FontWeight.Bold,
-        fontSize = 12.sp,
-    )
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+    // In the new views the link "Anschluss wechseln" above is the heading (B3); the question stays for screen readers.
+    val newViews = LocalWalkCardStyle.current != null
+    val question = stringResource(R.string.transfer_choice)
+    if (!newViews) {
+        MapFold(open = tileShow.connections && offered.isNotEmpty()) {
+            Text(
+                text = question,
+                color = AppColors.Muted,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+            )
+        }
+    }
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth().then(if (newViews) Modifier.semantics { contentDescription = question } else Modifier)) {
         // Three tiles fit the width where their text allows it; otherwise fewer, and the row scrolls.
-        val chipWidth = maxOf((maxWidth - CHOICE_GAP * 2) / 3, neededWidth)
+        // The other ways alone: at least as wide as before (ChoiceExtrasRow).
+        val chipWidth = maxOf((maxWidth - CHOICE_GAP * 2) / 3, if (offered.isEmpty()) CHOICE_EXTRA_MIN_WIDTH else neededWidth)
         val stepPixels = with(LocalDensity.current) { (chipWidth + CHOICE_GAP).toPx() }
         LaunchedEffect(shownBefore, stepPixels) {
             scroll.animateScrollTo(((shownBefore - 1).coerceAtLeast(0) * stepPixels).roundToInt())
@@ -1671,150 +2262,243 @@ fun ConnectionChips(change: TripChange, options: List<Journey>, onSwitch: (Journ
                 .fadeEdges(scroll, horizontal = true, length = 12.dp)
                 .horizontalScroll(scroll),
         ) {
-            offered.forEachIndexed { index, option ->
-                val ride = option.rides.first()
-                key("${ride.line}|${ride.plannedDeparture ?: ride.departure}") {
-                    val picked = index == chosen - from
-                    val inReach = reachable[index]
-                    val time = times[index]
-                    // Rated by the minutes left beyond what the change needs, walk included, by the
-                    // live times on both sides, and coloured by the wait it leaves (see waitTone):
-                    // a long wait is a calm sand with a clock, not the green of a good change. The
-                    // label names the stage and, where it is so, the long wait.
-                    val tone = time.tone
-                    // Read while drawing: the colour glides without composing the tile for each frame.
-                    val ground = animateColorAsState(
-                        if (!inReach) AppColors.DelayRed else toneContainer(tone),
-                        settle,
-                        label = "choiceGround",
-                    )
-                    val ink by animateColorAsState(
-                        if (!inReach) AppColors.OnDelayRed else toneInk(tone),
-                        settle,
-                        label = "choiceInk",
-                    )
-                    // The chosen tile stands a little forward and springs there when it is picked.
-                    val stand by animateFloatAsState(
-                        if (picked) 1f else 0.95f,
-                        spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow),
-                        label = "choiceStand",
-                    )
-                    val press = remember { MutableInteractionSource() }
-                    val toneText = toneLabel(time)
-                    val tightnessLabel = if (inReach) toneText else stringResource(R.string.choice_gone)
-                    val delta = deltaTexts[index]
-                    val arrivalText = arrivalTexts[index]
-                    // The chosen connection stays in view also when it can no longer be reached, and says so.
-                    AnimatedVisibility(
-                        visible = inReach || picked,
-                        enter = expandHorizontally(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) +
-                            fadeIn() + scaleIn(initialScale = 0.8f),
-                        exit = shrinkHorizontally(spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut(),
-                    ) {
-                        // Every tile alike, three lines at most: the line and the delta, the
-                        // arrival at the destination, the minutes of the change. The colour says
-                        // how tight it is; its name is read out to accessibility services. The
-                        // chosen one has a frame and a check mark in its corner.
-                        Box(
-                            modifier = Modifier
-                                .padding(end = CHOICE_GAP)
-                                .size(width = chipWidth, height = tileHeight)
-                                .graphicsLayer {
-                                    scaleX = stand
-                                    scaleY = stand
-                                }
-                                .springPress(press)
-                                .clip(RoundedCornerShape(20.dp))
-                                .drawBehind { drawRect(ground.value) }
-                                // The chosen one keeps the colour of its stage and gets a frame.
-                                .then(
-                                    if (picked) Modifier.border(3.dp, AppColors.Blue, RoundedCornerShape(20.dp)) else Modifier,
-                                )
-                                .semantics {
-                                    selected = picked
-                                    stateDescription = tightnessLabel
-                                }
-                                .clickable(interactionSource = press, indication = LocalIndication.current, enabled = !picked && inReach) {
-                                    onSwitch(option)
-                                },
+            order.forEachIndexed { slot, index ->
+                if (index >= offered.size) {
+                    // Another way in the shared row (#243): the same size, standing back a little
+                    // as every tile but the chosen connection; full size with the connections hidden.
+                    val extra = extras[index - offered.size]
+                    key("way|${extra.key}") {
+                        val back by animateFloatAsState(
+                            if (tileShow.connections) CHOICE_BACK_SCALE else 1f,
+                            if (animationsOn) spring(stiffness = Spring.StiffnessMediumLow) else snap(),
+                            label = "wayBack",
+                        )
+                        val shown = remember { MutableTransitionState(tileShow.ways && !(rowShown[0] && animationsOn)) }
+                        shown.targetState = tileShow.ways
+                        AnimatedVisibility(
+                            visibleState = shown,
+                            // Only while it shows: one that comes back starts afresh at its new place.
+                            modifier = if (shown.currentState || shown.targetState) Modifier.glideToSlot(slot, animationsOn) else Modifier,
+                            enter = choiceTileEnter(animationsOn),
+                            exit = choiceTileExit(animationsOn),
                         ) {
-                            Column(
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+                                    .padding(end = CHOICE_GAP)
+                                    .graphicsLayer {
+                                        scaleX = back
+                                        scaleY = back
+                                    },
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    val badge = lineColor(ride)
-                                    Text(
-                                        text = lineTexts[index],
-                                        color = lineInk(ride, badge),
-                                        style = badgeStyle,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(7.dp))
-                                            .background(badge)
-                                            .padding(horizontal = 6.dp, vertical = 1.dp),
+                                extra.content(chipWidth, tileHeight)
+                            }
+                        }
+                    }
+                } else {
+                    val option = offered[index]
+                    val ride = option.rides.first()
+                    key("${ride.line}|${ride.plannedDeparture ?: ride.departure}") {
+                        val picked = index == chosen - from
+                        val inReach = reachable[index]
+                        val time = times[index]
+                        // Rated by the minutes left beyond what the change needs, walk included, by the
+                        // live times on both sides, and coloured by the wait it leaves (see waitTone):
+                        // a long wait is a calm sand with a clock, not the green of a good change. The
+                        // label names the stage and, where it is so, the long wait.
+                        val tone = time.tone
+                        // Read while drawing: the colour glides without composing the tile for each frame.
+                        val ground = animateColorAsState(
+                            if (!inReach) AppColors.DelayRed else toneContainer(tone),
+                            settle,
+                            label = "choiceGround",
+                        )
+                        val ink by animateColorAsState(
+                            if (!inReach) AppColors.OnDelayRed else toneInk(tone),
+                            settle,
+                            label = "choiceInk",
+                        )
+                        // The chosen tile stands a little forward and springs there when it is picked.
+                        val stand by animateFloatAsState(
+                            if (picked) 1f else CHOICE_BACK_SCALE,
+                            spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow),
+                            label = "choiceStand",
+                        )
+                        val press = remember { MutableInteractionSource() }
+                        val toneText = toneLabel(time)
+                        val tightnessLabel = if (inReach) {
+                            listOfNotNull(toneText, markSpoken[index]).joinToString(", ")
+                        } else {
+                            stringResource(R.string.choice_gone)
+                        }
+                        // A tile that just became the chosen one confirms it (#115): its check grows
+                        // out of a dot and draws its tick while the tile lights up briefly. Not on the
+                        // first showing, and not with animations off (then it is simply there).
+                        var wasPicked by remember { mutableStateOf(picked) }
+                        val confirm = remember { Animatable(1f) }
+                        LaunchedEffect(picked) {
+                            if (picked && !wasPicked && animationsOn) {
+                                confirm.snapTo(0f)
+                                confirm.animateTo(1f, tween(durationMillis = CONFIRM_MILLIS, easing = FastOutSlowInEasing))
+                            } else {
+                                confirm.snapTo(1f)
+                            }
+                            wasPicked = picked
+                        }
+                        val glowColor = AppColors.Blue
+                        val delta = deltaTexts[index]
+                        val arrivalText = arrivalTexts[index]
+                        // The chosen connection stays in view also when it can no longer be reached, and says so.
+                        // Hidden too with the chip "Anschluss" off (#257): it leaves like a lost one.
+                        val visible = connectionTileShown(tileShow, inReach, picked)
+                        val shown = remember { MutableTransitionState(visible && !(rowShown[0] && animationsOn)) }
+                        shown.targetState = visible
+                        AnimatedVisibility(
+                            visibleState = shown,
+                            // Only while it shows: one that comes back starts afresh at its new place.
+                            modifier = if (shown.currentState || shown.targetState) Modifier.glideToSlot(slot, animationsOn) else Modifier,
+                            enter = choiceTileEnter(animationsOn),
+                            exit = choiceTileExit(animationsOn),
+                        ) {
+                            // Every tile alike, three lines at most: the line and the delta, the
+                            // arrival at the destination, the minutes of the change. The colour says
+                            // how tight it is; its name is read out to accessibility services. The
+                            // chosen one has a frame and a check mark in its corner.
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = CHOICE_GAP)
+                                    .size(width = chipWidth, height = tileHeight)
+                                    .graphicsLayer {
+                                        scaleX = stand
+                                        scaleY = stand
+                                    }
+                                    .springPress(press)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .drawBehind { drawRect(ground.value) }
+                                    .drawWithContent {
+                                        drawContent()
+                                        val glow = confirmGlow(confirm.value)
+                                        if (glow > 0f) drawRect(glowColor.copy(alpha = 0.22f * glow))
+                                    }
+                                    // The chosen one keeps the colour of its stage and gets a frame.
+                                    .then(
+                                        if (picked) Modifier.border(3.dp, AppColors.Blue, RoundedCornerShape(20.dp)) else Modifier,
                                     )
-                                    Spacer(modifier = Modifier.weight(1f))
-                                    // How much sooner or later than the chosen one it arrives, at the right.
-                                    if (delta != null) {
+                                    .semantics {
+                                        selected = picked
+                                        stateDescription = tightnessLabel
+                                    }
+                                    .clickable(interactionSource = press, indication = LocalIndication.current, enabled = !picked && inReach) {
+                                        onSwitch(option)
+                                    },
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        val badge = lineColor(ride)
                                         Text(
-                                            text = delta,
-                                            color = ink,
-                                            style = deltaStyle,
+                                            text = lineTexts[index],
+                                            color = lineInk(ride, badge),
+                                            style = badgeStyle,
                                             maxLines = 1,
                                             softWrap = false,
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(ink.copy(alpha = 0.12f))
-                                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                                                .clip(RoundedCornerShape(7.dp))
+                                                .background(badge)
+                                                .padding(horizontal = 6.dp, vertical = 1.dp),
                                         )
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        // How much sooner or later than the chosen one it arrives, at the right.
+                                        if (delta != null) {
+                                            Text(
+                                                text = delta,
+                                                color = ink,
+                                                style = deltaStyle,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(ink.copy(alpha = 0.12f))
+                                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                                            )
+                                        }
                                     }
-                                }
-                                if (arrivalText != null) {
-                                    Text(
-                                        text = arrivalText,
-                                        color = ink,
-                                        style = arrivalStyle,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                    )
-                                }
-                                // The minutes from the arrival to the departure: the time for the change,
-                                // after a small walking figure, or a clock where the wait is long.
-                                Row(
-                                    modifier = Modifier.clearAndSetSemantics { contentDescription = minuteSpoken[index] },
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                ) {
-                                    if (inReach) {
-                                        GlyphIcon(
-                                            glyph = if (tone == WaitTone.LongWait) Glyph.Recent else Glyph.Walk,
+                                    if (arrivalText != null) {
+                                        Text(
+                                            text = arrivalText,
                                             color = ink,
-                                            size = CHOICE_GLYPH,
+                                            style = arrivalStyle,
+                                            maxLines = 1,
+                                            softWrap = false,
                                         )
                                     }
-                                    Text(
-                                        text = minuteTexts[index],
-                                        color = ink,
-                                        style = minuteStyle,
-                                        maxLines = 1,
-                                        softWrap = false,
+                                    // The minutes from the arrival to the departure: the time for the change,
+                                    // after a small walking figure, or a clock where the wait is long.
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.clearAndSetSemantics { contentDescription = minuteSpoken[index] },
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                        ) {
+                                            if (inReach) {
+                                                GlyphIcon(
+                                                    glyph = if (tone == WaitTone.LongWait) Glyph.Recent else Glyph.Walk,
+                                                    color = ink,
+                                                    size = CHOICE_GLYPH,
+                                                )
+                                            }
+                                            Text(
+                                                text = minuteTexts[index],
+                                                color = ink,
+                                                style = minuteStyle,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                            )
+                                        }
+                                        // The mark of the earliest one (a filled pill) or of the Sprint (only a rim).
+                                        val mark = markTexts[index]
+                                        if (inReach && mark != null) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                            val earliest = tileMark(index, marks) == TileMark.Earliest
+                                            Text(
+                                                text = mark,
+                                                color = if (earliest) ink else ink.copy(alpha = 0.8f),
+                                                style = markStyle,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier
+                                                    .clearAndSetSemantics {}
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .then(
+                                                        if (earliest) {
+                                                            Modifier.background(ink.copy(alpha = 0.16f))
+                                                        } else {
+                                                            Modifier.border(1.dp, ink.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                                                        },
+                                                    )
+                                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                                if (picked) {
+                                    ChosenCheck(
+                                        label = chosenLabel,
+                                        progress = { confirm.value },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(top = 7.dp, end = 7.dp),
                                     )
                                 }
-                            }
-                            if (picked) {
-                                ChosenCheck(
-                                    label = chosenLabel,
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(top = 7.dp, end = 7.dp),
-                                )
                             }
                         }
                     }
@@ -1822,11 +2506,16 @@ fun ConnectionChips(change: TripChange, options: List<Journey>, onSwitch: (Journ
             }
         }
     }
+    // The line "Frühester erreichbarer …" under the row is gone (#115): its marks stand on the tiles.
 }
 
-/** The mark of the chosen tile: a small filled circle in the main colour with a white tick. */
+/**
+ * The mark of the chosen tile: a small filled circle in the main colour with a white tick. At
+ * [progress] below 1 it is being confirmed (#115): the circle grows out of a dot and the tick
+ * draws itself, short stroke first (see confirmCircle, confirmTick). Read while drawing.
+ */
 @Composable
-private fun ChosenCheck(label: String, modifier: Modifier = Modifier) {
+private fun ChosenCheck(label: String, modifier: Modifier = Modifier, progress: () -> Float = { 1f }) {
     val blue = AppColors.Blue
     val onBlue = AppColors.OnBlue
     Box(
@@ -1834,11 +2523,22 @@ private fun ChosenCheck(label: String, modifier: Modifier = Modifier) {
             .size(CHOICE_CHECK)
             .semantics { contentDescription = label }
             .drawBehind {
-                drawCircle(blue)
+                val p = progress()
+                drawCircle(blue, radius = size.minDimension / 2f * confirmCircle(p))
+                val tick = confirmTick(p)
+                if (tick <= 0f) return@drawBehind
                 val w = size.width
                 val stroke = w * 0.13f
-                drawLine(onBlue, Offset(w * 0.28f, w * 0.52f), Offset(w * 0.44f, w * 0.67f), strokeWidth = stroke, cap = StrokeCap.Round)
-                drawLine(onBlue, Offset(w * 0.44f, w * 0.67f), Offset(w * 0.73f, w * 0.36f), strokeWidth = stroke, cap = StrokeCap.Round)
+                val a = Offset(w * 0.28f, w * 0.52f)
+                val b = Offset(w * 0.44f, w * 0.67f)
+                val c = Offset(w * 0.73f, w * 0.36f)
+                // The short stroke takes the first third of the tick, the long one the rest.
+                val first = (tick / 0.35f).coerceAtMost(1f)
+                drawLine(onBlue, a, a + (b - a) * first, strokeWidth = stroke, cap = StrokeCap.Round)
+                if (tick > 0.35f) {
+                    val second = ((tick - 0.35f) / 0.65f).coerceAtMost(1f)
+                    drawLine(onBlue, b, b + (c - b) * second, strokeWidth = stroke, cap = StrokeCap.Round)
+                }
             },
     )
 }
@@ -1918,6 +2618,9 @@ private val BANNER_GAP = 10.dp
 // The top strip of the sheet that takes the pull: the grip line is drawn in its middle.
 private val SHEET_GRIP = 22.dp
 
+// The thin top edge of a sheet whose header is the handle (no grip line, see StageSheet).
+private val SHEET_EDGE = 8.dp
+
 // A sheet put away (see StageSheet) is a handle this wide; it starts to shrink below this content height.
 private val COMPACT_SHEET_WIDTH = 120.dp
 private val COMPACT_SHEET_FROM = 28.dp
@@ -1929,7 +2632,10 @@ private val COMPACT_SHEET_FROM = 28.dp
  * In between it takes about half of the room and no more than its content needs. [header]
  * stands under the edge and [footer] at the bottom of the sheet; both stay in every stage.
  * [onRecentre], when given, shows a round button above the sheet that lets the map frame
- * the trip again after the user moved it.
+ * the trip again after the user moved it. With [compass], the compass of the map stands beside
+ * it once the map is turned (see CompassButton). [restTop]: the stages below the top one are
+ * measured as if the room began this far down (what lies over the map above the sheet), so a
+ * sheet whose top stage covers that too (#128) keeps its middle stage where it was.
  */
 @Composable
 internal fun StageSheet(
@@ -1937,11 +2643,14 @@ internal fun StageSheet(
     onStage: (SheetStage) -> Unit,
     onRecentre: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    compass: Boolean = false,
     peek: Dp = 0.dp,
     topGap: Dp = 0.dp,
     header: (@Composable () -> Unit)? = null,
     footer: (@Composable () -> Unit)? = null,
     onSheetTop: ((Float) -> Unit)? = null,
+    noGrip: Boolean = false,
+    restTop: Dp = 0.dp,
     content: @Composable () -> Unit,
 ) {
     // How far the finger has pulled the sheet, in pixels (up is negative).
@@ -1955,13 +2664,16 @@ internal fun StageSheet(
         val fixed = with(density) {
             ((if (header != null) headerHeight else 0) + (if (footer != null) footerHeight else 0)).toDp()
         }
-        // Fully up, the sheet stays [topGap] below what lies above it.
-        val room = (maxHeight - SHEET_GRIP - fixed - topGap).coerceAtLeast(0.dp)
+        // Fully up, the sheet stays [topGap] below what lies above it. Without the grip line
+        // ([noGrip], the header takes the pull and shows a chevron) only a thin top edge.
+        val grip = if (noGrip && header != null) SHEET_EDGE else SHEET_GRIP
+        val room = (maxHeight - grip - fixed - topGap).coerceAtLeast(0.dp)
+        val restRoom = (room - restTop).coerceAtLeast(0.dp)
         // The height of the content in every stage.
         val stageHeights = SheetStage.entries.map { each ->
             when (each) {
                 SheetStage.Away -> peek.coerceAtMost(room)
-                SheetStage.Half -> maxOf(room * 0.48f, peek).coerceAtMost(room)
+                SheetStage.Half -> maxOf(restRoom * 0.48f, peek).coerceAtMost(room)
                 SheetStage.Full -> room
             }
         }
@@ -2026,7 +2738,20 @@ internal fun StageSheet(
             orientation = Orientation.Vertical,
             onDragStopped = { velocity -> settle(velocity) },
         )
-        if (onRecentre != null && stage != SheetStage.Full) {
+        if (compass && stage != SheetStage.Full) {
+            // The compass left of the button that frames the trip, or in its place without it.
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CompassButton()
+                if (onRecentre != null) {
+                    RoundButton(glyph = Glyph.Locate, description = stringResource(R.string.recentre_trip), onClick = onRecentre)
+                }
+            }
+        } else if (onRecentre != null && stage != SheetStage.Full) {
             RoundButton(
                 glyph = Glyph.Locate,
                 description = stringResource(R.string.recentre_trip),
@@ -2054,24 +2779,36 @@ internal fun StageSheet(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(SHEET_GRIP)
+                        .height(grip)
                         .semantics { contentDescription = handleLabel }
                         .clickable { onStage(if (stage == SheetStage.Away) SheetStage.Half else SheetStage.Away) }
                         .then(sheetDrag),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(width = 36.dp, height = 4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(AppColors.Muted.copy(alpha = 0.5f)),
-                    )
+                    if (grip == SHEET_GRIP) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 36.dp, height = 4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(AppColors.Muted.copy(alpha = 0.5f)),
+                        )
+                    }
                 }
                 if (header != null) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .onSizeChanged { headerHeight = it.height }
+                            // Without the grip line the header is the handle: a tap opens or puts away the sheet.
+                            .then(
+                                if (grip != SHEET_GRIP) {
+                                    Modifier
+                                        .semantics { contentDescription = handleLabel }
+                                        .clickable { onStage(if (stage == SheetStage.Away) SheetStage.Half else SheetStage.Away) }
+                                } else {
+                                    Modifier
+                                },
+                            )
                             .then(sheetDrag),
                     ) {
                         header()
@@ -2193,13 +2930,12 @@ fun TripBand(
                     value = minutes,
                     text = (if (step.estimated) stringResource(R.string.estimated_prefix) + " " else "") + if (minutes < 60) {
                         stringResource(R.string.trip_band_minutes, minutes)
-                    } else if (minutes < 100) {
-                        // From an hour on in hours and minutes ("1 h 37 min").
-                        durationLabel(minutes)
                     } else {
-                        step.time.clock()
+                        // From an hour on the clock time, as the big counter (#148).
+                        stringResource(if (heroClockIsArrival(step.kind)) R.string.r6c_hero_at_arrival else R.string.r6c_hero_at_departure) +
+                            " " + step.time.clock()
                     },
-                    color = AppColors.OnLime,
+                    color = countInk(step.estimated),
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 15.sp,
                 )
@@ -2300,6 +3036,10 @@ class TripActions(
     /** "Abkürzungs-Alarm" for this trip, and its switch; on while [everyMinute] is on. */
     val shortcutAlert: Boolean = false,
     val onShortcutAlert: ((Boolean) -> Unit)? = null,
+    /** The user's threshold of the shortcut alert, for the label "ab 3 min" (see ShortcutModeControl). */
+    val shortcutMinutes: Int = DEFAULT_SHORTCUT_MINUTES,
+    /** False where the screen shows the wake-up alarm with a control of its own (the companion's alarm tile). */
+    val wakeInSheet: Boolean = true,
 ) {
     /** Whether there is anything to offer at all. */
     val any: Boolean
@@ -2339,9 +3079,9 @@ private fun TripMenu(
 /**
  * The sheet of a followed trip at the bottom of the screen: re-plan from here, change the
  * destination, go on to one more place, share the trip (where the screen has no share button of
- * its own: the banner on the start page; it opens [ShareSheet]), the switch
- * "Every minute counts" and ending the trip, as far as [actions] offers them. Picking an
- * action closes the sheet; the switch keeps it open.
+ * its own: the banner on the start page; it opens [ShareSheet]), the control "Schnellere
+ * Wege melden" (Aus / ab 3 min / Jede Minute, see [ShortcutModeControl]) and ending the trip,
+ * as far as [actions] offers them. Picking an action closes the sheet; the control keeps it open.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2390,34 +3130,22 @@ fun TripActionSheet(actions: TripActions, onDismiss: () -> Unit) {
                     )
                 }
                 if (onEveryMinute != null) {
-                    // A mode, not an action: a group of its own with a heading, and a full explanation.
-                    Text(
-                        text = stringResource(R.string.trip_mode_title),
-                        color = AppColors.Muted,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(start = 8.dp, top = 14.dp, bottom = 6.dp),
-                    )
+                    // A mode, not an action: one control "Schnellere Wege melden" with three states.
                     val alertSwitch = actions.onShortcutAlert
-                    val lastRow = if (alertSwitch != null) 1 else 0
-                    TripSwitchRow(
-                        title = stringResource(R.string.every_minute),
-                        text = stringResource(R.string.every_minute_sheet_hint),
-                        checked = actions.everyMinute,
-                        onChange = onEveryMinute,
-                        shape = groupShape(0, lastRow),
+                    ShortcutModeControl(
+                        mode = shortcutMode(actions.everyMinute, actions.shortcutAlert),
+                        minutes = actions.shortcutMinutes,
+                        onMode = { mode ->
+                            // "Jede Minute zählt" first: switching it off puts the alert back to the setting.
+                            onEveryMinute(mode == ShortcutMode.EveryMinute)
+                            if (mode != ShortcutMode.EveryMinute) alertSwitch?.invoke(mode == ShortcutMode.FromThreshold)
+                        },
+                        shape = groupShape(0, 0),
+                        modifier = Modifier.padding(top = 14.dp),
                     )
-                    // The shortcut alert for this trip: on with "Every minute counts", which needs it.
-                    if (alertSwitch != null) {
-                        TripSwitchRow(
-                            title = stringResource(R.string.shortcut_alert),
-                            text = stringResource(R.string.shortcut_alert_trip_text),
-                            checked = actions.shortcutAlert || actions.everyMinute,
-                            onChange = { on -> if (!actions.everyMinute) alertSwitch(on) },
-                            shape = groupShape(1, lastRow),
-                        )
-                    }
                 }
+                // The wake-up alarm of the followed trip (only while the companion runs).
+                if (actions.wakeInSheet) Box(modifier = Modifier.padding(top = 8.dp)) { WakeAlarmTripSwitch(shape = groupShape(0, 0)) }
             }
         }
     }
@@ -2446,45 +3174,29 @@ private fun TripActionRow(title: String, text: String?, shape: Shape, onClick: (
 
 /**
  * The small mark in the companion's header while "Every minute counts" is on: a blue pill
- * with a lightning bolt and "Every minute". Only a mark; the switch is in the sheet of "Change".
+ * with a lightning bolt icon and "Every minute". Only a mark; the switch is in the sheet of "Change".
  */
 @Composable
 private fun EveryMinuteBadge() {
     val description = stringResource(R.string.every_minute_on)
-    Text(
-        text = "⚡ " + stringResource(R.string.every_minute_badge),
-        color = AppColors.OnBlue,
-        fontWeight = FontWeight.Bold,
-        fontSize = 11.sp,
-        lineHeight = 14.sp,
-        maxLines = 1,
+    Row(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(AppColors.Blue)
-            .semantics { contentDescription = description }
+            .semantics(mergeDescendants = true) { contentDescription = description }
             .padding(horizontal = 7.dp, vertical = 2.dp),
-    )
-}
-
-/** A switch in the sheet of a trip: the whole row toggles it. */
-@Composable
-private fun TripSwitchRow(title: String, text: String, checked: Boolean, onChange: (Boolean) -> Unit, shape: Shape) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(AppColors.Card)
-            .clickable { onChange(!checked) }
-            .defaultMinSize(minHeight = 56.dp)
-            .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(text = title, color = AppColors.Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Text(text = text, color = AppColors.Muted, fontSize = 13.sp, lineHeight = 17.sp)
-        }
-        Switch(checked = checked, onCheckedChange = onChange)
+        GlyphIcon(Glyph.Bolt, color = AppColors.OnBlue, size = 12.dp)
+        Text(
+            text = stringResource(R.string.every_minute_badge),
+            color = AppColors.OnBlue,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            maxLines = 1,
+        )
     }
 }
 
@@ -2543,7 +3255,7 @@ private fun ChangeTripButton(onClick: () -> Unit, shape: Shape, modifier: Modifi
  * ([appearModifier]; with animations off it is there at once).
  */
 @Composable
-private fun ShareTripButton(onClick: () -> Unit, size: Dp, modifier: Modifier = Modifier) {
+internal fun ShareTripButton(onClick: () -> Unit, size: Dp, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(10.dp)) {
     val interactions = remember { MutableInteractionSource() }
     val description = stringResource(R.string.trip_share_live)
     Box(
@@ -2551,7 +3263,7 @@ private fun ShareTripButton(onClick: () -> Unit, size: Dp, modifier: Modifier = 
             .then(appearModifier(1))
             .semantics { contentDescription = description }
             .springPress(interactions)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(shape)
             .background(AppColors.Card)
             .clickable(interactionSource = interactions, indication = LocalIndication.current, onClick = onClick)
             .size(size),
@@ -2602,7 +3314,15 @@ fun CompanionScreen(
     // Everything below shows plausible times: where the provider's prognosis is implausible,
     // the app's estimate (see plausible). The provider's journey itself stays as it is.
     val provided = journey
-    val journey = remember(provided) { provided.plausible() }
+    val plain = remember(provided) { provided.plausible() }
+    // One ride state from position and live times for every part below (see RideState): a ride
+    // left by position is over whatever its live arrival says, the ride on board arrives at the
+    // blended time, a ride waited for is not "ridden" before the position moves with it. So the
+    // block, the timeline, the change card ("Umstieg geschafft" / "zu spät") agree.
+    val rideNow = currentRideState(provided, now)
+    // "Automatisch" follows where the traveller stands: the map on foot, calm on board.
+    SideEffect { io.github.jnbp.nextstop.ui.companion.CompanionLayout.follow(rideNow.journeyId, rideNow.stage, rideNow.legIndex) }
+    val journey = remember(plain, rideNow) { plain.byRide(rideNow, now) }
     val courses = remember(courses) { courses.mapValues { it.value.plausible() } }
     val feeders = remember(feeders) { feeders.mapValues { it.value.plausible() } }
     val legs = journey.legs
@@ -2615,6 +3335,8 @@ fun CompanionScreen(
     val boarding = (riding ?: upcoming)?.fromPlace
     // Without a position of the device, a new plan starts at the next stop the traveller reaches.
     val ahead = replanFallback(journey, now)
+    val appContext = LocalContext.current
+    val shortcutMinutes = remember(appContext) { AppPrefs(appContext).shortcutMinutes }
     // Everything that changes the trip, in one sheet: opened by the visible "Change" button,
     // and by a long press on the banner as a shortcut.
     val tripActions = TripActions(
@@ -2626,6 +3348,9 @@ fun CompanionScreen(
         onEveryMinute = onEveryMinute,
         shortcutAlert = shortcutAlert,
         onShortcutAlert = onShortcutAlert,
+        shortcutMinutes = shortcutMinutes,
+        // The wake-up alarm has its own alarm tile in the bottom row.
+        wakeInSheet = false,
     )
     var actionsOpen by remember { mutableStateOf(false) }
     if (actionsOpen) TripActionSheet(actions = tripActions, onDismiss = { actionsOpen = false })
@@ -2644,12 +3369,46 @@ fun CompanionScreen(
     // Notices about lifts raise the sign only for step-free travel (see warningAlerts); for
     // everyone else they are listed quietly below it, as in the detail of a journey.
     val stepFree = rememberStepFree()
-    val rideWarnings = rides.filter { now.isBefore(it.arrival) }.flatMap { it.warnings }.distinct()
+    val rideWarnings = rides.filter { now.isBefore(it.arrival) }.flatMap { it.warnings }.distinctBy { it.summary to it.text }
     val warnings = alertingWarnings(rideWarnings, stepFree)
     val quiet = quietWarnings(rideWarnings, stepFree)
+    // The new views of the companion (calm, or with the map; see ui/companion), chosen in the
+    // settings; the classic view below stays as it is for "Klassisch" and for other screens.
+    if (companionModernHere()) {
+        ModernCompanion(
+            journey = journey,
+            now = now,
+            courses = courses,
+            alternatives = alternatives,
+            onMinimize = onMinimize,
+            onEnd = onEnd,
+            onMissed = onMissed,
+            onChangeTrip = { actionsOpen = true },
+            onShare = { shareOpen = true },
+            // The bottom bar of the new views offers these itself (#116).
+            actions = tripActions,
+            // The leg of the provider's journey, which the map finds among its legs.
+            onFocusWalk = { leg -> onFocusWalk(provided.legs.getOrNull(journey.legs.indexOfFirst { it === leg }) ?: leg) },
+            onSwitch = onSwitch,
+            onContinueTo = onContinueTo,
+            onRecentre = onRecentre,
+            warnings = warnings,
+            quiet = quiet,
+            faster = faster?.takeIf { everyMinute || shortcutAlert },
+            onTakeFaster = onTakeFaster,
+            onIgnoreFaster = onIgnoreFaster,
+            notificationsOff = notificationsOff,
+            onNotificationsNoteSeen = onNotificationsNoteSeen,
+            walkDetour = walkDetour,
+            // The live times of the provider's journey, for the quiet start of shortcuts (#75).
+            ownTimes = remember(provided) { io.github.jnbp.nextstop.ui.companion.shortcutOwn(provided) },
+            ownId = provided.id,
+        )
+        return
+    }
     var stage by remember { mutableStateOf(SheetStage.Half) }
     // Where a walk leads: the stop and platform of the ride after it, or the place itself.
-    val platforms = legs.associateWith { platformLabel(it.departurePlatform) }
+    val platforms = legs.associateWith { platformLabel(it.departurePlatform, it.product) }
     // Where OpenStreetMap leads a walk: its stop position ("Pos. 3") or a station entrance.
     val walkTargets = legs.associateWith { walkTargetText(it.walkTarget) }
     // And the exit of the station a walk after a train leaves by ("über Ausgang H").
@@ -2669,6 +3428,9 @@ fun CompanionScreen(
         onFocusWalk(provided.legs.getOrNull(journey.legs.indexOfFirst { it === leg }) ?: leg)
     }
     val upcomingIndex = legs.indexOfFirst { it === upcoming }
+    // A journey to a place (not a station) that ends on foot: its last ride gets the hint for the way out.
+    val lastRide = rides.lastOrNull()
+    val toPlace = remember(journey) { journey.legs.lastOrNull()?.let { it.walking && it.toPlace?.kind != PlaceKind.Stop } == true }
     val nextChange = upcomingChange(journey, now)
     // The timeline moves to where the traveller is whenever the step changes, unless the user is scrolling it.
     val scroll = rememberScrollState()
@@ -2770,6 +3532,12 @@ fun CompanionScreen(
                             AnimatedVisibility(visible = everyMinute, enter = fadeIn() + scaleIn(), exit = fadeOut()) {
                                 EveryMinuteBadge()
                             }
+                            // How old the live times of the trip are; a tap asks for them at once.
+                            FreshnessChip(
+                                source = LiveSource.Trip,
+                                onRefresh = { LiveFreshness.ask(LiveSource.Trip) },
+                                minHeight = 26.dp,
+                            )
                         }
                         Text(
                             text = stringResource(R.string.trip_to, legs.last().to.plainStopName()),
@@ -2791,7 +3559,7 @@ fun CompanionScreen(
                     )
                 }
             }
-            // Missed it, Change and End: at the foot, or held sideways right below the blue box.
+            // Missed it, Change, share, the wake-up alarm and ⋯ (End): at the foot, or held sideways right below the blue box.
             val tripButtons: @Composable () -> Unit = {
                 Row(
                     modifier = Modifier
@@ -2801,7 +3569,7 @@ fun CompanionScreen(
                 ) {
                     if (boarding != null) {
                         SecondaryButton(
-                            text = stringResource(R.string.missed_train),
+                            text = stringResource(missedRideRes(rideKindOf((riding ?: upcoming)?.product))),
                             onClick = { onMissed(boarding) },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(28.dp, 10.dp, 10.dp, 28.dp),
@@ -2826,12 +3594,10 @@ fun CompanionScreen(
                         onClick = { shareOpen = true },
                         size = buttonHeight,
                     )
-                    SecondaryButton(
-                        text = stringResource(R.string.trip_end),
-                        onClick = onEnd,
-                        shape = RoundedCornerShape(10.dp, 28.dp, 28.dp, 10.dp),
-                        minHeight = buttonHeight,
-                    )
+                    // The wake-up alarm in plain sight, no longer inside "Change".
+                    WakeAlarmTile(journey = journey, now = now, size = buttonHeight)
+                    // "End" is rare and final: behind the ⋯ at the end of the row.
+                    CompanionOverflowTile(onEnd = onEnd, height = buttonHeight)
                 }
             }
             Spacer(modifier = Modifier.height(BANNER_GAP))
@@ -2846,6 +3612,7 @@ fun CompanionScreen(
                     // The long press is a shortcut to the sheet of the "Change" button below; no ⋮ of its own.
                     actions = tripActions,
                     menuButton = false,
+                    onMissed = onMissed,
                 )
             }
             // At the destination the banner gives way to the card of the arrival, which holds the buttons.
@@ -2879,6 +3646,8 @@ fun CompanionScreen(
                     modifier = Modifier.matchParentSize(),
                 )
             }
+            // Position, a change of platform and the wake-up alarm of the trip, below the banner.
+            if (!arrived) CompanionExtrasStrip(journey = journey, now = now, modifier = Modifier.padding(top = 6.dp))
             if (!arrived && short) tripButtons()
             // A faster way found on the way: offered until it is taken or put aside, never taken by itself.
             if (faster != null && (everyMinute || shortcutAlert)) {
@@ -2887,6 +3656,25 @@ fun CompanionScreen(
                     onTake = { onTakeFaster(faster) },
                     onIgnore = { onIgnoreFaster(faster) },
                     modifier = Modifier.padding(top = 8.dp),
+                    onPreview = { ShortcutPreview.open(faster.key) },
+                )
+            }
+            // The preview of the offered way (#120), as in the new views, from the card or the notification.
+            val previewKey by ShortcutPreview.requested.collectAsState()
+            val previewed = faster?.takeIf { it.key == previewKey && (everyMinute || shortcutAlert) }
+            if (previewed != null) {
+                ShortcutPreviewDialog(
+                    offer = previewed,
+                    now = now,
+                    onTake = {
+                        ShortcutPreview.close()
+                        onTakeFaster(previewed)
+                    },
+                    onIgnore = {
+                        ShortcutPreview.close()
+                        onIgnoreFaster(previewed)
+                    },
+                    onClose = { ShortcutPreview.close() },
                 )
             }
             if (notificationsOff) {
@@ -2945,10 +3733,28 @@ fun CompanionScreen(
                                     .background(AppColors.Card)
                                     .padding(start = 2.dp, end = 10.dp, top = 2.dp, bottom = 8.dp),
                             ) {
+                                // "Nur nächste ausgeklappt" (#202): the next walk or change not yet over with a small map.
+                                // Worked out again once a minute at most (and when the OSM data comes), not every frame.
+                                val nextWalk = remember(journey, upcomingIndex, OsmStations.loaded, now.withSecond(0).withNano(0)) {
+                                nextWalkKey(entries, key = { it.key }, over = { entry ->
+                                    when (entry) {
+                                        is TimelineEntry.Walk -> !now.isBefore(entry.leg.arrival)
+                                        is TimelineEntry.Change -> !now.isBefore(entry.change.next.departure)
+                                        is TimelineEntry.Ride -> !now.isBefore(entry.leg.departure)
+                                    }
+                                }, hasMap = { entry ->
+                                    when (entry) {
+                                        is TimelineEntry.Walk -> hasWalkMap(entry.leg)
+                                        is TimelineEntry.Change -> changeHasMiniMap(entry.change.arriving, entry.change.next, entry.change.walk)
+                                        is TimelineEntry.Ride -> entry.index == 0 && hasBoardingPositionMap(entry.leg)
+                                    }
+                                })
+                                }
                                 entries.forEachIndexed { index, entry ->
                                     key(entry.key) {
                                         val placed = appearModifier(index)
                                             .onPlaced { entryTops[entry.key] = it.positionInParent().y.roundToInt() }
+                                        CompositionLocalProvider(LocalWalkMapNext provides (entry.key == nextWalk)) {
                                         when (entry) {
                                             is TimelineEntry.Walk -> WalkEntry(
                                                 leg = entry.leg,
@@ -2957,6 +3763,8 @@ fun CompanionScreen(
                                                 onFocusWalk = showWalk,
                                                 modifier = placed,
                                                 detour = walkDetour?.takeIf { it.legIndex == entry.index },
+                                                endsTrip = entry.leg === legs.last(),
+                                                toDestination = entry.leg === legs.last() && entry.leg.walking,
                                             )
 
                                             is TimelineEntry.Ride -> {
@@ -2985,7 +3793,18 @@ fun CompanionScreen(
                                                 }
                                                 RideSection(
                                                     boardingHint = if (following == null) {
-                                                        null
+                                                        // The last ride to a place: where to board for the shortest way out.
+                                                        if (phase == RidePhase.Waiting && leg === lastRide && toPlace) {
+                                                            {
+                                                                DestinationHint(
+                                                                    journey = journey,
+                                                                    ride = leg,
+                                                                    modifier = Modifier.padding(start = RAIL_WIDTH, top = 4.dp, bottom = 4.dp),
+                                                                )
+                                                            }
+                                                        } else {
+                                                            null
+                                                        }
                                                     } else {
                                                         {
                                                             CarriageHint(
@@ -3051,6 +3870,7 @@ fun CompanionScreen(
                                                 modifier = placed,
                                             )
                                         }
+                                        }
                                     }
                                 }
                             }
@@ -3075,7 +3895,7 @@ fun CompanionScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
-                        onSheetTop = if (mapCover == null) null else ({ y -> mapCover[1] = y }),
+                        onSheetTop = if (mapCover == null) null else ({ y -> MapEdges.report(mapCover, 1, y) }),
                         // Fully up, as far below the blue box as the box is below the bar on top.
                         topGap = BANNER_GAP,
                     ) {
@@ -3110,7 +3930,7 @@ fun CompanionScreen(
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ArrivedCard(
+internal fun ArrivedCard(
     journey: Journey,
     endsAt: OffsetDateTime?,
     onEnd: () -> Unit,
@@ -3277,7 +4097,13 @@ internal fun CheckMark(color: Color, modifier: Modifier = Modifier, progress: Fl
  * new arrival, with the buttons to take it or put it aside.
  */
 @Composable
-internal fun FasterCard(offer: FasterOffer, onTake: () -> Unit, onIgnore: () -> Unit, modifier: Modifier = Modifier) {
+internal fun FasterCard(
+    offer: FasterOffer,
+    onTake: () -> Unit,
+    onIgnore: () -> Unit,
+    modifier: Modifier = Modifier,
+    onPreview: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     Column(
         modifier = modifier
@@ -3304,6 +4130,16 @@ internal fun FasterCard(offer: FasterOffer, onTake: () -> Unit, onIgnore: () -> 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
         ) {
+            // A look at the offered way before taking it (#120).
+            if (onPreview != null) {
+                SecondaryButton(
+                    text = stringResource(R.string.r6c_faster_preview),
+                    onClick = onPreview,
+                    shape = RoundedCornerShape(16.dp),
+                    minHeight = 40.dp,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
             SecondaryButton(
                 text = stringResource(R.string.faster_ignore_action),
                 onClick = onIgnore,
@@ -3320,7 +4156,19 @@ internal fun FasterCard(offer: FasterOffer, onTake: () -> Unit, onIgnore: () -> 
     }
 }
 
-/** The time for a change: "12 min to change", from an hour on "1 h 37 min to change" (see durationLabel). */
+/** The time for a change: "12 min to change", from an hour on "1:37 h to change" (see durationLabel). */
 @Composable
 private fun changeLabel(minutes: Long): String =
     if (minutes < 60) stringResource(R.string.change_minutes, minutes) else stringResource(R.string.change_span, durationLabel(minutes))
+
+// The type sizes of the companion's lime minute count (see HeroMinutes).
+private val COMPANION_HERO_SIZES = HeroCountSizes(
+    prefix = 13.sp,
+    prefixGap = 4.dp,
+    number = 30.sp,
+    hoursNumber = 26.sp,
+    unit = 15.sp,
+    prime = 26.sp,
+    hoursPrime = 22.sp,
+    unitGap = 4.dp,
+)

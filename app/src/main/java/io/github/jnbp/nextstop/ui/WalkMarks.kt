@@ -102,6 +102,8 @@ internal fun drawWalkUnder(
  * What lies over the way of a walk with [details]: the entrances, lifts and escalators it passes
  * (a lift out of order, [brokenLifts] within 15 m, in red with a cross), then the [pins] of the
  * stop positions it starts or ends at; each pill on the side away from the other pin.
+ * Where the walk ends at the destination's [badge] (a badge of [badgeRadiusDp]), the signs near
+ * it move out to its free side and a pin on it is left out: the badge marks the end (#181c).
  */
 internal fun drawWalkOver(
     canvas: AndroidCanvas,
@@ -109,12 +111,17 @@ internal fun drawWalkOver(
     brokenLifts: List<Pair<Double, Double>>,
     density: Float,
     pins: List<PositionPin> = emptyList(),
+    badge: Pair<Double, Double>? = null,
+    badgeRadiusDp: Float = 0f,
     pixel: (Pair<Double, Double>) -> Pair<Float, Float>,
 ) {
-    drawPassageSigns(canvas, details, brokenLifts, density, pixel)
+    val badgeAt = badge?.let { pixel(it) }
+    drawPassageSigns(canvas, details, brokenLifts, density, badgeAt, badgeRadiusDp, pixel)
     val at = pins.map { pixel(it.point) }
+    val badgeReach = (badgeReachDp(badgeRadiusDp) + BADGE_DARK_HALO_DP) * density
     pins.forEachIndexed { index, pin ->
         val (x, y) = at[index]
+        if (badgeAt != null && coversBadge(x - badgeAt.first, y - badgeAt.second, badgeReach, BADGE_CLEAR_MARGIN_DP * density)) return@forEachIndexed
         val otherY = at.filterIndexed { i, _ -> i != index }.firstOrNull()?.second
         drawPositionPin(canvas, x, y, pin, density, up = otherY == null || otherY >= y)
     }
@@ -159,18 +166,30 @@ internal fun drawPositionPin(canvas: AndroidCanvas, x: Float, y: Float, pin: Pos
 /**
  * The entrances, lifts and escalators of [details] on the way: an entrance as a small blue
  * sign with its letter (or an arrow), a lift as the lift sign, an escalator as a slanted step
- * line; a lift out of order ([brokenLifts], within 15 m) in red with a cross.
+ * line; a lift out of order ([brokenLifts], within 15 m) in red with a cross. A sign near the
+ * destination's badge at [badgeAt] (pixels, a badge of [badgeRadiusDp]) is moved out to the
+ * side of the badge it lies on (see clearOfBadge), so it never sits on the badge.
  */
 private fun drawPassageSigns(
     canvas: AndroidCanvas,
     details: WalkDetails,
     brokenLifts: List<Pair<Double, Double>>,
     density: Float,
+    badgeAt: Pair<Float, Float>?,
+    badgeRadiusDp: Float,
     pixel: (Pair<Double, Double>) -> Pair<Float, Float>,
 ) {
     if (details.passages.isEmpty()) return
+    val clear = badgeSignClearDp(badgeRadiusDp, SIGN_HALF_DP) * density
+    val moved = FloatArray(2)
     for (passage in details.passages) {
-        val (x, y) = pixel(passage.position)
+        val (px, py) = pixel(passage.position)
+        var x = px
+        var y = py
+        if (badgeAt != null && clearOfBadge(px, py, badgeAt.first, badgeAt.second, clear, moved)) {
+            x = moved[0]
+            y = moved[1]
+        }
         when (passage.kind) {
             PassageKind.Entrance -> drawEntranceSign(canvas, x, y, passage.label, passage.throughBuilding, density)
             PassageKind.Lift, PassageKind.Escalator -> {
@@ -184,6 +203,9 @@ private fun drawPassageSigns(
         }
     }
 }
+
+// Half the height of an entrance or lift sign with its white rim, in dp.
+private const val SIGN_HALF_DP = 9.5f
 
 /** An entrance sign at [x], [y]: blue (grey for an access [throughBuilding]) with its [label] where short, else an arrow. */
 internal fun drawEntranceSign(canvas: AndroidCanvas, x: Float, y: Float, label: String?, throughBuilding: Boolean, density: Float, ground: Int? = null) {

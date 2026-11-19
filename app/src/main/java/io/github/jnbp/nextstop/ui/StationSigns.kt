@@ -1,6 +1,7 @@
 package io.github.jnbp.nextstop.ui
 
 import io.github.jnbp.nextstop.data.PlaceKind
+import io.github.jnbp.nextstop.data.StationIdentity
 import io.github.jnbp.nextstop.data.STREET_STOP_OWN_SIGN_METERS
 import io.github.jnbp.nextstop.data.Stop
 import io.github.jnbp.nextstop.data.dhidOf
@@ -32,8 +33,8 @@ const val STATION_MERGE_METERS = 400.0
 
 /**
  * Stops joined by their name or by OpenStreetMap's complex alone must be closer than this: two
- * stations of one name a few hundred metres apart (S Yorckstr. (Großgörschenstr.) and S+U
- * Yorckstr.) are two places to walk to, and stay two signs. Stops of one stop place (the same
+ * stations of one name a few hundred metres apart (an S-Bahn station and the S+U station of
+ * the same name round the corner) are two places to walk to, and stay two signs. Stops of one stop place (the same
  * provider number) join up to [STATION_MERGE_METERS].
  */
 const val STATION_NAME_MERGE_METERS = 250.0
@@ -118,7 +119,10 @@ fun stationGroups(stops: List<Stop>, complexOf: (Stop) -> String? = { null }): L
                     (!osmOnly || nameWords(stops[a].name).any { it in nameWords(stops[b].name) })
                 val sameComplex = complexes[a] != null && complexes[a] == complexes[b]
                 val near = apart <= STATION_NAME_MERGE_METERS
-                if (samePlace || (near && (sameComplex || baseKeysFit(keys.getValue(a), keys.getValue(b))))) {
+                // One station of two feeds (#96): hard ids (UIC), or place and name in any language (see StationIdentity).
+                val otherFeed = !isOsmOnlyStop(stops[a].id) && !isOsmOnlyStop(stops[b].id) &&
+                    StationIdentity.otherFeedTwins(stops[a], stops[b])
+                if (samePlace || otherFeed || (near && (sameComplex || baseKeysFit(keys.getValue(a), keys.getValue(b))))) {
                     parent[root(a)] = root(b)
                 }
             }
@@ -133,8 +137,11 @@ fun stationGroups(stops: List<Stop>, complexOf: (Stop) -> String? = { null }): L
     for (index in stops.indices) byRoot.getOrPut(root(index)) { ArrayList(1) }.add(index)
     return byRoot.values.map { indices ->
         if (indices.size == 1) return@map StationGroup(stops[indices[0]])
+        // The stop of the feed of the station's country before a foreign feed's ("Francfort sur le Main").
+        val country = StationIdentity.stationCountry(indices.map { stops[it] })
         val main = indices.minWithOrNull(
             compareBy<Int> { if (isOsmOnlyStop(stops[it].id)) 1 else 0 }
+                .thenBy { if (country != null && StationIdentity.facts(stops[it]).feedCountry != country) 1 else 0 }
                 .thenByDescending { stops[it].products.count { product -> product in RAIL_PRODUCTS } }
                 .thenBy { if (BRACKET.containsMatchIn(stops[it].name)) 1 else 0 }
                 .thenBy { it },

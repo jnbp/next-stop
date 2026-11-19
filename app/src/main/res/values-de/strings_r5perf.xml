@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Entwickleroptionen: der Jank-Messer (JankStats je Seite, die Bilder der Karte in Ruhe). -->
+    <string name="r5perf_jank_meter">Jank-Messer</string>
+    <string name="r5perf_jank_meter_text">Zählt die Bilder jeder Seite: Anteil ruckelnder, p95 und längstes Bild; dazu die Bilder, die die Karte in Ruhe zeichnet.</string>
+    <string name="r5perf_jank_frames">Bilder</string>
+    <string name="r5perf_jank_janky">ruckelnd</string>
+    <string name="r5perf_jank_map">Karte in Ruhe</string>
+    <string name="r5perf_jank_map_fps">Karten-fps in Ruhe: %1$s</string>
+    <string name="r5perf_jank_map_none">Noch keine Sekunde Ruhe</string>
+    <string name="r5perf_jank_empty">Noch keine Bilder gezählt</string>
+    <string name="r5perf_jank_reset">Zurücksetzen</string>
+    <string name="r5perf_jank_reset_text">Zählt von vorn.</string>
+    <string name="r5perf_jank_copy">Als Text kopieren</string>
+    <string name="r5perf_jank_copy_text">Die Zahlen in die Zwischenablage; sonst verlässt nichts das Handy.</string>
+    <string name="r5perf_jank_copied">Kopiert</string>
+    <!-- The chip of the companion map's locate button (#104): to the route still to go, and back to the own position. -->
+    <string name="r5perf_companion_show_route">Restliche Strecke</string>
+    <string name="r5perf_companion_my_position">Mein Standort</string>
+</resources>

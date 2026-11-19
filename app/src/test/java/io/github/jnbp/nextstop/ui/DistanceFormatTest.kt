@@ -63,16 +63,29 @@ class DistanceFormatTest {
 
     @Test
     fun durationsReadAsHoursAndMinutes() {
-        // "143 min" is hard to read: 2 h 23 min.
+        // "143 min" is hard to read: 2:23 h.
         assertEquals(2L to 23L, durationSpan(143))
         assertEquals(null to 48L, durationSpan(48))
         assertEquals(null to 0L, durationSpan(0))
         assertEquals(1L to null, durationSpan(60))
         assertEquals(2L to null, durationSpan(120))
         assertEquals(1L to 1L, durationSpan(61))
-        // A long ride: 413 min is "6 h 53 min", more than a day stays hours ("41 h 3 min"), never minutes alone.
+        // A long ride: 413 min is "6:53 h", more than a day stays hours ("41:03 h"), never minutes alone.
         assertEquals(6L to 53L, durationSpan(413))
         assertEquals(41L to 3L, durationSpan(2463))
         assertEquals(null to 59L, durationSpan(59))
+    }
+
+    @Test
+    fun durationsFromAnHourInTheCompactFormOfTheDb() {
+        // #106: "5:20 h", minutes always two digits, whole hours with ":00"; below an hour "45′".
+        assertEquals("5:20", durationClock(320))
+        assertEquals("1:05", durationClock(65))
+        assertEquals("2:00", durationClock(120))
+        assertEquals("1:00", durationClock(60))
+        assertEquals("41:03", durationClock(2463))
+        assertEquals(null, durationClock(59))
+        assertEquals(null, durationClock(0))
+        assertEquals(null, durationClock(-4))
     }
 }

@@ -66,4 +66,18 @@ class DiagLogTest {
         ring.add(0L, 'E', "Crash", "first\nsecond")
         assertTrue(ring.lines()[0].endsWith("E/Crash: first\n    second"))
     }
+
+    @Test
+    fun anEventOfSeveralLinesCountsOnceWhenReadBack() {
+        val format = DiagRing.lineFormat()
+        val one = DiagRing.formatLine(format, 1_000L, 'E', "Crash", "failed\nat a\nat b")
+        val two = DiagRing.formatLine(format, 2_000L, 'I', "Watch", "sent")
+        // As written to the file and read back line by line.
+        val read = (one + "\n" + two).split("\n")
+        assertEquals(4, read.size)
+        val entries = DiagRing.entriesOf(read)
+        assertEquals(listOf(one, two), entries)
+        // A continuation with nothing before it (the file cut at its start) stays on its own; empty lines go.
+        assertEquals(listOf("    at c", two), DiagRing.entriesOf(listOf("    at c", "", two)))
+    }
 }

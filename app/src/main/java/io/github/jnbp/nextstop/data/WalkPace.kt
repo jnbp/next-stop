@@ -28,8 +28,55 @@ const val BRISK_WALK_FACTOR = 0.8
 /** A change shorter than this is a sprint whatever its walk: getting off and on alone takes that. */
 const val MIN_KNAPP_MINUTES = 2L
 
-/** The factor on every walk for "Langsamer unterwegs" ([slower]) or not. */
-fun walkFactor(slower: Boolean): Double = if (slower) SLOWER_WALK_FACTOR else 1.0
+/** The smallest and the largest own factor of "Langsamer unterwegs" (#198), and its step. */
+const val MIN_OWN_WALK_FACTOR = 0.8
+const val MAX_OWN_WALK_FACTOR = 2.0
+const val OWN_WALK_FACTOR_STEP = 0.05
+
+/**
+ * The factor on every walk for "Langsamer unterwegs" ([slower]) or not; an own factor ([own],
+ * "Eigener Faktor", #198) wins, kept within its range (see [ownWalkFactor]).
+ */
+fun walkFactor(slower: Boolean, own: Double? = null): Double =
+    own?.let { ownWalkFactor(it) } ?: if (slower) SLOWER_WALK_FACTOR else 1.0
+
+/**
+ * [value] as an own factor: within [MIN_OWN_WALK_FACTOR]..[MAX_OWN_WALK_FACTOR], on a step of
+ * [OWN_WALK_FACTOR_STEP]; [SLOWER_WALK_FACTOR] for a value that is no number (a broken store).
+ */
+fun ownWalkFactor(value: Double): Double {
+    if (value.isNaN() || value.isInfinite()) return SLOWER_WALK_FACTOR
+    val steps = kotlin.math.round(value.coerceIn(MIN_OWN_WALK_FACTOR, MAX_OWN_WALK_FACTOR) / OWN_WALK_FACTOR_STEP)
+    // Two decimals, so that 1.35 stays 1.35 and compares equal after storing.
+    return kotlin.math.round(steps * OWN_WALK_FACTOR_STEP * 100.0) / 100.0
+}
+
+/** The whole minutes a walk of [minutes] at the usual pace takes at [factor] (the preview "5 min werden zu 7 min"). */
+fun pacedWalkMinutes(minutes: Int, factor: Double): Int =
+    if (minutes <= 0) minutes else ceil(minutes * factor - 1e-9).toInt()
+
+/**
+ * The walking speed to ask the providers for at [factor]: slow from 1.15 on (1.3, the factor of
+ * "Langsamer unterwegs", is slow), fast up to 0.9, else normal. The walks the app times itself
+ * use the exact factor.
+ */
+fun walkingSpeedFor(factor: Double): WalkingSpeed = when {
+    factor >= 1.15 -> WalkingSpeed.Slow
+    factor <= 0.9 -> WalkingSpeed.Fast
+    else -> WalkingSpeed.Normal
+}
+
+/**
+ * The walking speed in m/s for a journey search of Transitous (MOTIS, its pedestrianSpeed) with
+ * an own factor: its usual 1.2 m/s divided by [factor], two decimals; null for the usual pace.
+ */
+fun motisPedestrianSpeed(factor: Double): String? {
+    if (kotlin.math.abs(factor - 1.0) < 1e-6) return null
+    return String.format(java.util.Locale.ROOT, "%.2f", MOTIS_PEDESTRIAN_SPEED / factor)
+}
+
+// The usual walking speed of MOTIS (m/s), from which an own factor counts.
+private const val MOTIS_PEDESTRIAN_SPEED = 1.2
 
 /** The factor of the setting now (see [walkFactor]); set by the interface. */
 @Volatile

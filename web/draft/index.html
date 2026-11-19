@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#1B4FD8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#3D6AF2" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="../site/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../site/apple-touch-icon.png" type="image/png" sizes="180x180">
+  <link rel="apple-touch-icon" href="../site/apple-touch-icon.png">
+  <!-- DRAFT of the redesigned project site (#15). Not deployed (see .github/workflows/pages.yml). -->
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Next Stop – Entwurf</title>
+  <link rel="preload" href="../shared/fonts/google_sans_flex_800.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="../site/site.css">
+  <link rel="stylesheet" href="../draft/draft.css">
+</head>
+<body>
+<span class="draft-flag">Entwurf · nicht veröffentlicht</span>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+<header class="top">
+  <div class="wrap glass">
+    <a class="logo" href="#top"><img src="../site/favicon.svg" alt="" width="34" height="34">Next Stop</a>
+    <nav aria-label="Bereiche"><a href="#funktionen">Funktionen</a><a href="#offen">Open Source</a></nav>
+    <div class="lang" role="group" aria-label="Sprache"><span aria-current="page">DE</span><a href="en/" hreflang="en" lang="en">EN</a></div>
+  </div>
+</header>
+<main id="main">
+  <div class="hero slim" id="top">
+    <div class="wrap">
+      <div>
+        <span class="eyebrow glass"><i class="dot" aria-hidden="true"></i>Open Source · Android &amp; Wear OS</span>
+        <h1>Fährt <span class="mark">mit</span> dir.</h1>
+        <p class="lead">Schnellere Wege, Echtzeit für ganz Deutschland – und eine Live-Fahrt bis zum Aussteigen.</p>
+        <div class="cta">
+          <a class="btn primary" href="https://github.com/jnbp/next-stop"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Auf GitHub</a>
+          <!-- Google Play: becomes a link (official badge under site/img/) once the closed test or the release is open. -->
+          <span class="btn store" aria-disabled="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>Bald bei Google Play</span>
+          <a class="btn ghost" href="../live/#demo">Live-Demo<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M12 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+        </div>
+      </div>
+      <div class="trip glass" role="img" aria-label="Beispielverbindung: Hauptbahnhof → Hermannplatz, 12:04 – 12:27 · 23 Min. · 1 Umstieg">
+        <h2>Hauptbahnhof → Hermannplatz</h2>
+        <p class="sub">12:04 – 12:27 · 23 Min. · 1 Umstieg</p>
+        <div class="leg c-s5">
+          <div class="rail"></div>
+          <div>
+            <div class="stop"><b>12:04</b><span>Hauptbahnhof</span></div>
+            <div class="mid"><span class="badge c-s5">S5</span>Richtung Strausberg Nord</div>
+            <div class="stop end"><b>12:11</b><span>Alexanderplatz</span></div>
+          </div>
+        </div>
+        <div class="change"><span class="tag">Normal · 3 Min. übrig</span>3 Min. Fußweg</div>
+        <div class="leg c-u8">
+          <div class="rail"></div>
+          <div>
+            <div class="stop"><b>12:18</b><span>Alexanderplatz</span></div>
+            <div class="mid"><span class="badge c-u8">U8</span>Richtung Hermannstr.</div>
+            <div class="stop end"><b>12:27</b><span>Hermannplatz</span></div>
+          </div>
+        </div>
+        <div class="board"><span class="cars"><i></i><i></i><i></i><i></i><i></i></span>Vorne einsteigen</div>
+        <div class="watch">
+          <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="45" fill="none" stroke="#1E2436" stroke-width="5"/><path d="M50 5A45 45 0 0 1 92.8 36.1" fill="none" stroke="#2FA866" stroke-width="5" stroke-linecap="round"/></svg>
+          <div><small>12:14</small><strong>4 Min.</strong><br><span class="badge c-u8">U8</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section id="funktionen">
+    <div class="wrap">
+      <span class="kicker"><span class="badge c-s1">S1</span>Funktionen</span>
+      <h2 class="title">Das kann nur Next Stop</h2>
+      <div class="keys">
+        <article class="key glass"><div class="art"><svg viewBox="0 0 320 200" aria-hidden="true" focusable="false"><rect x="40" y="26" width="44" height="30" rx="8" class="f-u8"/><rect x="48" y="62" width="28" height="10" rx="5" class="lvl-relaxed"/><rect x="40" y="78" width="44" height="50" rx="8" class="f-u7"/><rect x="106" y="30" width="44" height="44" rx="8" class="f-s5"/><rect x="114" y="80" width="28" height="10" rx="5" class="line-f"/><rect x="106" y="96" width="44" height="36" rx="8" class="f-u7"/><rect x="172" y="34" width="44" height="36" rx="8" class="f-u2"/><rect x="180" y="76" width="28" height="10" rx="5" class="lvl-tight"/><rect x="172" y="92" width="44" height="48" rx="8" class="f-u7"/><rect x="238" y="38" width="44" height="26" rx="8" class="f-s1"/><rect x="246" y="70" width="28" height="10" rx="5" class="lvl-sprint"/><rect x="238" y="86" width="44" height="30" rx="8" class="f-u7"/><rect x="232" y="18" width="60" height="150" rx="14" fill="none" class="lime-s" stroke-width="5"/><rect x="222" y="160" width="80" height="26" rx="13" class="lime-f"/><text x="262" y="178" text-anchor="middle" font-size="14" font-weight="800" fill="#0E1A3A">Sprint</text></svg></div><h3>Verbindungen, die andere verschweigen</h3><p>Umstiege nach deinem Gehtempo – bis zum Sprint.</p></article>
+        <article class="key glass"><div class="art"><svg viewBox="0 0 320 200" aria-hidden="true" focusable="false"><g fill="none" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 150C80 150 110 60 170 60S260 110 300 40" class="s-u7"/><path d="M40 30L120 110H300" class="s-s5"/><path d="M160 190V120L220 60V10" class="s-u1"/></g><g class="card-f ink-s" stroke-width="4"><circle cx="120" cy="110" r="9"/><circle cx="220" cy="110" r="9"/><circle cx="160" cy="120" r="9"/></g><circle cx="220" cy="60" r="14" class="blue-f pulse"/><circle cx="220" cy="60" r="9" class="blue-f"/><rect x="232" y="146" width="74" height="28" rx="14" class="ink"/><circle cx="250" cy="160" r="5" fill="#2fbf71"/><text x="276" y="165" text-anchor="middle" font-size="13" font-weight="800" class="card-f">LIVE</text></svg></div><h3>Ganz Deutschland, live</h3><p>Echtzeit für Bus, Bahn und Fernverkehr.</p></article>
+        <article class="key glass"><div class="art"><svg viewBox="0 0 320 200" aria-hidden="true" focusable="false"><path d="M0 150H320M110 0V200M250 0V200" class="line-s" stroke-width="10" opacity=".5"/><rect x="30" y="94" width="270" height="32" rx="10" class="muted-f" opacity=".35"/><path d="M20 80H304" class="ink-s" stroke-width="3" opacity=".35"/><rect x="60" y="68" width="40" height="24" rx="6" class="line-f"/><rect x="106" y="68" width="40" height="24" rx="6" class="line-f"/><rect x="152" y="68" width="40" height="24" rx="6" class="line-f"/><rect x="198" y="68" width="40" height="24" rx="6" class="line-f"/><rect x="244" y="68" width="40" height="24" rx="6" class="lime-f"/><path d="M290 50V108" class="ink-s" stroke-width="4" stroke-linecap="round"/><rect x="222" y="18" width="92" height="28" rx="14" class="ink"/><text x="268" y="37" text-anchor="middle" font-size="13" font-weight="800" class="card-f">Hält hier</text><path d="M44 176C110 176 150 150 196 140S256 124 264 110" fill="none" class="blue-s" stroke-width="5" stroke-linecap="round" stroke-dasharray="2 10"/><circle cx="44" cy="176" r="12" class="blue-f pulse"/><circle cx="44" cy="176" r="7" class="blue-f"/><circle cx="264" cy="106" r="8" class="card-f ink-s" stroke-width="3"/><rect x="20" y="18" width="150" height="30" rx="15" class="card-f"/><text x="95" y="38" text-anchor="middle" font-size="14" font-weight="800" class="ink">Hier einsteigen</text></svg></div><h3>Richtig einsteigen</h3><p>Halteposition auf der Karte: wo der Zug hält, wo du einsteigst – und welcher Ausgang.</p></article>
+        <article class="key glass"><div class="art"><svg viewBox="0 0 320 200" aria-hidden="true" focusable="false"><path d="M40 120H280" class="s-s5" stroke-width="10" stroke-linecap="round"/><circle cx="40" cy="120" r="8" class="card-f ink-s" stroke-width="4"/><circle cx="110" cy="120" r="8" class="card-f ink-s" stroke-width="4"/><circle cx="180" cy="120" r="8" class="card-f ink-s" stroke-width="4"/><circle cx="250" cy="120" r="8" class="card-f ink-s" stroke-width="4"/><circle cx="280" cy="120" r="12" class="lime-f"/><g class="glide"><circle cx="70" cy="120" r="16" class="blue-f pulse"/><circle cx="70" cy="120" r="10" class="blue-f"/><circle cx="70" cy="120" r="4" class="card-f"/></g><g transform="translate(252 28)"><path d="M14 30h28l-4-6V14a10 10 0 0 0-20 0v10z" class="ink"/><circle cx="28" cy="34" r="4" class="ink"/></g><rect x="40" y="152" width="180" height="32" rx="16" class="ink"/><text x="130" y="173" text-anchor="middle" font-size="14" font-weight="800" class="card-f">Aussteigen um 12:27</text></svg></div><h3>Fährt mit bis zum Ziel</h3><p>Nächster Schritt, Countdown und Aufwach-Alarm – nach deinem Standort.</p></article>
+        <article class="key glass"><div class="art"><svg viewBox="0 0 320 200" aria-hidden="true" focusable="false"><rect x="40" y="24" width="96" height="160" rx="18" class="ink"/><rect x="48" y="40" width="80" height="128" rx="10" class="card-f"/><path d="M60 140C80 120 90 90 116 70" fill="none" class="s-u8" stroke-width="6" stroke-linecap="round"/><circle cx="116" cy="70" r="7" class="blue-f"/><path d="M150 104h30" class="blue-s" stroke-width="6" stroke-linecap="round" stroke-dasharray="2 12"/><rect x="190" y="48" width="110" height="110" rx="16" class="card-f line-s" stroke-width="3"/><rect x="190" y="48" width="110" height="20" rx="10" class="line-f"/><path d="M204 136C222 120 236 104 286 86" fill="none" class="s-u8" stroke-width="6" stroke-linecap="round"/><circle cx="250" cy="102" r="12" class="blue-f pulse"/><circle cx="250" cy="102" r="7" class="blue-f"/></svg></div><h3>Fahrt teilen</h3><p>Ein Link, und andere sehen live, wann du ankommst.</p></article>
+        <article class="key glass"><div class="art"><svg viewBox="0 0 320 200" aria-hidden="true" focusable="false"><rect x="132" y="6" width="56" height="40" rx="10" class="muted-f" opacity=".4"/><rect x="132" y="154" width="56" height="40" rx="10" class="muted-f" opacity=".4"/><circle cx="160" cy="100" r="72" fill="#05070D" stroke="#262D40" stroke-width="10"/><circle cx="160" cy="100" r="58" fill="none" stroke="#1E2436" stroke-width="6"/><path d="M160 42A58 58 0 0 1 215 82" fill="none" stroke="#2FA866" stroke-width="6" stroke-linecap="round"/><text x="160" y="82" text-anchor="middle" font-size="12" fill="#9EA9C8" font-weight="600">12:14</text><text x="160" y="112" text-anchor="middle" font-size="30" font-weight="800" fill="#fff">4 Min.</text><rect x="142" y="122" width="36" height="18" rx="5" class="f-u8"/><text x="160" y="136" text-anchor="middle" font-size="12" font-weight="800" fill="#fff">U8</text></svg></div><h3>Am Handgelenk</h3><p>Wear-OS-App mit Kacheln, Komplikationen und Vibration.</p></article>
+      </div>
+      <ul class="also"><li>Sonnenseite</li><li>Fahrt planen</li><li>Widgets</li><li>Meine Wege</li><li>Störungen</li></ul>
+    </div>
+  </section>
+
+  <section id="offen" class="tight">
+    <div class="wrap">
+      <div class="promise"><div><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M14 13l-7 7 7 7M26 13l7 7-7 7" fill="none" stroke="#C8F16B" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Open Source</div><div><svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="14" fill="none" stroke="#C8F16B" stroke-width="3.4"/><path d="M14 20h12" stroke="#C8F16B" stroke-width="3.4" stroke-linecap="round"/></svg>Kostenlos</div><div><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 6l12 5v8c0 8-5 13-12 15-7-2-12-7-12-15v-8z" fill="none" stroke="#C8F16B" stroke-width="3.4" stroke-linejoin="round"/><path d="M14 20l4 4 8-8" fill="none" stroke="#C8F16B" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Kein Tracking</div><a class="btn lime" href="https://github.com/jnbp/next-stop"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Code ansehen</a></div>
+    </div>
+  </section>
+</main>
+<footer>
+  <div class="wrap">
+    <div>
+      <p><strong>Next Stop – ein privates Open-Source-Projekt. Kein Angebot der BVG, des VBB oder der Deutschen Bahn.</strong></p>
+      <p>Diese Seite setzt keine Cookies, lädt nichts von Dritten und nutzt kein Tracking. Sie liegt bei GitHub Pages; GitHub als Hoster protokolliert Anfragen (z. B. IP-Adresse, Zeit) technisch bedingt.</p>
+      <p>© 2026 Next Stop · GPL-3.0 · Kartendaten © OpenStreetMap</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="https://github.com/jnbp/next-stop">Quellcode</a>
+      <a href="https://bapo.me/impressum" hreflang="de">Impressum</a>
+      <a href="../datenschutz/">Datenschutz</a>
+      <a href="#top">Nach oben</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

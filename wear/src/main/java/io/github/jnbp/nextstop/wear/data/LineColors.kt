@@ -5,9 +5,10 @@ package io.github.jnbp.nextstop.wear.data
  * same as in the phone app (ui/Components.kt lineColor).
  */
 private val LINE_COLORS: Map<String, Long> = mapOf(
-    "U1" to 0xFF7DAD4C, "U2" to 0xFFDA421E, "U3" to 0xFF16683D,
-    "U4" to 0xFFF0D722, "U5" to 0xFF7E5330, "U6" to 0xFF8C6DAB,
-    "U7" to 0xFF528DBA, "U8" to 0xFF224F86, "U9" to 0xFFF3791D,
+    // U-Bahn: the colours of the BVG's current line signs.
+    "U1" to 0xFF419328, "U2" to 0xFFED3C12, "U3" to 0xFF016144,
+    "U4" to 0xFFFFC101, "U5" to 0xFF603B2C, "U6" to 0xFF504F87,
+    "U7" to 0xFF0279BD, "U8" to 0xFF013F75, "U9" to 0xFFF96815,
     "S1" to 0xFFDA6BA2, "S2" to 0xFF007734, "S25" to 0xFF007734,
     "S26" to 0xFF007734, "S3" to 0xFF0066AD, "S41" to 0xFFAD5937,
     "S42" to 0xFFCB6418, "S45" to 0xFFCD9C53, "S46" to 0xFFCD9C53,
@@ -49,15 +50,33 @@ fun lineArgb(line: String?, product: String, color: Long? = null): Long {
     }
 }
 
-/** Dark ink on light line colours (U4, FLX), white on the others. */
+// The colours of the U-Bahn lines of Berlin, whose ink is that of the BVG's signs (see onLineArgb).
+private val SUBWAY_SIGN_COLORS: Set<Long> = LINE_COLORS.filterKeys { it.startsWith("U") }.values.toSet()
+
+/**
+ * On the colour of a U-Bahn line of Berlin the ink of the BVG's sign: white, black on the U4
+ * (the phone's LineColors.berlinSubwayText). Elsewhere dark ink on light line colours (FLX),
+ * white on the others: the phone's rule (onLineColor
+ * there, Compose's luminance above 0.45), so a badge has the same ink on both. Compose's
+ * luminance is the relative luminance of the linear sRGB channels; with the plain channels and
+ * 0.55 the watch put dark ink on the green of the S8 and the ochre of the S47, white on the phone.
+ */
 fun onLineArgb(argb: Long): Long {
-    val r = (argb shr 16 and 0xFF) / 255.0
-    val g = (argb shr 8 and 0xFF) / 255.0
-    val b = (argb and 0xFF) / 255.0
-    val luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    return if (luminance > 0.55) 0xFF16130A else 0xFFFFFFFF
+    val opaque = argb or 0xFF000000
+    if (opaque == LINE_COLORS["U4"]) return 0xFF000000
+    if (opaque in SUBWAY_SIGN_COLORS) return 0xFFFFFFFF
+    fun linear(channel: Long): Double {
+        val c = (channel and 0xFF) / 255.0
+        return if (c <= 0.04045) c / 12.92 else Math.pow((c + 0.055) / 1.055, 2.4)
+    }
+    val luminance = 0.2126 * linear(argb shr 16) + 0.7152 * linear(argb shr 8) + 0.0722 * linear(argb)
+    return if (luminance > 0.45) 0xFF16130A else 0xFFFFFFFF
 }
 
-/** Whole minutes from [now] until [time], never below zero. */
+/**
+ * Whole minutes from [now] until [time], never below zero: the full minutes left, as the phone
+ * counts them (minutesBetween there), so watch and phone show the same number at the same moment
+ * and "now" in the last minute.
+ */
 fun minutesUntil(time: Long, now: Long = System.currentTimeMillis()): Long =
-    ((time - now + 30_000) / 60_000).coerceAtLeast(0)
+    ((time - now) / 60_000).coerceAtLeast(0)

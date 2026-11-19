@@ -12,6 +12,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -80,6 +82,10 @@ fun SavedPlacesList(
     onDisruptions: (SavedPlace) -> Unit = {},
     /** The radius the notices around the places were found in (see CardDisruptionLine). */
     disruptionRadius: Int? = null,
+    /** A bell on each place ("tell me about problems" near it, see placeWatchKey); [onBell] after a switch. */
+    bell: Boolean = false,
+    onBell: () -> Unit = {},
+    onWatchSettings: (() -> Unit)? = null,
 ) {
     var openId by remember { mutableStateOf<String?>(null) }
     // While a place is dragged: the list in its new order, which place it is, and how far it
@@ -91,6 +97,8 @@ fun SavedPlacesList(
     val latestPlaces by rememberUpdatedState(places)
     val latestChange by rememberUpdatedState(onChange)
     val gap = with(LocalDensity.current) { 3.dp.toPx() }
+    // A firm buzz as a place is picked up, a click for each new slot (see Haptics).
+    val ticks = rememberTicks()
     val shown = order ?: places
     GlassSurface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
         if (places.isEmpty()) {
@@ -112,6 +120,9 @@ fun SavedPlacesList(
                         disruptions = disruptionsOf(saved),
                         onDisruptions = { onDisruptions(saved) },
                         disruptionRadius = disruptionRadius,
+                        bellKey = if (bell) placeWatchKey(saved.place) else null,
+                        onBell = onBell,
+                        onWatchSettings = onWatchSettings,
                         onChange = { changed -> onChange(places.map { if (it.id == changed.id) changed else it }) },
                         onRemove = {
                             openId = null
@@ -133,6 +144,7 @@ fun SavedPlacesList(
                                     order = latestPlaces
                                     draggedId = saved.id
                                     dragOffset = 0f
+                                    ticks.pickUp()
                                 },
                                 onDragEnd = { finish(keep = true) },
                                 onDragCancel = { finish(keep = false) },
@@ -150,12 +162,14 @@ fun SavedPlacesList(
                                         if (dragOffset > step / 2f) {
                                             order = list.toMutableList().apply { add(at + 1, removeAt(at)) }
                                             dragOffset -= step
+                                            ticks.tick()
                                         }
                                     } else if (dragOffset < 0f && above != null) {
                                         val step = (heights[above.id] ?: 0) + gap
                                         if (-dragOffset > step / 2f) {
                                             order = list.toMutableList().apply { add(at - 1, removeAt(at)) }
                                             dragOffset += step
+                                            ticks.tick()
                                         }
                                     }
                                 },
@@ -193,6 +207,9 @@ private fun SavedPlaceRow(
     disruptions: List<Disruption> = emptyList(),
     onDisruptions: () -> Unit = {},
     disruptionRadius: Int? = null,
+    bellKey: String? = null,
+    onBell: () -> Unit = {},
+    onWatchSettings: (() -> Unit)? = null,
 ) {
     val placeName = saved.place.name.shortStopName()
     Column(
@@ -248,6 +265,7 @@ private fun SavedPlaceRow(
                     CardDisruptionLine(items = disruptions, onClick = onDisruptions, radiusMeters = disruptionRadius)
                 }
             }
+            if (bellKey != null) DisruptionBell(watchKey = bellKey, onChange = onBell, onSettings = onWatchSettings, size = 40.dp)
             val editLabel = stringResource(R.string.saved_place_edit)
             Box(
                 modifier = Modifier
@@ -348,31 +366,47 @@ internal fun NameField(value: String, placeholder: String, onValue: (String) -> 
     )
 }
 
-/** All icons of places in a row that can be pushed sideways; the picked one is filled. */
+/**
+ * All icons of places as a grid that wraps (no hidden icons off to the side), the name of the
+ * picked one above it; the picked one is filled. Shared by the saved and the favourite places.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun IconPicker(selected: PlaceIcon, onSelect: (PlaceIcon) -> Unit) {
-    Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        PlaceIcon.entries.forEach { icon ->
-            val picked = icon == selected
-            val label = placeIconLabel(icon)
-            val ground by animateColorAsState(
-                if (picked) AppColors.Blue else AppColors.Chip,
-                spring(stiffness = Spring.StiffnessMediumLow),
-                label = "savedIconGround",
+internal fun IconPicker(selected: PlaceIcon, onSelect: (PlaceIcon) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FadeSwap(target = placeIconLabel(selected)) { label ->
+            Text(
+                text = label,
+                color = AppColors.Muted,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.sp,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 4.dp),
             )
-            Box(
-                modifier = Modifier
-                    .semantics { contentDescription = label }
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(ground)
-                    .clickable { onSelect(icon) }
-                    .size(44.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                GlyphIcon(placeGlyph(icon), color = if (picked) AppColors.OnBlue else AppColors.Ink)
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            PlaceIcon.entries.forEach { icon ->
+                val picked = icon == selected
+                val label = placeIconLabel(icon)
+                val ground by animateColorAsState(
+                    if (picked) AppColors.Blue else AppColors.Chip,
+                    spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "savedIconGround",
+                )
+                Box(
+                    modifier = Modifier
+                        .semantics { contentDescription = label }
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ground)
+                        .clickable { onSelect(icon) }
+                        .size(44.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    GlyphIcon(placeGlyph(icon), color = if (picked) AppColors.OnBlue else AppColors.Ink)
+                }
             }
         }
     }

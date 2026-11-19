@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -33,8 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
 import io.github.jnbp.nextstop.R
-import io.github.jnbp.nextstop.data.Accessibility
-import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.data.Journey
 import io.github.jnbp.nextstop.data.LiftKeys
 import io.github.jnbp.nextstop.data.LiftOutage
@@ -51,7 +50,8 @@ import io.github.jnbp.nextstop.ui.theme.AppFont
 @Composable
 fun JourneyLiftWarning(journey: Journey, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val stepFree = remember { AppPrefs(context).searchOptions.accessibility != Accessibility.None }
+    // Follows the setting live (see rememberStepFree).
+    val stepFree = rememberStepFree()
     val sources = remember { LiftKeys(context).sources() }
     if (!stepFree || sources.isEmpty()) return
     var found by remember(journey.id) { mutableStateOf<List<Pair<String, List<LiftOutage>>>>(emptyList()) }
@@ -154,7 +154,8 @@ fun KeyField(value: String, onChange: (String) -> Unit, placeholder: String) {
         textStyle = TextStyle(color = AppColors.Ink, fontSize = 14.sp, fontFamily = AppFont),
         cursorBrush = SolidColor(AppColors.Blue),
         modifier = Modifier
-            .width(260.dp)
+            .widthIn(max = 260.dp)
+            .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(AppColors.Chip)
             .padding(horizontal = 14.dp, vertical = 12.dp),

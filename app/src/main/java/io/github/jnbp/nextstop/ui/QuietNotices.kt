@@ -1,5 +1,12 @@
 package io.github.jnbp.nextstop.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,15 +25,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.jnbp.nextstop.R
-import io.github.jnbp.nextstop.data.Accessibility
-import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.data.Warning
+import io.github.jnbp.nextstop.data.stepFreeSetting
 import io.github.jnbp.nextstop.ui.theme.AppColors
 
 /**
@@ -33,10 +39,14 @@ import io.github.jnbp.nextstop.ui.theme.AppColors
  * "any". Then notices about lifts and escalators raise the warning sign (see warningAlerts).
  */
 @Composable
-fun rememberStepFree(): Boolean {
-    val context = LocalContext.current
-    return remember(context) { AppPrefs(context).searchOptions.accessibility != Accessibility.None }
-}
+fun rememberStepFree(): Boolean = LocalStepFree.current
+
+/**
+ * Whether the traveller travels step-free, as the setting is right now: AppRoot provides it
+ * from [stepFreeSetting], so every reader follows a change at once. Only the readers compose
+ * anew (the setting rarely changes); without a provider the setting as it is when read.
+ */
+internal val LocalStepFree = compositionLocalOf { stepFreeSetting.value }
 
 /**
  * The notices of a journey that do not raise the warning sign (see quietWarnings): about lifts,
@@ -70,7 +80,14 @@ fun QuietNotices(warnings: List<Warning>, modifier: Modifier = Modifier) {
             )
             Chevron(open = open)
         }
-        if (open) {
+        // Unfolds and folds softly (#209); at once with animations off.
+        val animate = rememberAnimationsOn()
+        AnimatedVisibility(
+            visible = open,
+            enter = if (animate) expandVertically(Motion.settle()) + fadeIn(Motion.fadeIn()) else EnterTransition.None,
+            exit = if (animate) shrinkVertically(Motion.settle()) + fadeOut(Motion.fadeOut()) else ExitTransition.None,
+        ) {
+          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             warnings.forEach { warning ->
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
@@ -83,6 +100,7 @@ fun QuietNotices(warnings: List<Warning>, modifier: Modifier = Modifier) {
                     }
                 }
             }
+          }
         }
     }
 }

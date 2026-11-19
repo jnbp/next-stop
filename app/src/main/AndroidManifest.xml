@@ -9,6 +9,16 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- The trip companion follows the position of the device while it runs ("Standort im
+         Begleiter nutzen"); no position in the background otherwise. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- The wake-up alarm of long rides rings over the lock screen like an alarm clock. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Exact times for the wake-up alarm and the start of a planned trip, where the user allows
+         them (denied by default from Android 14 on; without it the alarms may come a little late). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Planned trips set their alarms again after a restart of the device. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Lets the notification of a trip be shown as a Live Update from Android 16 on. -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
@@ -106,12 +116,13 @@
                 <data android:pathPrefix="/maps" />
             </intent-filter>
         </activity>
-        <!-- Keeps a followed trip current with the screen off and shows its next step. It uses
-             no location, so none of the other types fits: the trip companion is its special use. -->
+        <!-- Keeps a followed trip current with the screen off and shows its next step: its special
+             use. With "Standort im Begleiter nutzen" it also follows the position of the device
+             while it runs (type location, only then), to tell the next stop and when to get off. -->
         <service
             android:name=".ui.TripService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|location">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Live trip companion: refreshes the public transport journey the user started and shows its next step in an ongoing notification until the trip ends." />
@@ -120,6 +131,39 @@
         <receiver
             android:name=".ui.FasterReceiver"
             android:exported="false" />
+        <!-- The wake-up alarm of long rides: its next ring and "Ich bin wach" (see ui/WakeAlarm.kt). -->
+        <receiver
+            android:name=".ui.WakeAlarmReceiver"
+            android:exported="false" />
+        <activity
+            android:name=".ui.WakeAlarmActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.NextStop"
+            android:turnScreenOn="true" />
+        <!-- Planned trips: their alarms, their buttons, and setting the alarms again after a
+             restart of the device or an update of the app (see ui/PlannedTripAlarms.kt). -->
+        <receiver
+            android:name=".ui.PlannedTripReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <!-- Exact alarms allowed or taken back: the alarm is set again the other way. -->
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <!-- A followed trip goes on after an update of the app (see ui/TripResume.kt). -->
+        <receiver
+            android:name=".ui.TripResumeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <!-- The alarm of the next reminder to get off during a followed trip. -->
         <receiver
             android:name=".ui.AlightReceiver"

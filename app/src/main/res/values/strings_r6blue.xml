@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r6b_change_head">Change · %1$s</string>
+    <string name="r6b_change_head_plain">Change</string>
+    <string name="r6b_walk_minutes">Walk %1$d′</string>
+    <string name="r6b_cycle_minutes">By bike %1$d′</string>
+    <string name="r6b_bus_line">Bus %1$s</string>
+    <string name="r6b_tram_line">Tram %1$s</string>
+    <string name="r6b_choice_group">Connections to choose from</string>
+</resources>

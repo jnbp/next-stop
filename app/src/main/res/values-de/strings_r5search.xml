@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #59: a refresh of the connections failed; the last ones stay. -->
+    <string name="r5search_refresh_failed">Verbindungen konnten nicht aktualisiert werden. Die letzten bleiben sichtbar.</string>
+    <string name="r5search_retry">Nochmal versuchen</string>
+    <string name="r5search_retrying">Versuche es erneut…</string>
+    <!-- #58: picking a contact's address. -->
+    <string name="r5search_contact_resolving">Adresse wird gesucht…</string>
+    <!-- #68: the search finds contacts and appointments too. -->
+    <string name="r5search_from_contacts">Kontakte</string>
+    <string name="r5search_from_appointments">Termine</string>
+</resources>

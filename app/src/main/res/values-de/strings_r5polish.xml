@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Zeiten stehen mit Strich ("5′"); Screenreader lesen sie mit diesen Worten vor. -->
+    <plurals name="r5_minutes_spoken">
+        <item quantity="one">%d Minute</item>
+        <item quantity="other">%d Minuten</item>
+    </plurals>
+    <plurals name="r5_hours_spoken">
+        <item quantity="one">%d Stunde</item>
+        <item quantity="other">%d Stunden</item>
+    </plurals>
+    <!-- Die Erklärung der Sonnenseite, einmal beim ersten Hinweis (#90). -->
+    <string name="r5_sun_intro_text">Auf dieser Seite scheint die Sonne – setz dich auf die andere, wenn du Schatten willst</string>
+    <string name="r5_sun_intro_picture">Ein Zug, auf einer Seite scheint die Sonne; ein Sitzplatz auf der Schattenseite</string>
+    <string name="r5_developer_sun_intro">Sonnenseite-Einführung zeigen</string>
+    <string name="r5_developer_sun_intro_text">Öffnet die Erklärung der Sonnenseite jetzt und beim nächsten Sonnenseiten-Hinweis einer Fahrt wieder.</string>
+</resources>

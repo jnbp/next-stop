@@ -148,6 +148,13 @@ val THIRD_PARTY_LIBRARIES: List<ThirdPartyNotice> = listOf(
         aliases = listOf("androidx-work-runtime"),
     ),
     ThirdPartyNotice(
+        name = "JankStats",
+        maintainer = ANDROIDX,
+        license = APACHE,
+        url = "https://developer.android.com/jetpack/androidx/releases/metrics",
+        aliases = listOf("androidx-metrics-performance"),
+    ),
+    ThirdPartyNotice(
         name = "Wear Compose",
         maintainer = ANDROIDX,
         license = APACHE,

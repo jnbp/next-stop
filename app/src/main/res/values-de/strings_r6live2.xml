@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Runde 6, Feldtest der blauen Karten (r6live2). -->
+    <string name="r6l2_map_open">Karte öffnen</string>
+    <string name="r6l2_map_open_big">Auf großer Karte öffnen</string>
+</resources>

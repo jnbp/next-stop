@@ -2,6 +2,8 @@ package io.github.jnbp.nextstop.ui
 
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -37,7 +39,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.jnbp.nextstop.R
+import androidx.compose.runtime.compositionLocalOf
 import io.github.jnbp.nextstop.data.AppPrefs
+import io.github.jnbp.nextstop.data.PickerMode
+import io.github.jnbp.nextstop.data.walkMapStartsOpen
 import io.github.jnbp.nextstop.data.FootPaths
 import io.github.jnbp.nextstop.data.FootWay
 import io.github.jnbp.nextstop.data.Leg
@@ -60,42 +65,55 @@ import io.github.jnbp.nextstop.ui.theme.AppColors
 
 /*
  * The small maps of walks (see WalkMiniMap) as they stand in the journey detail and in the
- * companion: folded away behind a visible "Show map" button, unless the setting "Always
- * unfold walk mini maps" is on. A folded map takes no picture of the map.
+ * companion: folded away behind a visible "Show map" button, unfolded as the setting
+ * "Minikarte für Fußwege" says (#202). A folded map takes no picture of the map.
  */
 
-/** The setting whether the small maps of walks start unfolded; off by default. */
+/** The setting which small maps of walks start unfolded (#202); the next one by default. */
 object WalkMapSetting {
-    var open by mutableStateOf(false)
+    var mode by mutableStateOf(PickerMode.NextOpen)
         private set
     private var loaded = false
 
     /** The stored setting, read once per process. */
-    fun load(context: Context): Boolean {
+    fun load(context: Context): PickerMode {
         if (!loaded) {
             loaded = true
-            open = AppPrefs(context).walkMapsOpen
+            mode = AppPrefs(context).walkMapsMode
         }
-        return open
+        return mode
     }
 
-    fun update(context: Context, value: Boolean) {
+    fun update(context: Context, value: PickerMode) {
         loaded = true
-        open = value
-        AppPrefs(context).walkMapsOpen = value
+        mode = value
+        AppPrefs(context).walkMapsMode = value
     }
 }
 
-/** Whether a small map starts unfolded, by the setting; each map keeps its own state after that. */
+/**
+ * Whether the walk of the small maps below is the next one (#202): on the detail page the first
+ * walk, in the Live-Fahrt the next walk or change not yet over (see nextWalkKey). Null where the
+ * page does not say: there "Nur nächste ausgeklappt" leaves the map folded.
+ */
+val LocalWalkMapNext = compositionLocalOf<Boolean?> { null }
+
+/**
+ * Whether a small map starts unfolded, by the setting and whether its walk is the next one
+ * ([LocalWalkMapNext]); each map keeps its own state after that, until its walk becomes the next
+ * one or stops being it, or the setting changes.
+ */
 @Composable
 fun rememberWalkMapOpen(): androidx.compose.runtime.MutableState<Boolean> {
     val context = LocalContext.current
-    return remember { mutableStateOf(WalkMapSetting.load(context)) }
+    val start = walkMapStartsOpen(WalkMapSetting.load(context), LocalWalkMapNext.current)
+    return remember(start) { mutableStateOf(start) }
 }
 
 /**
  * The button that unfolds or folds a small map: a map icon, "Show map" or "Hide map" and
- * a chevron that turns; its width follows the label softly.
+ * a chevron that turns; its width follows the label softly ([animateSize]; without, it takes
+ * the width of its label at once, for measuring what it will need, see BlueWalkActions).
  */
 @Composable
 fun MapFoldButton(
@@ -104,6 +122,7 @@ fun MapFoldButton(
     modifier: Modifier = Modifier,
     ground: Color = AppColors.Chip,
     ink: Color = AppColors.Ink,
+    animateSize: Boolean = true,
 ) {
     Row(
         modifier = modifier
@@ -111,7 +130,7 @@ fun MapFoldButton(
             .background(ground)
             .clickable(onClick = onToggle)
             .defaultMinSize(minHeight = 40.dp)
-            .animateContentSize(Motion.settle())
+            .then(if (animateSize) Modifier.animateContentSize(Motion.settle()) else Modifier)
             .padding(start = 10.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -128,13 +147,18 @@ fun MapFoldButton(
     }
 }
 
-/** [content] unfolded while [open], folding in and out softly. */
+/**
+ * [content] unfolded while [open], folding in and out softly (expand and fade in, shrink and fade
+ * out); at once with animations off (animator scale 0, battery saver, reduced motion). Also the
+ * fold of the connection tiles and of "Andere Wege ab hier" (#221).
+ */
 @Composable
 fun MapFold(open: Boolean, content: @Composable () -> Unit) {
+    val animate = rememberAnimationsOn()
     AnimatedVisibility(
         visible = open,
-        enter = expandVertically(Motion.settle()) + fadeIn(Motion.fadeIn()),
-        exit = shrinkVertically(Motion.settle()) + fadeOut(Motion.fadeOut()),
+        enter = if (animate) expandVertically(Motion.settle()) + fadeIn(Motion.fadeIn()) else EnterTransition.None,
+        exit = if (animate) shrinkVertically(Motion.settle()) + fadeOut(Motion.fadeOut()) else ExitTransition.None,
     ) {
         content()
     }
@@ -154,6 +178,18 @@ fun FoldedMap(modifier: Modifier = Modifier, indent: Dp = 0.dp, map: @Composable
             Box(modifier = Modifier.padding(top = 8.dp)) { map() }
         }
     }
+}
+
+/**
+ * True when the change from [arriving] to [next] (with its walk leg [walk], null for none) shows
+ * a small map in the blue change card: the walk's own or that of the change (see BlueChangeEntry).
+ * For "Nur nächste ausgeklappt" (#202), to find the next walk with a map.
+ */
+fun changeHasMiniMap(arriving: Leg, next: Leg, walk: Leg?): Boolean = when {
+    walk != null -> changeWalkMapKind(arriving, next, walk, java.time.Duration.between(walk.departure, walk.arrival).toMinutes()) != ChangeMapKind.None
+    hasSpotWalkMap(arriving, next) -> true
+    arriving.boardingSpot == null && arriving.alightingSpot == null && hasBoardingPositionMap(next) -> true
+    else -> !hasBoardingPositionMap(next) && hasChangeMap(arriving, next)
 }
 
 /** True when [walk] has a way to draw as a small map: two points at least. */
@@ -273,9 +309,12 @@ fun ChangeWalkMap(arriving: Leg, next: Leg, onFocusWalk: (Leg) -> Unit) {
     }
 }
 
-/** The small map of [walk] (see [WalkMiniMap]); a tap shows the walk on the full map. */
+/**
+ * The small map of [walk] (see [WalkMiniMap]); a tap shows the walk on the full map. The last
+ * walk of a journey ([toDestination], see walkEndsAtDestination) ends in the destination flag.
+ */
 @Composable
-fun WalkMap(walk: Leg, onFocusWalk: (Leg) -> Unit) {
+fun WalkMap(walk: Leg, onFocusWalk: (Leg) -> Unit, toDestination: Boolean = false) {
     // Drawn again once the real way on foot came in.
     val footVersion by FootPaths.version.collectAsState()
     val path = remember(walk, footVersion) { FootPaths.pathFor(walk) }
@@ -313,6 +352,7 @@ fun WalkMap(walk: Leg, onFocusWalk: (Leg) -> Unit) {
             details = details,
             brokenLifts = broken,
             targetIsPosition = target?.kind == WalkTargetKind.StopPosition,
+            destination = toDestination,
         )
         val summary = remember(details, broken, path, walk) {
             walkSummaryText(
@@ -449,6 +489,33 @@ internal fun boardingWalk(ride: Leg, path: List<Pair<Double, Double>>): Leg = Le
     toPlace = ride.fromPlace,
     walkTarget = ride.boardingSpot,
 )
+
+/**
+ * The way of a change from [arriving] to [next] without a walk leg of its own, as its small map
+ * draws it, as a walk to show on the big map ("Karte öffnen", #191): between two stop positions
+ * of buses or trams, to the stop position of the next bus or tram, or between the places the
+ * rides are left and boarded. By the way on foot where it is known, the straight line until
+ * then; null where the change has no such way.
+ */
+internal fun changeFocusWalk(arriving: Leg, next: Leg): Leg? {
+    if (hasSpotWalkMap(arriving, next)) {
+        val from = arriving.alightingSpot ?: return null
+        val to = next.boardingSpot ?: return null
+        val start = arriving.path.lastOrNull() ?: from.position
+        val end = next.path.firstOrNull() ?: to.position
+        return spotWalk(arriving, next, FootPaths.wayBetween(start, end).ifEmpty { listOf(start, end) })
+    }
+    if (arriving.boardingSpot == null && arriving.alightingSpot == null && hasBoardingPositionMap(next)) {
+        val end = next.boardingSpot?.position ?: return null
+        val start = arriving.path.lastOrNull() ?: arriving.toPlace?.position ?: next.fromPlace?.position ?: return null
+        return boardingWalk(next, FootPaths.wayBetween(start, end).ifEmpty { listOf(start, end) })
+    }
+    if (!hasBoardingPositionMap(next) && hasChangeMap(arriving, next)) {
+        val ends = changeEndsOf(arriving, next) ?: return null
+        return spotWalk(arriving, next, FootPaths.wayBetween(ends.start, ends.end).ifEmpty { listOf(ends.start, ends.end) })
+    }
+    return null
+}
 
 /** The way on foot between two rides along [path], as a walk to show on the map; it is no leg of the journey. */
 private fun spotWalk(arriving: Leg, next: Leg, path: List<Pair<Double, Double>>): Leg = Leg(

@@ -1,5 +1,6 @@
 package io.github.jnbp.nextstop.ui
 
+import io.github.jnbp.nextstop.data.SLOWER_WALK_FACTOR
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -7,6 +8,8 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.minimumInteractiveComponentSize
 import io.github.jnbp.nextstop.ui.theme.MapStyleChoice
 import io.github.jnbp.nextstop.ui.theme.MapVehiclesChoice
 import io.github.jnbp.nextstop.data.LineColors
@@ -19,7 +22,6 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -28,6 +30,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -52,6 +55,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -69,17 +73,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -96,6 +104,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -123,6 +132,7 @@ import kotlinx.coroutines.launch
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.Accessibility
 import io.github.jnbp.nextstop.data.AppPrefs
+import io.github.jnbp.nextstop.data.WakeAlarmMode
 import io.github.jnbp.nextstop.data.TransferComfort
 import io.github.jnbp.nextstop.ui.theme.AppColors
 import io.github.jnbp.nextstop.ui.theme.Appearance
@@ -145,10 +155,31 @@ object SetupState {
  * cosmetic ones later (the colours next to the name for the live link, both about the look),
  * permissions and the watch at the end. Nothing depends on the order but the pager itself.
  */
-private enum class SetupStep {
-    Welcome, Connections, Delays, Transfers, StepFree, ConnectionChoice, Start, Vehicles, Notifications,
-    ShortcutAlert, DisruptionCheck, EveryMinute, Colors, LiveName, Permissions, Watch, Done,
+internal enum class SetupStep {
+    Welcome, Connections, Delays, Transfers, StepFree, ConnectionChoice, Start, Places, Vehicles, CompanionView, Comfort, Notifications,
+    ShortcutAlert, DisruptionCheck, Colors, LiveName, Permissions, Watch, Done,
+
+    // The quick path ("Quick start" on the welcome page): the view of the connections, then
+    // the two permissions that matter most (position and notifications) on one page.
+    QuickView, QuickBasics,
 }
+
+// The pages only the quick path shows.
+private val QUICK_ONLY_STEPS = setOf(SetupStep.QuickView, SetupStep.QuickBasics)
+
+/**
+ * The pages of a path through the setup. The quick one: welcome, the view of the connections,
+ * position and notifications, done; everything else keeps its defaults. The detailed one:
+ * every step in the order of [SetupStep], the watch always before "Done" (with a watch its
+ * options, without one a short note; it never blocks). Both start with the welcome page, so
+ * choosing a path there never moves the page under the finger.
+ */
+internal fun setupSteps(quick: Boolean): List<SetupStep> =
+    if (quick) {
+        listOf(SetupStep.Welcome, SetupStep.QuickView, SetupStep.QuickBasics, SetupStep.Done)
+    } else {
+        SetupStep.entries.filter { it !in QUICK_ONLY_STEPS }
+    }
 
 /**
  * The setup on first launch: one page per topic on glass cards over a slowly drifting ground,
@@ -159,19 +190,13 @@ private enum class SetupStep {
 fun SetupWizard(onDone: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { AppPrefs(context) }
-    // The page about the watch only when a Wear OS watch is connected to this phone. The
-    // status is polled while the wizard is open: once the page is there it stays (a watch
-    // that drops out for a moment does not take it away), and it only comes in while the user
-    // is still before its place, so no page shifts under the user's finger.
+    // The state of the watch, polled while the wizard is open (only in the foreground): its
+    // page is always part of the detailed path and shows what fits, so no page comes or goes.
     val watch = rememberWatchStatus()
-    var showWatch by rememberSaveable { mutableStateOf(false) }
-    val steps = remember(showWatch) { SetupStep.entries.filter { it != SetupStep.Watch || showWatch } }
+    // Chosen on the welcome page: the quick path asks only for the view and two permissions.
+    var quick by rememberSaveable { mutableStateOf(false) }
+    val steps = remember(quick) { setupSteps(quick) }
     val pager = rememberPagerState(pageCount = { steps.size })
-    val watchConnected = watch != null && watch.state != WatchState.None
-    LaunchedEffect(watchConnected) {
-        // The watch page goes where "Done" is now.
-        if (watchConnected && !showWatch && pager.currentPage < steps.indexOf(SetupStep.Done)) showWatch = true
-    }
     LaunchedEffect(pager.currentPage) {
         // Once the page for the name was seen, the first live link does not ask again.
         if (steps.getOrNull(pager.currentPage) == SetupStep.LiveName) prefs.liveNameAsked = true
@@ -265,7 +290,11 @@ fun SetupWizard(onDone: () -> Unit) {
                     // what lies below it.
                     val info = SetupPageInfo(compact = maxHeight < SETUP_COMPACT_HEIGHT, active = pager.settledPage == page)
                     CompositionLocalProvider(LocalSetupPage provides info) {
-                        SetupPageContent(steps[page], prefs, watch)
+                        SetupPageContent(steps[page], prefs, watch) { short ->
+                            // The path is chosen, then the next page of it comes in.
+                            quick = short
+                            scope.launch { pager.animateScrollToPage(1) }
+                        }
                     }
                 }
             }
@@ -276,7 +305,9 @@ fun SetupWizard(onDone: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                // Both boxes keep the height of a button while it is hidden (the welcome page):
+                // the pager above never changes its height as a button fades, so a swipe does not jump.
+                Box(modifier = Modifier.weight(1f).heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
                     // Called on the row: inside a Box the RowScope overload is only reachable explicitly.
                     this@Row.AnimatedVisibility(visible = pager.currentPage > 0, enter = fadeIn(), exit = fadeOut()) {
                         SecondaryButton(
@@ -287,15 +318,18 @@ fun SetupWizard(onDone: () -> Unit) {
                         )
                     }
                 }
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                Box(modifier = Modifier.weight(1f).heightIn(min = 48.dp), contentAlignment = Alignment.CenterEnd) {
                     val last = pager.currentPage == steps.lastIndex
-                    PrimaryButton(
-                        text = stringResource(if (last) R.string.setup_finish else R.string.setup_next),
-                        onClick = {
-                            if (last) finish() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
-                        },
-                        minHeight = 48.dp,
-                    )
+                    // Not on the welcome page: its two paths are the way on there.
+                    this@Row.AnimatedVisibility(visible = pager.currentPage > 0, enter = fadeIn(), exit = fadeOut()) {
+                        PrimaryButton(
+                            text = stringResource(if (last) R.string.setup_finish else R.string.setup_next),
+                            onClick = {
+                                if (last) finish() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
+                            },
+                            minHeight = 48.dp,
+                        )
+                    }
                 }
             }
         }
@@ -304,20 +338,25 @@ fun SetupWizard(onDone: () -> Unit) {
 
 /** One page of the setup, by its step. */
 @Composable
-private fun SetupPageContent(step: SetupStep, prefs: AppPrefs, watch: WatchStatus?) {
+private fun SetupPageContent(step: SetupStep, prefs: AppPrefs, watch: WatchStatus?, onPath: (quick: Boolean) -> Unit) {
     when (step) {
-        SetupStep.Welcome -> WelcomePage()
+        SetupStep.Welcome -> WelcomePage(onPath)
+        SetupStep.QuickView -> QuickViewPage(prefs)
+        SetupStep.QuickBasics -> QuickBasicsPage()
+        SetupStep.Comfort -> ComfortPage()
         SetupStep.Connections -> ConnectionsPage(prefs)
         SetupStep.Delays -> DelaysPage(prefs)
         SetupStep.Transfers -> TransfersPage(prefs)
         SetupStep.StepFree -> StepFreePage(prefs)
         SetupStep.ConnectionChoice -> ConnectionChoicePage(prefs)
         SetupStep.Start -> StartPage(prefs)
+        // Zuhause, Arbeit and more places, for disruption alerts and quick routes (#229).
+        SetupStep.Places -> SetupPlacesPage(prefs)
         SetupStep.Vehicles -> VehiclesPage()
+        SetupStep.CompanionView -> CompanionViewPage()
         SetupStep.Notifications -> NotificationsPage(prefs)
         SetupStep.ShortcutAlert -> ShortcutAlertPage()
         SetupStep.DisruptionCheck -> DisruptionCheckPage()
-        SetupStep.EveryMinute -> EveryMinutePage()
         SetupStep.Colors -> ColorsPage()
         SetupStep.LiveName -> LiveNamePage(prefs)
         SetupStep.Permissions -> PermissionsPage()
@@ -367,11 +406,11 @@ private fun ScrollWithHint(
     var peeked by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(page.active, measured) {
         if (!page.active || !measured || peeked || !animate || scroll.value != 0) return@LaunchedEffect
-        delay(700)
+        animationDelay(700)
         peeked = true
         val peek = with(density) { PEEK_DISTANCE.roundToPx() }.coerceAtMost(scroll.maxValue)
         scroll.animateScrollTo(peek, tween(420))
-        delay(260)
+        animationDelay(260)
         // Back up, unless the user took over in the meantime.
         if (!scroll.isScrollInProgress && scroll.value == peek) scroll.animateScrollTo(0, tween(420))
     }
@@ -416,19 +455,45 @@ private fun ScrollWithHint(
     }
 }
 
+/**
+ * The phase (0 to 1) of an endless loop [loopMillis] long (at the system's animator duration
+ * scale) that moves only while [running], going on from where it stood: a sketch on a page
+ * that is not in front rests and costs no frames. Starts at [rest].
+ */
+@Composable
+private fun rememberLoopPhase(running: Boolean, loopMillis: Int, rest: Float): State<Float> {
+    val phase = remember { mutableFloatStateOf(rest) }
+    LaunchedEffect(running) {
+        if (!running) return@LaunchedEffect
+        var last = withFrameNanos { it }
+        while (true) {
+            val frame = withFrameNanos { it }
+            phase.floatValue = advanceLoop(phase.floatValue, frame - last, SystemAnimation.millis(loopMillis.toLong()))
+            last = frame
+        }
+    }
+    return phase
+}
+
 /** Two soft blobs of the accent colour that drift slowly behind the cards. */
 @Composable
 private fun Modifier.driftingGround(): Modifier {
-    val transition = rememberInfiniteTransition(label = "setupGround")
-    val drift by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(9_000), RepeatMode.Reverse),
-        label = "setupDrift",
-    )
+    // An idle drift: the blobs rest halfway while the battery saver is active.
+    val driftState = if (BatterySaver.active) {
+        null
+    } else {
+        rememberInfiniteTransition(label = "setupGround").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(9_000), RepeatMode.Reverse),
+            label = "setupDrift",
+        )
+    }
     val accent = AppColors.Blue
     val second = AppColors.Lime
     return this.drawBehind {
+        // Read while drawing only, so the drift costs no recomposition.
+        val drift = driftState?.value ?: 0.5f
         val first = Offset(size.width * (0.15f + 0.25f * drift), size.height * (0.18f + 0.08f * drift))
         drawCircle(
             Brush.radialGradient(listOf(accent.copy(alpha = 0.30f), Color.Transparent), center = first, radius = size.width * 0.8f),
@@ -476,7 +541,7 @@ private fun SetupProgress(progress: () -> Float, description: String, modifier: 
  * and shows that there is more (see ScrollWithHint). Tighter on a small phone.
  */
 @Composable
-private fun SetupCard(title: String, text: String, more: String? = null, content: @Composable ColumnScope.() -> Unit = {}) {
+internal fun SetupCard(title: String, text: String, more: String? = null, content: @Composable ColumnScope.() -> Unit = {}) {
     val compact = LocalSetupPage.current.compact
     GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(32.dp)) {
         ScrollWithHint(
@@ -572,14 +637,14 @@ private fun SetupSwitch(title: String, text: String, checked: Boolean, onChange:
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .background(AppColors.Card)
-            .clickable { onChange(!checked) }
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
             .defaultMinSize(minHeight = 56.dp)
             .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         SetupText(title, text, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = null, modifier = Modifier.minimumInteractiveComponentSize())
     }
 }
 
@@ -627,11 +692,30 @@ private fun PermissionRow(title: String, text: String, granted: Boolean, onAllow
     }
 }
 
-/** The logo of the app, which springs in. */
+/**
+ * The logo of the app, which springs in: its tile grows in, the arrow slides over to the stop
+ * and the stop (the lime circle) pops up as the arrow reaches it. With animations off (reduced
+ * motion, the battery saver at "Extrem") it is simply there.
+ */
 @Composable
-private fun SetupLogo(edge: Int = 112) {
-    val grow = remember { Animatable(0.6f) }
-    LaunchedEffect(Unit) { grow.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow)) }
+private fun SetupLogo(edge: Int = 128) {
+    val animate = rememberAnimationsOn()
+    val grow = remember { Animatable(if (animate) 0.6f else 1f) }
+    val slide = remember { Animatable(if (animate) 0f else 1f) }
+    val pop = remember { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(animate) {
+        if (!animate) {
+            grow.snapTo(1f)
+            slide.snapTo(1f)
+            pop.snapTo(1f)
+            return@LaunchedEffect
+        }
+        launch { grow.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow)) }
+        animationDelay(LOGO_ARROW_DELAY_MILLIS)
+        launch { slide.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) }
+        animationDelay(LOGO_POP_DELAY_MILLIS)
+        pop.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = Spring.StiffnessMediumLow))
+    }
     Box(
         modifier = Modifier
             .size(edge.dp)
@@ -647,35 +731,225 @@ private fun SetupLogo(edge: Int = 112) {
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
         )
-        Image(
-            painter = painterResource(R.drawable.ic_launcher_foreground),
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
+        Canvas(modifier = Modifier.fillMaxSize()) { logoMark(slide.value, pop.value) }
+    }
+}
+
+/**
+ * The mark of the launcher icon (ic_launcher_foreground: arrow and stop, in its viewport of
+ * 108 with the group scaled by 0.82 about the middle and moved 3 to the left): the arrow
+ * [slide] of the way in from the left, the stop grown to [pop] (it may overshoot a little).
+ */
+private fun DrawScope.logoMark(slide: Float, pop: Float) {
+    val unit = size.width / 108f
+    fun x(v: Float) = (54f + (v - 54f) * 0.82f - 3f) * unit
+    fun y(v: Float) = (54f + (v - 54f) * 0.82f) * unit
+    val stroke = 8f * 0.82f * unit
+    val shift = (1f - slide.coerceIn(0f, 1.2f)) * -22f * 0.82f * unit
+    val arrowAlpha = slide.coerceIn(0f, 1f)
+    val ink = Color.White.copy(alpha = arrowAlpha)
+    drawLine(ink, Offset(x(27f) + shift, y(54f)), Offset(x(48f) + shift, y(54f)), strokeWidth = stroke, cap = StrokeCap.Round)
+    val head = Path().apply {
+        moveTo(x(41f) + shift, y(42f))
+        lineTo(x(53f) + shift, y(54f))
+        lineTo(x(41f) + shift, y(66f))
+    }
+    drawPath(head, ink, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    val grown = pop.coerceAtLeast(0f)
+    if (grown > 0f) {
+        val center = Offset(x(74f), y(54f))
+        drawCircle(LOGO_LIME, radius = 14f * 0.82f * unit * grown, center = center)
+        drawCircle(LOGO_BLUE, radius = 5.9f * 0.82f * unit * grown, center = center)
+    }
+}
+
+// The colours of the mark, as in ic_launcher_foreground.
+private val LOGO_LIME = Color(0xFFC8F16B)
+private val LOGO_BLUE = Color(0xFF1B4FD8)
+
+// The arrow starts once the tile has grown a little; the stop pops as the arrow arrives.
+private const val LOGO_ARROW_DELAY_MILLIS = 120L
+private const val LOGO_POP_DELAY_MILLIS = 220L
+
+/**
+ * The welcome: the logo, one short line and the two ways through, "Quick start" (the view and
+ * two permissions, the rest as it is) and "Set up in detail" (every step once). The parts come
+ * in one after another; with animations off (or the battery saver at "Extreme") they are simply there.
+ */
+@Composable
+private fun WelcomePage(onPath: (quick: Boolean) -> Unit) {
+    val compact = LocalSetupPage.current.compact
+    ScrollWithHint(spacing = if (compact) 14.dp else 18.dp, horizontalAlignment = Alignment.CenterHorizontally) {
+        SetupLogo(edge = if (compact) 100 else 128)
+        WelcomeEntrance(order = 1) {
+            Text(
+                text = stringResource(R.string.setup_welcome_title),
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 30.sp,
+                lineHeight = 34.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
+        WelcomeEntrance(order = 2) {
+            Text(
+                text = stringResource(R.string.setup_welcome_line),
+                color = AppColors.Muted,
+                fontSize = 16.sp,
+                lineHeight = 22.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
+        Spacer(modifier = Modifier.height(if (compact) 4.dp else 12.dp))
+        WelcomeEntrance(order = 3) {
+            PrimaryButton(
+                text = stringResource(R.string.setup_quick_start),
+                onClick = { onPath(true) },
+                modifier = Modifier.fillMaxWidth(),
+                minHeight = 52.dp,
+            )
+        }
+        WelcomeEntrance(order = 4) {
+            SecondaryButton(
+                text = stringResource(R.string.setup_mode_detailed),
+                onClick = { onPath(false) },
+                modifier = Modifier.fillMaxWidth(),
+                minHeight = 52.dp,
+                ground = AppColors.Chip,
+            )
+        }
+    }
+}
+
+/** A part of the welcome that rises and fades in, [order] steps after the logo. */
+@Composable
+private fun WelcomeEntrance(order: Int, content: @Composable () -> Unit) {
+    val animate = rememberAnimationsOn()
+    val shown = remember { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(animate) {
+        if (!animate) {
+            shown.snapTo(1f)
+        } else {
+            animationDelay(WELCOME_STAGGER_MILLIS * order)
+            shown.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow))
+        }
+    }
+    Box(
+        modifier = Modifier.graphicsLayer {
+            alpha = shown.value.coerceIn(0f, 1f)
+            translationY = (1f - shown.value) * 16.dp.toPx()
+        },
+    ) {
+        content()
+    }
+}
+
+// The parts of the welcome come in this far apart, in milliseconds.
+private const val WELCOME_STAGGER_MILLIS = 90L
+
+/** The short path: only list or chart, the rest stays as it is. */
+@Composable
+private fun QuickViewPage(prefs: AppPrefs) {
+    SetupCard(
+        title = stringResource(R.string.setup_view_title),
+        text = stringResource(R.string.setup_quick_view_text),
+    ) {
+        ConnectionsViewChoice(prefs)
+    }
+}
+
+/**
+ * The quick path's second question: the two permissions that matter most, the position (to
+ * start where you are) and the notifications (the companion of a trip). Both can be left
+ * out; the rest of the setup keeps its defaults.
+ */
+@Composable
+private fun QuickBasicsPage() {
+    val context = LocalContext.current
+    // Counted up after every answer, so the marks are read again.
+    var answers by remember { mutableIntStateOf(0) }
+    val location = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ -> answers++ }
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> answers++ }
+    val locationGranted = remember(answers) {
+        granted(context, Manifest.permission.ACCESS_FINE_LOCATION) || granted(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+    }
+    val notificationsAllowed = remember(answers) { notificationsGranted(context) }
+    SetupCard(
+        title = stringResource(R.string.setup_quick_basics_title),
+        text = stringResource(R.string.setup_quick_basics_text),
+    ) {
+        PermissionRow(
+            title = stringResource(R.string.setup_permission_location),
+            text = stringResource(R.string.setup_permission_location_text),
+            granted = locationGranted,
+            onAllow = {
+                location.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            },
+        )
+        PermissionRow(
+            title = stringResource(R.string.setup_permission_notifications),
+            text = stringResource(R.string.setup_permission_notifications_text),
+            granted = notificationsAllowed,
+            onAllow = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            },
         )
     }
 }
 
+/** The companion during a ride: calm, with the map, or classic, as three small pictures (see ui/companion). */
 @Composable
-private fun WelcomePage() {
-    // Scrolls once "Learn more" is open, or with a large font on a small phone.
-    ScrollWithHint(spacing = 18.dp, horizontalAlignment = Alignment.CenterHorizontally) {
-        SetupLogo(edge = if (LocalSetupPage.current.compact) 88 else 112)
-        Text(
-            text = stringResource(R.string.setup_welcome_title),
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 30.sp,
-            lineHeight = 34.sp,
-            textAlign = TextAlign.Center,
+private fun CompanionViewPage() {
+    SetupCard(
+        title = stringResource(R.string.setup_companion_title),
+        text = stringResource(R.string.setup_companion_short),
+    ) {
+        io.github.jnbp.nextstop.ui.companion.CompanionLayoutChoice(
+            previewHeight = if (LocalSetupPage.current.compact) 64.dp else 84.dp,
         )
-        Text(
-            text = stringResource(R.string.setup_welcome_short),
-            color = AppColors.Muted,
-            fontSize = 16.sp,
-            lineHeight = 22.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 12.dp),
-        )
-        MoreText(stringResource(R.string.setup_welcome_text), center = true)
+    }
+}
+
+/** Handling and battery: the battery saver and the haptics, as in the settings, with their previews. */
+@Composable
+private fun ComfortPage() {
+    SetupCard(
+        title = stringResource(R.string.setup_comfort_title),
+        text = stringResource(R.string.setup_comfort_short),
+    ) {
+        BatterySaverRow(shape = RoundedCornerShape(20.dp))
+        HapticsRow(shape = RoundedCornerShape(20.dp))
+    }
+}
+
+/** Chart or list, each as a small sketch; stored at once. */
+@Composable
+private fun ConnectionsViewChoice(prefs: AppPrefs) {
+    var list by remember { mutableStateOf(prefs.connectionsList) }
+    val compact = LocalSetupPage.current.compact
+    VisualChoice(title = stringResource(R.string.view_title), text = "") {
+        VisualOption(
+            label = stringResource(R.string.view_chart),
+            selected = !list,
+            onClick = {
+                list = false
+                prefs.connectionsList = false
+            },
+            modifier = Modifier.weight(1f),
+            previewHeight = if (compact) 64.dp else 96.dp,
+        ) { chartSketch(0f, 0f, size.width, size.height) }
+        VisualOption(
+            label = stringResource(R.string.view_list),
+            selected = list,
+            onClick = {
+                list = true
+                prefs.connectionsList = true
+            },
+            modifier = Modifier.weight(1f),
+            previewHeight = if (compact) 64.dp else 96.dp,
+        ) { listSketch(0f, 0f, size.width, size.height) }
     }
 }
 
@@ -732,7 +1006,6 @@ private fun ColorsPage() {
  */
 @Composable
 private fun ConnectionsPage(prefs: AppPrefs) {
-    var list by remember { mutableStateOf(prefs.connectionsList) }
     var full by remember { mutableStateOf(prefs.connectionsFull) }
     val compact = LocalSetupPage.current.compact
     SetupCard(
@@ -741,28 +1014,7 @@ private fun ConnectionsPage(prefs: AppPrefs) {
         more = stringResource(R.string.setup_full_text),
     ) {
         // No line of its own: the text of the card already says what this is.
-        VisualChoice(title = stringResource(R.string.view_title), text = "") {
-            VisualOption(
-                label = stringResource(R.string.view_chart),
-                selected = !list,
-                onClick = {
-                    list = false
-                    prefs.connectionsList = false
-                },
-                modifier = Modifier.weight(1f),
-                previewHeight = if (compact) 64.dp else 96.dp,
-            ) { chartSketch(0f, 0f, size.width, size.height) }
-            VisualOption(
-                label = stringResource(R.string.view_list),
-                selected = list,
-                onClick = {
-                    list = true
-                    prefs.connectionsList = true
-                },
-                modifier = Modifier.weight(1f),
-                previewHeight = if (compact) 64.dp else 96.dp,
-            ) { listSketch(0f, 0f, size.width, size.height) }
-        }
+        ConnectionsViewChoice(prefs)
         VisualChoice(title = stringResource(R.string.connections_full_title), text = "") {
             val splitReveal = rememberReveal(!full)
             VisualOption(
@@ -792,8 +1044,8 @@ private fun ConnectionsPage(prefs: AppPrefs) {
 
 /**
  * How a late departure looks: three options, each with its line of explanation and its live
- * sample (see DelayDisplay). No "Learn more": the options explain themselves, and without it
- * all three fit on a small phone.
+ * sample (see DelayDisplay). No "Learn more": the options explain themselves; the page
+ * scrolls where all four do not fit.
  */
 @Composable
 private fun DelaysPage(prefs: AppPrefs) {
@@ -852,7 +1104,7 @@ private fun TransfersPage(prefs: AppPrefs) {
 @Composable
 private fun StepFreePage(prefs: AppPrefs) {
     var level by remember { mutableStateOf(prefs.searchOptions.accessibility) }
-    var slower by remember { mutableStateOf(prefs.searchOptions.slower) }
+    var slower by remember { mutableStateOf(prefs.searchOptions.let { it.slower || it.ownWalkFactor != null }) }
     val compact = LocalSetupPage.current.compact
     SetupCard(
         title = stringResource(R.string.accessibility_title),
@@ -880,14 +1132,15 @@ private fun StepFreePage(prefs: AppPrefs) {
                 ) { accessibilitySketch(option, reveal.value) }
             }
         }
-        SlowerSketch(on = slower, height = if (compact) 32.dp else 40.dp)
+        SlowerSketch(on = slower, height = if (compact) 32.dp else 40.dp, factor = prefs.searchOptions.walkFactorInUse.takeIf { slower } ?: SLOWER_WALK_FACTOR)
         SetupSwitch(
             title = stringResource(R.string.slower_title),
             text = stringResource(R.string.slower_text),
             checked = slower,
             onChange = { value ->
                 slower = value
-                prefs.searchOptions = prefs.searchOptions.copy(slower = value)
+                // Off also ends an own factor set in the settings (#198); on keeps it.
+                prefs.searchOptions = prefs.searchOptions.let { if (value) it.copy(slower = true) else it.copy(slower = false, ownWalkFactor = null) }
             },
         )
     }
@@ -1055,17 +1308,9 @@ private fun MapStyleChoiceGrid(previewHeight: Dp) {
  */
 @Composable
 internal fun VehicleMapSketch(level: MapVehiclesChoice, sketchHeight: Dp = MAP_SKETCH_HEIGHT) {
+    // Moving only on the page in front of the setup (and in the settings): hidden pages rest.
     val animate = rememberAnimationsOn()
-    val drive = if (animate) {
-        rememberInfiniteTransition(label = "wideSketch").animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(WIDE_SKETCH_LOOP_MILLIS, easing = LinearEasing), RepeatMode.Restart),
-            label = "wideSketchDrive",
-        )
-    } else {
-        null
-    }
+    val drive = if (animate) rememberLoopPhase(LocalSetupPage.current.active, WIDE_SKETCH_LOOP_MILLIS, MAP_SKETCH_REST) else null
     val dark = AppColors.palette.dark
     val style = when (Appearance.mapStyle) {
         MapStyleChoice.Auto -> if (dark) MapStyleChoice.Dark else MapStyleChoice.Light
@@ -1194,17 +1439,9 @@ private val WIDE_SKETCH_COLORS = listOf(Color(0xFF3A7BD5), Color(0xFF3F9C35), Co
  */
 @Composable
 private fun CloseVehicleSketch() {
+    // Moving only on the page in front of the setup (and in the settings): hidden pages rest.
     val animate = rememberAnimationsOn()
-    val drive = if (animate) {
-        rememberInfiniteTransition(label = "mapSketch").animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(MAP_SKETCH_LOOP_MILLIS, easing = LinearEasing), RepeatMode.Restart),
-            label = "mapSketchDrive",
-        )
-    } else {
-        null
-    }
+    val drive = if (animate) rememberLoopPhase(LocalSetupPage.current.active, MAP_SKETCH_LOOP_MILLIS, MAP_SKETCH_REST) else null
     // The map's own colours: those of the chosen style, light or dark as the app is for "automatic".
     val dark = AppColors.palette.dark
     val style = when (Appearance.mapStyle) {
@@ -1367,6 +1604,8 @@ private fun notificationsGranted(context: Context): Boolean =
 private fun NotificationsPage(prefs: AppPrefs) {
     val context = LocalContext.current
     var reminders by remember { mutableStateOf(prefs.alightReminders) }
+    var wakeMode by remember { mutableStateOf(prefs.wakeAlarmMode) }
+    var companionLocation by remember { mutableStateOf(prefs.companionLocation) }
     var allowed by remember { mutableStateOf(notificationsGranted(context)) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
         allowed = notificationsGranted(context)
@@ -1412,6 +1651,31 @@ private fun NotificationsPage(prefs: AppPrefs) {
                 prefs.alightReminders = value
             },
         )
+        // The wake-up alarm of long rides: off, by itself from 60 min, or on every ride.
+        SetupChoice(
+            title = stringResource(R.string.wake_alarm_title),
+            text = stringResource(R.string.wake_alarm_text),
+            labels = listOf(
+                stringResource(R.string.wake_alarm_off),
+                stringResource(R.string.wake_alarm_auto),
+                stringResource(R.string.wake_alarm_always),
+            ),
+            selected = wakeMode.ordinal,
+            onSelect = { index ->
+                wakeMode = WakeAlarmMode.entries[index]
+                prefs.wakeAlarmMode = wakeMode
+            },
+        )
+        // The position in the companion (only while it runs); the permission is asked on the page of the position.
+        SetupSwitch(
+            title = stringResource(R.string.companion_location_title),
+            text = stringResource(R.string.companion_location_text),
+            checked = companionLocation,
+            onChange = { value ->
+                companionLocation = value
+                prefs.companionLocation = value
+            },
+        )
         PermissionRow(
             title = stringResource(R.string.setup_permission_notifications),
             text = stringResource(R.string.setup_permission_notifications_text),
@@ -1426,19 +1690,97 @@ private fun NotificationsPage(prefs: AppPrefs) {
 }
 
 /**
- * The shortcut alert: a remembered setting. While any trip is followed, it speaks up when
- * something changed since the journey was chosen; "only when needed" or "always on".
+ * The shortcut alert, in one step (#260): first what it looks like (the offer card, as a real
+ * faster way brings it), then what it does, "Try it" (the card anew and the same notification),
+ * then "Every minute counts" as what switches it on at its most for one trip (sprint changes,
+ * from 1 minute), and last the remembered choice: "only when needed" or "always on".
  */
 @Composable
 private fun ShortcutAlertPage() {
     val context = LocalContext.current
     val prefs = remember { AppPrefs(context) }
     var alertAlways by remember { mutableStateOf(prefs.shortcutAlert) }
-    SetupCard(
-        title = stringResource(R.string.shortcut_alert),
-        text = stringResource(R.string.setup_shortcut_short),
-        more = stringResource(R.string.shortcut_alert_text),
-    ) {
+    // The picture of an offer, there from the start; "Try it" makes it anew with the notification.
+    var offer by remember { mutableStateOf(FasterWatch.demoOffer(OffsetDateTime.now())) }
+    var shown by remember { mutableStateOf(true) }
+    var tried by remember { mutableStateOf(false) }
+    SetupCard(title = stringResource(R.string.shortcut_alert), text = "") {
+        Text(
+            text = stringResource(R.string.r8m_setup_shortcut_looks),
+            color = AppColors.Ink,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 15.sp,
+            lineHeight = 20.sp,
+        )
+        AnimatedVisibility(
+            visible = shown,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            FasterCard(
+                offer = offer,
+                onTake = {
+                    shown = false
+                    FasterWatch.dismissDemo(context)
+                },
+                onIgnore = {
+                    shown = false
+                    FasterWatch.dismissDemo(context)
+                },
+            )
+        }
+        Text(text = stringResource(R.string.setup_shortcut_short), color = AppColors.Muted, fontSize = 15.sp, lineHeight = 20.sp)
+        MoreText(stringResource(R.string.shortcut_alert_text))
+        PrimaryButton(
+            text = stringResource(R.string.setup_try),
+            onClick = {
+                // The same card and notification a real faster way brings, once per tap.
+                val demo = FasterWatch.demoOffer(OffsetDateTime.now())
+                offer = demo
+                shown = true
+                tried = true
+                FasterWatch.showDemo(context, demo)
+            },
+            glyph = Glyph.Play,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = stringResource(
+                if (tried && !notificationsGranted(context)) R.string.setup_try_no_notification else R.string.r8m_setup_shortcut_try_hint,
+            ),
+            color = AppColors.Muted,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+        // "Every minute counts": the alert at its most, for one trip.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(AppColors.Card)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(AppColors.Blue),
+                contentAlignment = Alignment.Center,
+            ) {
+                GlyphIcon(Glyph.Bolt, color = AppColors.OnBlue, size = 16.dp)
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(text = stringResource(R.string.every_minute), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(
+                    text = stringResource(R.string.r8m_setup_every_minute_part),
+                    color = AppColors.Muted,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                )
+            }
+        }
         FeatureTag(text = stringResource(R.string.setup_tag_remembered))
         SetupChoice(
             title = stringResource(R.string.setup_shortcut_when),
@@ -1513,6 +1855,10 @@ private fun DisruptionCheckPage() {
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .background(AppColors.Card)
+                .toggleable(value = places, role = Role.Switch) { value ->
+                    places = value
+                    DisruptionWatch.setCheckPlaces(context, value)
+                }
                 .padding(start = 14.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1526,73 +1872,7 @@ private fun DisruptionCheckPage() {
                     lineHeight = 16.sp,
                 )
             }
-            Switch(
-                checked = places,
-                onCheckedChange = { value ->
-                    places = value
-                    DisruptionWatch.setCheckPlaces(context, value)
-                },
-            )
-        }
-    }
-}
-
-/**
- * "Every minute counts": a sprint mode switched on for one trip, in a connection. It turns on
- * sprint changes and the shortcut alert for that trip; "Try it" shows what an offer looks like.
- */
-@Composable
-private fun EveryMinutePage() {
-    val context = LocalContext.current
-    var offer by remember { mutableStateOf<FasterOffer?>(null) }
-    var shown by remember { mutableStateOf(false) }
-    SetupCard(
-        title = stringResource(R.string.every_minute),
-        text = stringResource(R.string.setup_every_minute_short),
-        more = stringResource(R.string.hint_every_minute_text) + "\n\n" + stringResource(R.string.setup_every_minute_how),
-    ) {
-        FeatureTag(text = stringResource(R.string.setup_tag_per_trip))
-        PrimaryButton(
-            text = stringResource(R.string.setup_try),
-            onClick = {
-                // The same card and notification a real faster way brings, once per tap.
-                val demo = FasterWatch.demoOffer(OffsetDateTime.now())
-                offer = demo
-                shown = true
-                FasterWatch.showDemo(context, demo)
-            },
-            glyph = Glyph.Play,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        AnimatedVisibility(
-            visible = shown,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-        ) {
-            val demo = offer
-            if (demo != null) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FasterCard(
-                        offer = demo,
-                        onTake = {
-                            shown = false
-                            FasterWatch.dismissDemo(context)
-                        },
-                        onIgnore = {
-                            shown = false
-                            FasterWatch.dismissDemo(context)
-                        },
-                    )
-                    if (!notificationsGranted(context)) {
-                        Text(
-                            text = stringResource(R.string.setup_try_no_notification),
-                            color = AppColors.Muted,
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp,
-                        )
-                    }
-                }
-            }
+            Switch(checked = places, onCheckedChange = null, modifier = Modifier.minimumInteractiveComponentSize())
         }
     }
 }
@@ -1681,16 +1961,121 @@ private fun PermissionsPage() {
     }
 }
 
-/** The connected watch: "Watch connected ✓" with Next Stop on it, else a button that installs it there. */
+/**
+ * The watch, always in the detailed path. With a Wear OS watch connected: its state (with
+ * "Install" when Next Stop is not on it yet) and, once the app is there, whether a trip
+ * started here opens the companion on the watch (off by default, as in the settings).
+ * Without one: a short note that the app exists for the watch too, with a link to its store
+ * page to install it later. Nothing here has to be answered; the page cross-fades when a
+ * watch shows up or goes while it is open.
+ */
 @Composable
 private fun WatchPage(status: WatchStatus?) {
+    val kind = setupWatchKind(status?.state)
     SetupCard(
         title = stringResource(R.string.setup_watch_title),
-        text = stringResource(R.string.setup_watch_short),
-        more = stringResource(R.string.setup_watch_text),
+        text = stringResource(if (kind == SetupWatchKind.None) R.string.setup_watch_none_short else R.string.setup_watch_short),
+        more = if (kind == SetupWatchKind.None) null else stringResource(R.string.setup_watch_text),
     ) {
-        WatchStatusRow(status)
+        val animate = rememberAnimationsOn()
+        Crossfade(targetState = kind, animationSpec = if (animate) tween<Float>(260) else snap<Float>(), label = "setupWatch") { shown ->
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (shown) {
+                    SetupWatchKind.None -> WatchLaterNote()
+                    SetupWatchKind.Checking, SetupWatchKind.Paired -> WatchStatusRow(status)
+                    SetupWatchKind.Ready -> {
+                        WatchStatusRow(status)
+                        WatchOpenCompanionSwitch()
+                    }
+                }
+            }
+        }
     }
+}
+
+/** What the watch page shows, by the state of the watch (see [setupWatchKind]). */
+internal enum class SetupWatchKind { Checking, None, Paired, Ready }
+
+/** The watch page's content for [state]: null while the first check runs. */
+internal fun setupWatchKind(state: WatchState?): SetupWatchKind = when (state) {
+    null -> SetupWatchKind.Checking
+    WatchState.None -> SetupWatchKind.None
+    WatchState.NoApp -> SetupWatchKind.Paired
+    WatchState.Connected -> SetupWatchKind.Ready
+}
+
+/** Without a watch: "Next Stop is on Wear OS too", and a link to its store page for later. */
+@Composable
+private fun WatchLaterNote() {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(AppColors.Card)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(text = stringResource(R.string.setup_watch_none_title), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        Text(
+            text = stringResource(R.string.setup_watch_none_text),
+            color = AppColors.Muted,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+        )
+        Text(
+            text = stringResource(R.string.setup_watch_store_link),
+            color = AppColors.Blue,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(role = Role.Button) { openStorePage(context) }
+                .padding(vertical = 8.dp),
+        )
+    }
+}
+
+/** Opens the app's store page on this phone (from there it can be installed on a watch later); nothing when no store or browser can. */
+private fun openStorePage(context: Context) {
+    val intent = android.content.Intent(
+        android.content.Intent.ACTION_VIEW,
+        android.net.Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}"),
+    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (e: android.content.ActivityNotFoundException) {
+        // No store and no browser: the note stays, nothing to do.
+    }
+}
+
+/** Whether a trip started here opens the companion on the watch, the same setting as in Settings › Watch. */
+@Composable
+private fun WatchOpenCompanionSwitch() {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            io.github.jnbp.nextstop.wear.WatchSettings.load(context)
+        }
+    }
+    val settings by io.github.jnbp.nextstop.wear.WatchSettings.values.collectAsState()
+    val open = io.github.jnbp.nextstop.wear.settingFlag(
+        settings,
+        io.github.jnbp.nextstop.wear.WatchSettingKeys.OPEN_COMPANION,
+        default = false,
+    )
+    SetupSwitch(
+        title = stringResource(R.string.watch_open_companion_title),
+        text = stringResource(R.string.watch_open_companion_text),
+        checked = open,
+        onChange = { value ->
+            io.github.jnbp.nextstop.wear.WatchSettings.set(
+                context,
+                io.github.jnbp.nextstop.wear.WatchSettingKeys.OPEN_COMPANION,
+                value.toString(),
+            )
+        },
+    )
 }
 
 @Composable

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Jank meter of the developer options (r6perf) -->
+    <string name="r6perf_jank_late">late</string>
+    <string name="r6perf_jank_cause_vehicles">vehicles</string>
+    <string name="r6perf_jank_cause_pulse">pulse</string>
+    <string name="r6perf_jank_cause_other">other</string>
+    <string name="r6perf_jank_basis">p95 and max: work per frame on the main and render thread (budget 8.3 ms at 120 Hz). Late: frames that missed their vsync.</string>
+    <string name="r6perf_jank_transitions">Transitions</string>
+    <string name="r6perf_jank_transitions_none">No change of page counted yet</string>
+    <string name="r6perf_jank_first_draw">first draw</string>
+    <string name="r6perf_jank_longest">longest frame</string>
+    <string name="r6perf_jank_backdrop">backdrop</string>
+</resources>

@@ -2,29 +2,20 @@ package io.github.jnbp.nextstop.widget
 
 import android.content.Context
 import android.location.Location
-import android.location.LocationManager
-import android.location.LocationRequest
-import android.os.CancellationSignal
-import kotlin.coroutines.resume
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import io.github.jnbp.nextstop.data.AppPrefs
 
 /*
  * Where the widgets think the user is.
  *
- * Widgets load in a WorkManager job, with the app in the background. With the location
- * permission "while using the app" only (the app does not ask for ACCESS_BACKGROUND_LOCATION),
- * Android gives a background job no fresh position: a request returns nothing. So the widgets
- * rely on what is known:
+ * Widgets load with the app in the background (a tap on ↻, the screen coming on, the app
+ * coming to the front). They never ask for a position of their own: a request would wake a
+ * location provider, and the app may use the battery only in the front or during a followed
+ * trip (battery rule). The widgets rely on what is known:
  *
  * 1. the position the app itself stores whenever it gets one (start page, map, companion,
  *    walk view: see [recordWidgetPosition]), with the time it was taken;
- * 2. the newest position Android still keeps for the app (getLastKnownLocation);
- * 3. a single, balanced request of the fused provider of the platform (no Google Play
- *    services needed) when both are older than [FRESH_POSITION_MILLIS]. It costs little,
- *    answers whenever Android lets the app locate at that moment (the app is open, or the
- *    user granted "allow all the time" in the system settings), and simply times out otherwise.
+ * 2. the newest position Android still keeps for the app (getLastKnownLocation), which costs
+ *    nothing and wakes nothing.
  *
  * A widget whose content depends on a position older than [POSITION_NOTE_MINUTES] says how old
  * it is ("Location from 25 min ago"), so a stale nearest stop is never taken for the current one.
@@ -43,9 +34,6 @@ internal const val POSITION_NOTE_MINUTES = 10L
 
 // The app stores a new position for the widgets at most this often.
 private const val RECORD_EVERY_MILLIS = 30_000L
-
-// How long the widget job waits for the one balanced position request.
-private const val FRESH_FIX_TIMEOUT_MILLIS = 8_000L
 
 /** The newer of two positions; one with an unknown time loses against one with a time. */
 internal fun newerPosition(a: TimedPosition?, b: TimedPosition?): TimedPosition? = when {
@@ -93,36 +81,4 @@ internal fun recordWidgetPosition(prefs: AppPrefs, position: TimedPosition) {
     if (stored != null && position.at <= stored.at) return
     prefs.widgetPosition = position.pair
     prefs.widgetPositionAt = position.at
-}
-
-/**
- * One balanced request of the fused provider of the platform (network and Wi-Fi rather than
- * satellites), or of the network where it is missing. Null without permission, when Android
- * gives the app no position in the background, or when none comes in time.
- */
-internal suspend fun balancedWidgetLocation(context: Context): Location? {
-    if (!hasLocationPermission(context)) return null
-    val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
-    val enabled = manager.getProviders(true)
-    val provider = listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER)
-        .firstOrNull { it in enabled } ?: return null
-    val request = LocationRequest.Builder(0L)
-        .setQuality(LocationRequest.QUALITY_BALANCED_POWER_ACCURACY)
-        .setDurationMillis(FRESH_FIX_TIMEOUT_MILLIS)
-        .build()
-    return withTimeoutOrNull(FRESH_FIX_TIMEOUT_MILLIS) {
-        suspendCancellableCoroutine { continuation ->
-            val signal = CancellationSignal()
-            continuation.invokeOnCancellation { signal.cancel() }
-            try {
-                manager.getCurrentLocation(provider, request, signal, context.mainExecutor) { location ->
-                    if (continuation.isActive) continuation.resume(location)
-                }
-            } catch (e: SecurityException) {
-                continuation.resume(null)
-            } catch (e: IllegalArgumentException) {
-                continuation.resume(null)
-            }
-        }
-    }
 }

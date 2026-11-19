@@ -51,7 +51,8 @@ object LocalFollow {
         private set
 
     /** The step of the journey at [now], with the destination for "Missed it". */
-    fun snapshot(chosen: Journey, now: Long): TripSnapshot = snapshotOf(chosen, now).copy(target = destination)
+    // The names as the watch shows them: the providers it asks write the town ("(Berlin)", #177).
+    fun snapshot(chosen: Journey, now: Long): TripSnapshot = tripWithShownNames(snapshotOf(chosen, now).copy(target = destination))
 
     /**
      * The one "Start" of the watch: follows [chosen] here at once and asks the phone to
@@ -124,7 +125,8 @@ object LocalFollow {
                     if (token != null && !token.startsWith(FOREIGN_TOKEN_PREFIX) && now - lastLoad >= REFRESH_MILLIS) {
                         lastLoad = now
                         try {
-                            client.refreshJourney(token)?.let { journey = it.copy(refreshToken = it.refreshToken ?: token) }
+                            // Where to board and the phone's ratings come with the search, not the reload: kept.
+                            client.refreshJourney(token)?.let { journey = withSearchFacts(it.copy(refreshToken = it.refreshToken ?: token), current) }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -138,7 +140,8 @@ object LocalFollow {
                         if (!isActive) return@launch
                         WatchStore.saveTrip(app, snapshot)
                     }
-                    if (snapshot.alert && WatchStore.takeAlert(app, snapshot.alertKey)) alertGetOff(app, snapshot.place, snapshot.change)
+                    if (snapshot.alert && WatchStore.takeAlert(app, snapshot.alertKey)) alertGetOff(app, snapshot.place, snapshot.change, snapshot.alertKey)
+                    clearOutlivedAlert(app, snapshot)
                     NextTileService.requestUpdate(app)
                     NextComplicationService.requestUpdate(app)
                     if (snapshot.kind == StepKind.Arrived && now > (journey ?: current).arrival + AFTER_ARRIVAL_MILLIS) {
@@ -163,6 +166,7 @@ object LocalFollow {
             followingState.value = false
             if (clear && !WatchStore.trip.value.fromPhone) {
                 WatchStore.saveTrip(context.applicationContext, TripSnapshot.NONE)
+                clearOutlivedAlert(context.applicationContext, TripSnapshot.NONE)
                 NextTileService.requestUpdate(context)
                 NextComplicationService.requestUpdate(context)
             }

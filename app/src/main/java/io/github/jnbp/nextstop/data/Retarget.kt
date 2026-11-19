@@ -1,9 +1,6 @@
 package io.github.jnbp.nextstop.data
 
-import java.time.Duration
 import java.time.OffsetDateTime
-import kotlin.math.abs
-import kotlin.math.cos
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -72,11 +69,8 @@ fun retargetPoints(journey: Journey, now: OffsetDateTime, course: TripCourse?, m
 fun vehicleStops(leg: Leg, course: TripCourse?): List<Stopover> {
     val own = leg.stopovers
     val stops = course?.stops ?: return own
-    val timed = stops.indexOfFirst { stop ->
-        val departure = stop.departure
-        stop.name == leg.from && departure != null && abs(Duration.between(departure, leg.departure).toMinutes()) <= 5
-    }
-    val board = if (timed >= 0) timed else stops.indexOfFirst { it.name == leg.from }
+    // On a ring the boarding stop comes round more than once: the call at the time of the ride.
+    val board = TripMatch.boardIndex(stops, leg)
     if (board < 0 || stops.size - board < own.size) return own
     return stops.drop(board)
 }
@@ -88,9 +82,21 @@ fun rideUntil(leg: Leg, stops: List<Stopover>, position: Int, course: TripCourse
     val target = stop.place?.position
     val way = course?.path.orEmpty()
     val start = leg.path.firstOrNull() ?: stops.first().place?.position
-    val path = if (way.size >= 2 && start != null && target != null) {
-        val from = nearestIndex(way, start, 0)
-        val to = nearestIndex(way, target, from)
+    // Where the stops come from the whole run, the way is cut between their own calls on it: on
+    // a ring the nearest point to a stop anywhere may lie a lap away (see TripMatch).
+    val runStops = course?.stops
+    val board = if (runStops != null && way.size >= 2) TripMatch.boardIndex(runStops, leg) else -1
+    val fromRun = board >= 0 && runStops != null && runStops.size - board == stops.size
+    val cut = if (fromRun && runStops != null) {
+        TripMatch.cutBetween(way, runStops.map { it.place?.position }, board, board + position)
+    } else {
+        null
+    }
+    val path = if (cut != null) {
+        cut
+    } else if (way.size >= 2 && start != null && target != null) {
+        val from = TripMatch.pathIndex(way, start, 0)
+        val to = TripMatch.pathIndex(way, target, from)
         if (to > from) way.subList(from, to + 1) else leg.path + target
     } else if (target != null) {
         leg.path + target
@@ -106,15 +112,6 @@ fun rideUntil(leg: Leg, stops: List<Stopover>, position: Int, course: TripCourse
         stopovers = stops.take(position + 1),
         path = path,
     )
-}
-
-private fun nearestIndex(path: List<Pair<Double, Double>>, point: Pair<Double, Double>, from: Int): Int {
-    val scale = cos(Math.toRadians(point.first))
-    return (from until path.size).minByOrNull { index ->
-        val north = path[index].first - point.first
-        val east = (path[index].second - point.second) * scale
-        north * north + east * east
-    } ?: from
 }
 
 /** A way to the new destination: leave the followed journey at [point], then take [option]. */

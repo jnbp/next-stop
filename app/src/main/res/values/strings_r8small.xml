@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Variante 2: the list of other ways under a change shows three rows at first -->
+    <string name="r8s_ways_more">Show more</string>
+</resources>

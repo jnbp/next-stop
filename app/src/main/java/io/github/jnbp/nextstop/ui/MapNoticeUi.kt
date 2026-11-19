@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.jnbp.nextstop.R
+import io.github.jnbp.nextstop.data.AlertHarvest
 import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.data.Disruption
 import io.github.jnbp.nextstop.data.HIDDEN_NOTICE_KEEP_MILLIS
@@ -44,6 +45,8 @@ import io.github.jnbp.nextstop.data.NOTICE_AREA_METERS
 import io.github.jnbp.nextstop.data.NamedStops
 import io.github.jnbp.nextstop.data.NoticeMarker
 import io.github.jnbp.nextstop.data.OsmStations
+import io.github.jnbp.nextstop.data.PlaceIcon
+import io.github.jnbp.nextstop.data.RoutingSource
 import io.github.jnbp.nextstop.data.Stop
 import io.github.jnbp.nextstop.data.TransitSource
 import io.github.jnbp.nextstop.data.bigStopsIn
@@ -207,15 +210,17 @@ object MapNoticePool {
 
     /**
      * Every notice known now, each once: those kept here (no older than [POOL_MAX_AGE_MILLIS]),
-     * those of the stored statuses of the routes [routeIds], and those around the places of
-     * "My routes". Reads the stored statuses: call off the main thread.
+     * those of the stored statuses of the routes [routeIds], those around the places of
+     * "My routes", and those noted from the journeys and departures loaded lately (see
+     * AlertHarvest: the notices of Transitous away from Berlin). Reads the stored statuses:
+     * call off the main thread.
      */
     fun known(context: Context, routeIds: List<String>): List<Disruption> {
         val now = System.currentTimeMillis()
         val pooled = synchronized(lists) { lists.values.filter { now - it.millis <= POOL_MAX_AGE_MILLIS }.map { it.items } }
         val routes = routeIds.distinct().mapNotNull { DisruptionWatch.statusOf(context, it)?.disruptions() }
         val places = PlaceDisruptionCache.all().map { it.disruptions }
-        return mergeDisruptions(pooled + routes + places)
+        return mergeDisruptions(pooled + routes + places + listOf(AlertHarvest.current()))
     }
 
     /**
@@ -461,3 +466,13 @@ fun HiddenNoticesSheet(onDismiss: () -> Unit) {
         }
     }
 }
+
+/**
+ * The places the overview of disruptions treats as the region (see nationwideDisruptions):
+ * where the user is (or the middle of the map), and home. Positions only; nothing is stored.
+ */
+internal fun disruptionAnchors(prefs: AppPrefs, source: RoutingSource): List<Pair<Double, Double>> =
+    listOfNotNull(
+        source.searchNear ?: source.searchRegion,
+        prefs.loadFavoritePlaces().firstOrNull { it.icon == PlaceIcon.Home }?.place?.position,
+    )

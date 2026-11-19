@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
@@ -55,7 +56,6 @@ import kotlin.math.log2
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.tan
-import kotlinx.coroutines.delay
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.Disruption
 import io.github.jnbp.nextstop.data.spotMeters
@@ -314,7 +314,14 @@ fun WaysMapHeader(
         }
         places.forEachIndexed { index, place ->
             val at = camera.place(place.position, width, height)
-            if (!inside(at)) return@forEachIndexed
+            if (!inside(at)) {
+                // Off the picture (another city): an arrow at the edge points towards it.
+                val arrow = edgeArrow(at, width, height, EDGE_INSET) ?: return@forEachIndexed
+                MapAppear(ready = ready, animate = animate, order = index) { appear ->
+                    EdgeArrowMark(place = place, arrow = arrow, appear = appear)
+                }
+                return@forEachIndexed
+            }
             MapAppear(ready = ready, animate = animate, order = index) { appear ->
                 Box(
                     modifier = Modifier
@@ -400,6 +407,52 @@ fun WaysMapHeader(
 }
 
 /**
+ * A place beyond the edge of the picture: its icon in a small round mark at the edge, with a
+ * tip on the side towards it; a tap opens it as its pin would.
+ */
+@Composable
+private fun EdgeArrowMark(place: WaysMapPlace, arrow: EdgeArrow, appear: Float) {
+    val tip = AppColors.Blue
+    Box(
+        modifier = Modifier
+            .offset((arrow.x - EDGE_MARK / 2).dp, (arrow.y - EDGE_MARK / 2).dp)
+            .size(EDGE_MARK.dp)
+            .graphicsLayer {
+                scaleX = appear
+                scaleY = appear
+                alpha = appear
+            }
+            .semantics { contentDescription = place.name }
+            .clickable(role = Role.Button, onClick = place.onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        // The tip, turned towards the place; its path is made once per size (drawWithCache).
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { rotationZ = arrow.degrees.toFloat() }
+                .drawWithCache {
+                    val r = size.minDimension / 2f
+                    val edge = 3.dp.toPx()
+                    // The middle of the mark (a cache scope has no centre of its own).
+                    val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(center.x + r, center.y)
+                        lineTo(center.x + r - edge * 2.2f, center.y - edge * 1.8f)
+                        lineTo(center.x + r - edge * 2.2f, center.y + edge * 1.8f)
+                        close()
+                    }
+                    onDrawBehind {
+                        drawCircle(color = tip, radius = r - edge)
+                        drawPath(path, color = tip)
+                    }
+                },
+        )
+        GlyphIcon(place.glyph, color = AppColors.OnBlue, size = 13.dp)
+    }
+}
+
+/**
  * A marker that comes in once the picture is there: grows and fades in a little after the one
  * before it ([order]); at once with animations off. [content] gets how far it is in (0..1).
  */
@@ -408,7 +461,7 @@ private fun MapAppear(ready: Boolean, animate: Boolean, order: Int, content: @Co
     val appear = remember { Animatable(if (animate) 0f else 1f) }
     LaunchedEffect(ready) {
         if (!ready || appear.value >= 1f) return@LaunchedEffect
-        delay(MAP_SETTLE_MILLIS / 2L + order.coerceAtMost(8) * PIN_STAGGER_MILLIS)
+        animationDelay(MAP_SETTLE_MILLIS / 2L + order.coerceAtMost(8) * PIN_STAGGER_MILLIS)
         appear.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow))
     }
     if (!ready && animate) return
@@ -485,3 +538,7 @@ private const val WAYS_METERS_PER_DEGREE = 111_320.0
 
 // Where the map looks without any place or position: the middle of Berlin.
 private val BERLIN_MIDDLE = 52.52 to 13.405
+
+// The marks of places beyond the edge: their size, and how far inside the edge their middle sits.
+private const val EDGE_MARK = 28.0
+private const val EDGE_INSET = 18.0

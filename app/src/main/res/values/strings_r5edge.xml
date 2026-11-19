@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The badge at an edge of the connection chart while a page loads there, or after one that showed nothing new. -->
+    <string name="chart_edge_loading_earlier">Earlier …</string>
+    <string name="chart_edge_loading_later">Later …</string>
+    <string name="chart_edge_failed">Could not load. Pull again to retry.</string>
+    <string name="chart_edge_hidden">Only hidden connections came. Pull again for more.</string>
+    <string name="chart_edge_nothing_earlier">No new earlier connections. Pull again for more.</string>
+    <string name="chart_edge_nothing_later">No new later connections. Pull again for more.</string>
+    <string name="chart_edge_end_earlier">No earlier connections</string>
+    <string name="chart_edge_end_later">No later connections</string>
+</resources>

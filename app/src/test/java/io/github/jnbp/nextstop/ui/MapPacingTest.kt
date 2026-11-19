@@ -99,4 +99,27 @@ class MapPacingTest {
         assertEquals(2.0, backdropGrow(16.0, 15.0).toDouble(), 1e-6)
         assertEquals(0.5, backdropGrow(14.0, 15.0).toDouble(), 1e-6)
     }
+
+    @Test
+    fun dotRowsShrinkTowardTheirStationFarOut() {
+        assertEquals(1f, dotRowScale(14.0, 12.0), 0f)
+        assertEquals(1f, dotRowScale(12.0, 12.0), 0f)
+        // Continuous: no jump where the signs end.
+        assertEquals(1f, dotRowScale(11.999, 12.0), 0.01f)
+        assertEquals(DOT_ROW_FAR_SCALE, dotRowScale(10.5, 12.0), 1e-6f)
+        assertEquals(DOT_ROW_FAR_SCALE, dotRowScale(9.0, 12.0), 1e-6f)
+        val middle = dotRowScale(11.25, 12.0)
+        assertTrue(middle > DOT_ROW_FAR_SCALE && middle < 1f)
+    }
+
+    @Test
+    fun dotRowDriftCountsZoomAndScale() {
+        // Closer in than the signs it is the plain drift of the zoom.
+        assertEquals(dotDriftDp(20f, 13.0, 14.0), dotRowDriftDp(20f, 13.0, 14.0, 12.0), 1e-9)
+        // Unchanged camera: no drift; none without a row.
+        assertEquals(0.0, dotRowDriftDp(20f, 11.0, 11.0, 12.0), 1e-9)
+        assertEquals(0.0, dotRowDriftDp(0f, 11.0, 10.0, 12.0), 1e-9)
+        // Far out a zoom step moves the dot by the halved offset at the same small scale.
+        assertEquals(20.0 * DOT_ROW_FAR_SCALE * 0.5, dotRowDriftDp(20f, 10.0, 9.0, 12.0), 1e-6)
+    }
 }

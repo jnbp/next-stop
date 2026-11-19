@@ -18,7 +18,7 @@
     <string name="setup_live_name_preview_none">Unterwegs nach %1$s</string>
     <string name="setup_sample_destination">Alexanderplatz</string>
     <string name="setup_sample_appointment">14:00 Zahnarzt · Alexanderplatz</string>
-    <string name="setup_sample_leave">los in 12 min · U8 ab 13:41</string>
+    <string name="setup_sample_leave">los in 12′ · U8 ab 13:41</string>
     <string name="setup_vehicles_short">Ein grüner Punkt heißt: Live-Daten.</string>
     <string name="setup_map_style_short">Tipp einen Stil an, die Karte folgt.</string>
     <string name="setup_notifications_short">Deine Fahrt in der Statusleiste, mit Erinnerung ans Aussteigen.</string>

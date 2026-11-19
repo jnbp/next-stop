@@ -22,7 +22,7 @@ const {
   parseTransitousTrip, distance, along, cutPath, cutPathBetween, expectedTime, matchStop, tripUrl, guessProduct,
   canonicalLine, lineColor, inkOn, ROUTE_DRAW_MS, textNumber, rollsUp, lineLength, snakeFeatures, easeOutCubic,
   ageText, freshness, freshnessText, clock, delayText, delayLevel, readLinkFragment, pickLanguage,
-  counterText, progressSegments, sheetRest, sheetClamp, appIntentUrl, PLAY_URL,
+  counterText, progressSegments, sheetRest, sheetClamp, sheetDragMode, appIntentUrl, PLAY_URL,
 } = core;
 
 // Polling of each running ride: every 20 s while the page is seen, every 60 s while it is hidden.
@@ -977,7 +977,7 @@ if (typeof module !== 'undefined' && module.exports) {
     freshnessText, pollDelay, timelineModel, lineColor, inkOn, guessProduct, distance, EXPIRY_MS, POLL_MS,
     textNumber, rollsUp, lineLength, snakeFeatures, easeOutCubic, confettiPieces, confettiAt, CONFETTI_SECONDS,
     CONFETTI_COUNT, ROUTE_DRAW_MS, heroModel, arrivalHero, nowLine, nextStepLine, heroShowsClock, HERO_CLOCK_FROM_MINUTES, platformLabel, progressSegments, counterText, sheetRest, sheetClamp,
-    appIntentUrl, PLAY_URL,
+    sheetDragMode, appIntentUrl, PLAY_URL,
   };
 }
 
@@ -1138,9 +1138,14 @@ if (typeof document !== 'undefined') {
       }
 
       // Dragging the grabber or the hero moves the sheet with the finger; it rests open or collapsed.
-      function startDrag(e) {
+      // The whole head of the open sheet pulls it down too, as a native bottom sheet (#262); pushed
+      // up there, the hero scrolls the content instead (see sheetDragMode).
+      function startDrag(e, handle) {
         if (isWide() || (e.button != null && e.button !== 0)) return;
-        dragging = { y: e.clientY, from: sheetOffset, t: performance.now(), v: 0, moved: false, id: e.pointerId };
+        dragging = {
+          y: e.clientY, from: sheetOffset, t: performance.now(), v: 0, moved: false, id: e.pointerId,
+          handle, scroll: $('sheet-body').scrollTop, mode: null,
+        };
         $('sheet').classList.add('dragging');
       }
       function moveDrag(e) {
@@ -1148,6 +1153,11 @@ if (typeof document !== 'undefined') {
         const dy = e.clientY - dragging.y;
         if (Math.abs(dy) > 6) dragging.moved = true;
         if (!dragging.moved) return;
+        if (!dragging.mode) dragging.mode = sheetDragMode(dragging.handle, sheetOpen, dy, dragging.scroll);
+        if (dragging.mode === 'scroll') {
+          $('sheet-body').scrollTop = Math.max(0, dragging.scroll - dy);
+          return;
+        }
         const t = performance.now();
         const next = sheetClamp(dragging.from + dy, sheetClosed);
         dragging.v = (next - sheetOffset) / Math.max(1, t - dragging.t);
@@ -1165,6 +1175,7 @@ if (typeof document !== 'undefined') {
           else layoutVars();
           return;
         }
+        if (d.mode === 'scroll') return;
         setSheet(sheetRest(sheetOffset, d.v, sheetClosed) === 0);
       }
 
@@ -1706,7 +1717,7 @@ if (typeof document !== 'undefined') {
       $('follow').addEventListener('click', () => setFollowing(true));
       [$('grabber'), $('hero')].forEach((handle) => {
         handle.addEventListener('pointerdown', (e) => {
-          startDrag(e);
+          startDrag(e, handle.id);
           if (dragging && handle.setPointerCapture) handle.setPointerCapture(e.pointerId);
         });
         handle.addEventListener('pointermove', moveDrag);

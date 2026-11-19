@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Time travel on the overview of the live trip: the time and place of the row in the middle. -->
+    <string name="r6ideas_tt_at">at %1$s · %2$s</string>
+    <!-- The minutes to spare at the next change from there. -->
+    <string name="r6ideas_tt_buffer">%1$d′ to spare</string>
+    <string name="r6ideas_tt_short">%1$d′ short</string>
+    <!-- The short status of the trip on the watch face before the minutes ("Aussteigen 2'"). -->
+    <string name="r6ideas_ongoing_get_off">Get off</string>
+    <string name="r6ideas_ongoing_change">Change</string>
+</resources>

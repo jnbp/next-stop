@@ -1,5 +1,8 @@
 package io.github.jnbp.nextstop.ui
 
+import io.github.jnbp.nextstop.data.StopAction
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.mutableIntStateOf
 import android.Manifest
 import android.content.ActivityNotFoundException
@@ -61,6 +64,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
@@ -95,10 +100,14 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.graphics.SolidColor
+import io.github.jnbp.nextstop.data.ChartShortLegs
 import io.github.jnbp.nextstop.data.ChartTotalTime
+import io.github.jnbp.nextstop.data.SHORTCUT_MINUTE_CHOICES
 import io.github.jnbp.nextstop.data.DelayDisplay
 import io.github.jnbp.nextstop.data.SearchBlocks
 import io.github.jnbp.nextstop.data.longDistanceBlocks
+import io.github.jnbp.nextstop.data.searchSections
+import io.github.jnbp.nextstop.data.departureModeFilters
 import io.github.jnbp.nextstop.data.townOf
 import io.github.jnbp.nextstop.data.BvgRestSource
 import androidx.compose.material3.Text
@@ -106,6 +115,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
@@ -140,6 +150,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -150,6 +161,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import java.time.OffsetDateTime
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
+import io.github.jnbp.nextstop.data.peopleIndex
+import io.github.jnbp.nextstop.data.peopleMatchingIn
+import androidx.compose.ui.semantics.selected
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -163,6 +178,7 @@ import io.github.jnbp.nextstop.data.Appointment
 import io.github.jnbp.nextstop.data.Backend
 import io.github.jnbp.nextstop.data.PteSource
 import io.github.jnbp.nextstop.data.ContactAddress
+import io.github.jnbp.nextstop.data.QuickStop
 import io.github.jnbp.nextstop.data.Departure
 import io.github.jnbp.nextstop.data.OsmLine
 import io.github.jnbp.nextstop.data.FavoritePlace
@@ -172,12 +188,22 @@ import io.github.jnbp.nextstop.data.PLACE_RADII
 import io.github.jnbp.nextstop.data.withLocalOnly
 import io.github.jnbp.nextstop.data.PlaceDisruptions
 import io.github.jnbp.nextstop.data.PlaceIcon
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import io.github.jnbp.nextstop.data.PlannedTrips
+import io.github.jnbp.nextstop.data.TripStats
+import io.github.jnbp.nextstop.data.tripSummary
 import io.github.jnbp.nextstop.data.PlaceKind
 import io.github.jnbp.nextstop.data.SavedPlace
 import io.github.jnbp.nextstop.data.SavedRoute
 import io.github.jnbp.nextstop.data.spotMeters
 import io.github.jnbp.nextstop.data.SavedPattern
 import io.github.jnbp.nextstop.data.Disruption
+import io.github.jnbp.nextstop.data.DisruptionTapTarget
+import io.github.jnbp.nextstop.data.disruptionTapTarget
+import io.github.jnbp.nextstop.data.waysDisruptionsIndex
 import io.github.jnbp.nextstop.data.WayNotices
 import io.github.jnbp.nextstop.data.waysPill
 import io.github.jnbp.nextstop.data.noticesOnLines
@@ -200,10 +226,12 @@ import io.github.jnbp.nextstop.data.placeScore
 import io.github.jnbp.nextstop.data.resolveContactPlace
 import io.github.jnbp.nextstop.data.resolvePlace
 import io.github.jnbp.nextstop.data.searchTokens
+import io.github.jnbp.nextstop.data.servicesUnreachable
 import io.github.jnbp.nextstop.data.shortStopName
 import io.github.jnbp.nextstop.data.stopNamePart
 import io.github.jnbp.nextstop.data.listedStopName
 import io.github.jnbp.nextstop.data.upcomingAppointments
+import io.github.jnbp.nextstop.data.UxPrefs
 import io.github.jnbp.nextstop.data.walkableFrom
 import io.github.jnbp.nextstop.data.anyWalkableFrom
 import io.github.jnbp.nextstop.data.boardDisruptions
@@ -251,10 +279,18 @@ fun SearchPanel(
     // the share gave one, is offered on top while the text is unchanged. The user confirms.
     initialQuery: String = "",
     offered: Stop? = null,
+    // With a target, a chip offers to choose the place on the map instead (see MapPick.kt).
+    mapPick: MapPickTarget? = null,
+    // "Von wo?": stops near the user under "Aktueller Standort" while nothing is typed (#173).
+    nearbyQuick: List<QuickStop> = emptyList(),
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf(initialQuery) }
+    // What was picked, shown in the field in place of the typed text from the tap on (#126): a
+    // contact's address is looked up first, and the panel closes after that, so the text typed
+    // before must not stay in the field meanwhile. Not searched for; typing again lets it go.
+    var pickedText by remember { mutableStateOf<String?>(null) }
     // The text last put in with the paste button: it is searched for without the pause for typing.
     var pastedQuery by remember { mutableStateOf<String?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -264,13 +300,24 @@ fun SearchPanel(
     // True while the providers are asked for what is typed; true after a search that failed.
     var searching by remember { mutableStateOf(false) }
     var searchFailed by remember { mutableStateOf(false) }
+    // Why it failed: no source reached says "Dienste nicht erreichbar" (#196).
+    var searchFailure by remember { mutableStateOf<Exception?>(null) }
     val focusRequester = remember { FocusRequester() }
-    // Contacts are read when asked for and only held while this panel is open.
+    // Contacts are read when the panel opens, where the app may read them (the search finds
+    // them while typing, #68), or when asked for, and only held while this panel is open.
     var contactsOpen by remember { mutableStateOf(false) }
+    var calendarOpen by remember { mutableStateOf(false) }
     var contactsDenied by remember { mutableStateOf(false) }
+    var contactsGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED,
+        )
+    }
     var contacts by remember { mutableStateOf<List<ContactAddress>?>(null) }
-    var contactNotFound by remember { mutableStateOf(false) }
     var resolving by remember { mutableStateOf(false) }
+    // The contact whose address is looked up now, and the one whose address was not found (#58).
+    var resolvingContact by remember { mutableStateOf<ContactAddress?>(null) }
+    var failedContact by remember { mutableStateOf<ContactAddress?>(null) }
     val expand = remember { Animatable(if (expandFromY == null) 1f else 0f) }
     val fieldTop = remember { mutableFloatStateOf(Float.NaN) }
 
@@ -278,18 +325,24 @@ fun SearchPanel(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         contactsDenied = !granted
+        if (granted) contactsGranted = true
+        calendarOpen = false
         contactsOpen = true
     }
-    // The appointments of the calendar with a place, read when asked for and only held while open.
-    var calendarOpen by remember { mutableStateOf(false) }
+    // The appointments of the calendar with a place, read when the panel opens where the app may
+    // read them (#68) or when asked for, and only held while open.
     var calendarDenied by remember { mutableStateOf(false) }
+    var calendarGranted by remember { mutableStateOf(onPickAppointment != null && hasCalendarPermission(context)) }
     var calendarList by remember { mutableStateOf<List<Appointment>?>(null) }
     var appointmentNotFound by remember { mutableStateOf(false) }
     val calendarLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         calendarDenied = !granted
-        if (granted) onCalendarGranted()
+        if (granted) {
+            calendarGranted = true
+            onCalendarGranted()
+        }
         contactsOpen = false
         calendarOpen = true
     }
@@ -298,17 +351,32 @@ fun SearchPanel(
 
     // The address of the picked contact is resolved by its fields and checked against its
     // postcode and town (see resolveContactPlace), so a street of the same name elsewhere is not taken.
+    // The row says that it is looked up; a lookup that fails or takes too long ends as "not
+    // found" beside the row, and the rows can be tapped again (#58: one that never ended left
+    // every row disabled, without a word).
     fun pickContact(contact: ContactAddress) {
+        if (resolving) return
+        pickedText = contact.address.replace("\n", ", ")
         resolving = true
-        contactNotFound = false
+        resolvingContact = contact
+        failedContact = null
         scope.launch {
-            val place = resolveContactPlace(context, source, contact, approximateNote)
-            resolving = false
+            val place = try {
+                withTimeoutOrNull(CONTACT_RESOLVE_MILLIS) { resolveContactPlace(context, source, contact, approximateNote) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            } finally {
+                resolving = false
+                resolvingContact = null
+            }
             if (place != null) {
                 onRemember(place)
                 onPick(place)
             } else {
-                contactNotFound = true
+                failedContact = contact
+                pickedText = null
             }
         }
     }
@@ -316,32 +384,47 @@ fun SearchPanel(
     // The place of a picked appointment is found from its location as for the appointment card.
     fun pickAppointment(appointment: Appointment) {
         val pick = onPickAppointment ?: return
+        pickedText = appointment.location
         resolving = true
         appointmentNotFound = false
         scope.launch {
-            val place = source.resolvePlace(appointment.location)
-            resolving = false
+            val place = try {
+                withTimeoutOrNull(CONTACT_RESOLVE_MILLIS) { source.resolvePlace(appointment.location) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            } finally {
+                resolving = false
+            }
             if (place != null) {
                 val found = place.copy(distanceMeters = null)
                 onRemember(found)
                 pick(appointment, found)
             } else {
                 appointmentNotFound = true
+                pickedText = null
             }
         }
     }
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
-    LaunchedEffect(calendarOpen, calendarDenied) {
-        if (calendarOpen && !calendarDenied) {
-            calendarList = upcomingAppointments(context, days = APPOINTMENT_DAYS, limit = APPOINTMENT_ROWS)
+    LaunchedEffect(calendarOpen, calendarDenied, calendarGranted) {
+        if (calendarList == null && (calendarGranted || (calendarOpen && !calendarDenied))) {
+            calendarList = upcomingAppointments(
+                context,
+                days = APPOINTMENT_DAYS,
+                limit = APPOINTMENT_ROWS,
+                afterMinutes = UxPrefs(context).appointmentAfterMinutes,
+            )
         }
     }
     LaunchedEffect(expand) {
         expand.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
     }
-    LaunchedEffect(contactsOpen, contactsDenied) {
-        if (contactsOpen && !contactsDenied) contacts = loadContactAddresses(context)
+    LaunchedEffect(contactsOpen, contactsDenied, contactsGranted) {
+        if (stopsOnly || contacts != null) return@LaunchedEffect
+        if (contactsGranted || (contactsOpen && !contactsDenied)) contacts = loadContactAddresses(context)
     }
     // Search as you type: every key restarts this effect, which cancels the request of the
     // text before (stale answers never land). After a short quiet the providers (BVG and the
@@ -386,15 +469,18 @@ fun SearchPanel(
                         emptyList()
                     }
                 }
+                var failure: Exception? = null
                 val found = try {
                     source.searchStops(text)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    failure = e
                     null
                 }
                 val resolved = resolving.await()
                 searchFailed = found == null && resolved == null
+                searchFailure = if (searchFailed) failure else null
                 // A failed search keeps what is shown; an answer replaces it.
                 if (!searchFailed) {
                     results = (listOfNotNull(resolved) + found.orEmpty())
@@ -433,8 +519,11 @@ fun SearchPanel(
             GlassSurface(modifier = Modifier.weight(1f), shape = RoundedCornerShape(30.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     BasicTextField(
-                        value = query,
-                        onValueChange = { query = it },
+                        value = pickedText ?: query,
+                        onValueChange = {
+                            pickedText = null
+                            query = it
+                        },
                         singleLine = true,
                         textStyle = TextStyle(
                             color = AppColors.Ink,
@@ -448,7 +537,7 @@ fun SearchPanel(
                             .padding(horizontal = 20.dp, vertical = 15.dp),
                         decorationBox = { innerTextField ->
                             Box {
-                                if (query.isEmpty()) {
+                                if ((pickedText ?: query).isEmpty()) {
                                     Text(
                                         text = placeholder,
                                         color = AppColors.Muted,
@@ -462,9 +551,10 @@ fun SearchPanel(
                     )
                     // Typed text goes with one tap; the field keeps the focus, so typing goes on.
                     FieldClearButton(
-                        visible = query.isNotEmpty(),
+                        visible = (pickedText ?: query).isNotEmpty(),
                         onClear = {
                             query = ""
+                            pickedText = null
                             pastedQuery = null
                             try {
                                 focusRequester.requestFocus()
@@ -476,6 +566,7 @@ fun SearchPanel(
                     // A copied address goes into the field with one tap and is searched for at once.
                     ClipboardPasteButton(
                         onPaste = { text ->
+                            pickedText = null
                             pastedQuery = text
                             contactsOpen = false
                             calendarOpen = false
@@ -510,27 +601,25 @@ fun SearchPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (quickShown) {
-                    quickPlaces.forEach { favorite ->
-                        val place = favorite.place ?: return@forEach
-                        QuickPlaceChip(
-                            glyph = placeGlyph(favorite.icon),
-                            name = favorite.name.ifBlank { placeIconLabel(favorite.icon) },
-                            onClick = { onPick(place) },
-                        )
-                    }
-                    quickSaved.forEach { place ->
-                        QuickPlaceChip(
-                            glyph = placeGlyph(place.icon),
-                            name = savedPlaceName(place),
-                            onClick = { onPick(place.place) },
-                            small = true,
-                        )
-                    }
-                }
-                if (!stopsOnly) ChoiceChip(
-                    text = stringResource(R.string.contacts),
-                    active = contactsOpen,
+                // The place chosen on the map: the search gives way to the map with a pin in its middle.
+                // Compact round buttons with their names read out (#68), not wide chips.
+                if (mapPick != null) RoundButton(
+                    glyph = Glyph.Map,
+                    description = stringResource(R.string.r3map_pick_on_map),
+                    size = SEARCH_TOOL_SIZE,
+                    onClick = {
+                        keyboard?.hide()
+                        MapPick.begin(mapPick, source)
+                        onClose()
+                    },
+                )
+                // All contacts with an address, as a list to filter (the search finds them anyway).
+                if (!stopsOnly) RoundButton(
+                    glyph = Glyph.Friends,
+                    description = stringResource(R.string.contacts),
+                    size = SEARCH_TOOL_SIZE,
+                    solid = contactsOpen,
+                    modifier = Modifier.semantics { selected = contactsOpen },
                     onClick = {
                         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
                             PackageManager.PERMISSION_GRANTED
@@ -546,9 +635,12 @@ fun SearchPanel(
                     },
                 )
                 // The appointments of the next days with a place: one tap takes that place.
-                if (!stopsOnly && onPickAppointment != null) ChoiceChip(
-                    text = stringResource(R.string.appointments_chip),
-                    active = calendarOpen,
+                if (!stopsOnly && onPickAppointment != null) RoundButton(
+                    glyph = Glyph.Calendar,
+                    description = stringResource(R.string.appointments_chip),
+                    size = SEARCH_TOOL_SIZE,
+                    solid = calendarOpen,
+                    modifier = Modifier.semantics { selected = calendarOpen },
                     onClick = {
                         when {
                             calendarOpen -> calendarOpen = false
@@ -561,6 +653,31 @@ fun SearchPanel(
                         }
                     },
                 )
+                // The favourite and saved places after the small buttons, so these stay in reach.
+                if (quickShown) {
+                    quickPlaces.forEach { favorite ->
+                        val place = favorite.place ?: return@forEach
+                        QuickPlaceChip(
+                            glyph = placeGlyph(favorite.icon),
+                            name = favorite.name.ifBlank { placeIconLabel(favorite.icon) },
+                            onClick = {
+                                pickedText = place.name
+                                onPick(place)
+                            },
+                        )
+                    }
+                    quickSaved.forEach { place ->
+                        QuickPlaceChip(
+                            glyph = placeGlyph(place.icon),
+                            name = savedPlaceName(place),
+                            onClick = {
+                                pickedText = place.place.name
+                                onPick(place.place)
+                            },
+                            small = true,
+                        )
+                    }
+                }
             }
         }
 
@@ -601,8 +718,49 @@ fun SearchPanel(
                 fixed = (lead + historyShown + pinned).mapTo(HashSet()) { it.id },
             )
         }
-        val shown = blocks.local
+        // While typing, the list comes in fixed sections (#208, SEARCH_SECTION_ORDER): the own position,
+        // contacts and appointments, what is known at once (history, favourites), stations (local, then
+        // long-distance), places. A late answer goes into its own section and never pushes an earlier
+        // one down (see searchSections).
+        val sections = if (text.length < SEARCH_MIN_CHARS) {
+            null
+        } else {
+            val fixedIds = (lead + historyShown + pinned).mapTo(HashSet()) { it.id }
+            searchSections(
+                instant = blocks.local.filter { it.id in fixedIds },
+                found = blocks.local.filter { it.id !in fixedIds },
+                far = blocks.far,
+                near = suggestions.firstOrNull { it.id == CURRENT_LOCATION_ID }?.position,
+                leadIds = lead.mapTo(HashSet()) { it.id },
+            )
+        }
+        // The fixed first rows: while typing only the own position (the rest of what is known
+        // comes below the contacts and appointments), else the whole list as before.
+        val shown = sections?.lead ?: blocks.local
+        val knownShown = sections?.instant.orEmpty()
         val farShown = blocks.far
+        val anyShown = shown.isNotEmpty() || (sections != null && sections.all.size > shown.size) || farShown.isNotEmpty()
+        // Contacts and appointments that fit what is typed, where the app may read them (#68):
+        // a few of each below the places, without opening their lists first.
+        val listOpen = contactsOpen || calendarOpen
+        // Their words are taken apart once when they are read, not at every key (#109).
+        val contactIndex = remember(known) { peopleIndex(known.orEmpty()) { listOf(it.name, it.address, it.kind) } }
+        val appointmentIndex = remember(calendarList) { peopleIndex(calendarList.orEmpty()) { listOf(it.title, it.location) } }
+        val contactHits = remember(contactIndex, text, listOpen) {
+            if (stopsOnly || listOpen) {
+                emptyList()
+            } else {
+                peopleMatchingIn(contactIndex, text, INLINE_PEOPLE, SEARCH_MIN_CHARS)
+            }
+        }
+        val appointmentHits = remember(appointmentIndex, text, listOpen) {
+            if (stopsOnly || onPickAppointment == null || listOpen) {
+                emptyList()
+            } else {
+                peopleMatchingIn(appointmentIndex, text, INLINE_PEOPLE, SEARCH_MIN_CHARS)
+            }
+        }
+        val peopleShown = contactHits.isNotEmpty() || appointmentHits.isNotEmpty()
         if (calendarOpen) {
             GlassSurface(modifier = listModifier.weight(1f, fill = false), shape = RoundedCornerShape(28.dp)) {
                 val list = calendarList
@@ -681,25 +839,21 @@ fun SearchPanel(
                                 contentPadding = PaddingValues(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(3.dp),
                             ) {
-                                if (contactNotFound) {
-                                    item {
-                                        Text(
-                                            text = stringResource(R.string.contacts_not_found),
-                                            color = AppColors.DelayRed,
-                                            fontSize = 13.sp,
-                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                        )
-                                    }
-                                }
                                 items(matching) { contact ->
-                                    ContactRow(contact, enabled = !resolving, onClick = { pickContact(contact) })
+                                    ContactRow(
+                                        contact,
+                                        enabled = !resolving,
+                                        onClick = { pickContact(contact) },
+                                        busy = contact == resolvingContact,
+                                        note = if (contact == failedContact) stringResource(R.string.contacts_not_found) else null,
+                                    )
                                 }
                             }
                         }
                     }
                 }
             }
-        } else if (shown.isEmpty() && text.length >= SEARCH_MIN_CHARS && (searching || searchFailed)) {
+        } else if (!anyShown && !peopleShown && text.length >= SEARCH_MIN_CHARS && (searching || searchFailed)) {
             // Nothing to show yet: say that the search runs (with the little train), or that it failed.
             if (searching) {
                 LoadingRow(
@@ -708,14 +862,19 @@ fun SearchPanel(
                     modifier = listModifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
             } else {
+                val failure = searchFailure
                 Text(
-                    text = stringResource(R.string.search_failed),
+                    text = if (failure != null && servicesUnreachable(failure)) {
+                        problemText(errorText(context, failure))
+                    } else {
+                        AnnotatedString(stringResource(R.string.search_failed))
+                    },
                     color = AppColors.Muted,
                     fontSize = 14.sp,
                     modifier = listModifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
             }
-        } else if (shown.isNotEmpty() || farShown.isNotEmpty()) {
+        } else if (anyShown || peopleShown) {
             val resultScroll = rememberScrollState()
             GlassSurface(modifier = listModifier.weight(1f, fill = false), shape = RoundedCornerShape(28.dp)) {
                 Column(
@@ -725,38 +884,89 @@ fun SearchPanel(
                         .padding(8.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
-                    shown.forEachIndexed { index, place ->
+                    // The quick picks follow "Aktueller Standort", only while nothing is typed (#173).
+                    val quick = if (query.isEmpty() && pickedText == null && shown.firstOrNull()?.id == CURRENT_LOCATION_ID) nearbyQuick else emptyList()
+                    // A stop among the quick picks is not listed a second time further down.
+                    val quickIds = quick.mapTo(HashSet()) { it.stop.id }
+                    val rows = if (quickIds.isEmpty()) shown else shown.filter { it.id !in quickIds }
+                    val rowsLast = rows.lastIndex + quick.size
+                    rows.forEachIndexed { index, place ->
+                        val row = if (index == 0) 0 else index + quick.size
                         key(place.id) {
                             ResultRow(
                                 place = place,
                                 fromHistory = place.id in historyIds,
-                                modifier = appearModifier(index),
-                                shape = groupShape(index, shown.lastIndex),
+                                modifier = appearModifier(row),
+                                shape = groupShape(row, rowsLast),
                                 onClick = {
                                     onRemember(place)
+                                    pickedText = place.name
                                     onPick(place)
                                 },
                                 onForget = { onForget(place) },
                             )
                         }
+                        if (index == 0) {
+                            quick.forEachIndexed { at, pick ->
+                                key("quick:" + pick.stop.id) {
+                                    NearbyQuickRow(
+                                        quick = pick,
+                                        shape = groupShape(at + 1, rowsLast),
+                                        modifier = appearModifier(at + 1),
+                                        onClick = {
+                                            val place = pick.stop.copy(distanceMeters = null)
+                                            onRemember(place)
+                                            pickedText = place.name
+                                            onPick(place)
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
-                    if (farShown.isNotEmpty()) {
-                        Text(
-                            text = stringResource(R.string.search_long_distance),
-                            color = AppColors.Muted,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = if (shown.isEmpty()) 4.dp else 10.dp, bottom = 2.dp),
-                        )
-                        farShown.forEachIndexed { index, place ->
-                            key("far:" + place.id) {
+                    // The contacts and appointments that fit, each under its heading (#68).
+                    if (contactHits.isNotEmpty()) {
+                        SearchSectionTitle(stringResource(R.string.r5search_from_contacts), first = shown.isEmpty())
+                        contactHits.forEach { contact ->
+                            ContactRow(
+                                contact,
+                                enabled = !resolving,
+                                onClick = { pickContact(contact) },
+                                busy = contact == resolvingContact,
+                                note = if (contact == failedContact) stringResource(R.string.contacts_not_found) else null,
+                            )
+                        }
+                    }
+                    if (appointmentHits.isNotEmpty()) {
+                        SearchSectionTitle(stringResource(R.string.r5search_from_appointments), first = shown.isEmpty() && contactHits.isEmpty())
+                        if (appointmentNotFound) {
+                            Text(
+                                text = stringResource(R.string.appointment_place_missing),
+                                color = AppColors.DelayRed,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                            )
+                        }
+                        appointmentHits.forEach { appointment ->
+                            AppointmentRow(appointment, enabled = !resolving, onClick = { pickAppointment(appointment) })
+                        }
+                    }
+                    // The places picked before and the favourites that fit, below the contacts and
+                    // appointments (#208); under a heading only when these stand above them.
+                    if (knownShown.isNotEmpty()) {
+                        val peopleAbove = contactHits.size + appointmentHits.size
+                        val knownAbove = shown.size + peopleAbove
+                        if (peopleAbove > 0) SearchSectionTitle(stringResource(R.string.r7night_search_known), first = false)
+                        knownShown.forEachIndexed { index, place ->
+                            key("known:" + place.id) {
                                 ResultRow(
                                     place = place,
-                                    fromHistory = false,
-                                    modifier = appearModifier(shown.size + index),
-                                    shape = groupShape(index, farShown.lastIndex),
+                                    fromHistory = place.id in historyIds,
+                                    modifier = appearModifier(knownAbove + index),
+                                    shape = groupShape(index, knownShown.lastIndex),
                                     onClick = {
                                         onRemember(place)
+                                        pickedText = place.name
                                         onPick(place)
                                     },
                                     onForget = { onForget(place) },
@@ -764,8 +974,41 @@ fun SearchPanel(
                             }
                         }
                     }
+                    // The stations and places below, each group under its heading (#208); without
+                    // typing, the stations of a far town as before.
+                    val groups = if (sections != null) {
+                        listOf(
+                            R.string.r7search_local_transport to sections.local,
+                            R.string.search_long_distance to sections.longDistance,
+                            R.string.r7search_places to sections.places,
+                        )
+                    } else {
+                        listOf(R.string.search_long_distance to farShown)
+                    }
+                    var above = shown.size + contactHits.size + appointmentHits.size + knownShown.size
+                    groups.forEach { (title, places) ->
+                        if (places.isEmpty()) return@forEach
+                        SearchSectionTitle(stringResource(title), first = above == 0)
+                        places.forEachIndexed { index, place ->
+                            key("sec:" + title + ":" + place.id) {
+                                ResultRow(
+                                    place = place,
+                                    fromHistory = false,
+                                    modifier = appearModifier(above + index),
+                                    shape = groupShape(index, places.lastIndex),
+                                    onClick = {
+                                        onRemember(place)
+                                        pickedText = place.name
+                                        onPick(place)
+                                    },
+                                    onForget = { onForget(place) },
+                                )
+                            }
+                        }
+                        above += places.size
+                    }
                     // Places from OpenStreetMap (Photon) are credited below the list.
-                    if (shown.any { isOsmPlace(it) }) {
+                    if ((sections?.all ?: shown).any { isOsmPlace(it) }) {
                         Text(
                             text = stringResource(R.string.osm_attribution),
                             color = AppColors.Muted,
@@ -785,6 +1028,27 @@ fun SearchPanel(
 
 // Favourite places offered as chips above the suggestions of a search.
 private const val MAX_QUICK_PLACES = 4
+
+// Contacts and appointments shown among the results while typing, at most this many of each (#68).
+private const val INLINE_PEOPLE = 3
+
+// The round buttons beside the places above the results: map, contacts, appointments (#68).
+private val SEARCH_TOOL_SIZE = 44.dp
+
+// A contact's address or an appointment's place is given up on after this long (#58).
+private const val CONTACT_RESOLVE_MILLIS = 25_000L
+
+/** A heading of a group among the results of the search (contacts, appointments). */
+@Composable
+private fun SearchSectionTitle(text: String, first: Boolean) {
+    Text(
+        text = text,
+        color = AppColors.Muted,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = if (first) 4.dp else 10.dp, bottom = 2.dp),
+    )
+}
 
 // Places from the history shown while nothing is typed, and at most while typing.
 private const val HISTORY_EMPTY = 8
@@ -812,6 +1076,9 @@ private fun ResultRow(
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    // A stop pressed long opens the menu every stop has (#139); the tap still picks it.
+    val stopHost = LocalStopMenuHost.current?.takeIf { place.kind == PlaceKind.Stop }
+    var stopMenuOpen by remember { mutableStateOf(false) }
     Box(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -819,14 +1086,18 @@ private fun ResultRow(
                 .clip(shape)
                 .background(AppColors.Card)
                 .then(
-                    if (fromHistory) {
-                        Modifier.combinedClickable(
+                    when {
+                        stopHost != null -> Modifier.combinedClickable(
+                            onLongClickLabel = stringResource(R.string.stop_menu),
+                            onLongClick = { stopMenuOpen = true },
+                            onClick = onClick,
+                        )
+                        fromHistory -> Modifier.combinedClickable(
                             onLongClickLabel = stringResource(R.string.history_remove),
                             onLongClick = { menuOpen = true },
                             onClick = onClick,
                         )
-                    } else {
-                        Modifier.clickable(onClick = onClick)
+                        else -> Modifier.clickable(onClick = onClick)
                     },
                 )
                 .defaultMinSize(minHeight = 52.dp)
@@ -869,6 +1140,14 @@ private fun ResultRow(
                     GlyphIcon(Glyph.Close, color = AppColors.Muted, size = 14.dp)
                 }
             }
+        }
+        if (stopHost != null) {
+            StopMenu(
+                open = stopMenuOpen,
+                onDismiss = { stopMenuOpen = false },
+                onAction = { action -> stopHost.onAction(place, action) },
+                place = place,
+            )
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             DropdownMenuItem(
@@ -960,7 +1239,13 @@ private fun AppointmentRow(appointment: Appointment, enabled: Boolean, onClick: 
 
 /** A contact in the search: the name, and below it the address the journey would lead to. */
 @Composable
-private fun ContactRow(contact: ContactAddress, enabled: Boolean, onClick: () -> Unit) {
+private fun ContactRow(
+    contact: ContactAddress,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    busy: Boolean = false,
+    note: String? = null,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1005,6 +1290,21 @@ private fun ContactRow(contact: ContactAddress, enabled: Boolean, onClick: () ->
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        // While its address is looked up the row says so; one not found says that beside it (#58).
+        if (busy) {
+            LoadingRow(
+                text = stringResource(R.string.r5search_contact_resolving),
+                compact = true,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        } else if (note != null) {
+            Text(
+                text = note,
+                color = AppColors.DelayRed,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
     }
 }
 
@@ -1014,7 +1314,7 @@ private fun ContactRow(contact: ContactAddress, enabled: Boolean, onClick: () ->
  * shows the course of its line, its ⋮ (or a long press) opens its menu. Pulling the list
  * down asks for the departures again ([onRefresh]); [refreshing] while that runs.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun DeparturesScreen(
     stops: List<Stop>,
@@ -1163,14 +1463,31 @@ fun DeparturesScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            if (headerPart != null) {
-                                Text(
-                                    text = headerPart,
-                                    color = AppColors.Muted,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                            // The sub-line (#223): the part of the station, then how fresh the live
+                            // times are ("● Live vor 10 s"); a tap on those loads the list again.
+                            val liveShown = loaded && time == null
+                            if (headerPart != null || liveShown) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (headerPart != null) {
+                                        Text(
+                                            text = if (liveShown) "$headerPart · " else headerPart,
+                                            color = AppColors.Muted,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                        )
+                                    }
+                                    if (liveShown) {
+                                        FreshnessChip(
+                                            source = LiveSource.Departures,
+                                            onRefresh = onRefresh,
+                                            refreshing = refreshing,
+                                            minHeight = 24.dp,
+                                            plain = true,
+                                        )
+                                    }
+                                }
                             }
                         }
                         // With the notice line folded away above the list, its sign and count
@@ -1296,7 +1613,8 @@ fun DeparturesScreen(
                         open = stopMenuOpen,
                         onDismiss = { stopMenuOpen = false },
                         onAction = { action -> onStopAction(selected, action) },
-                        omit = setOf(StopAction.Departures, StopAction.Map),
+                        // The star beside it keeps the favourite.
+                        omit = setOf(StopAction.Departures, StopAction.Map, StopAction.Favorite),
                     )
                 }
             }
@@ -1310,68 +1628,116 @@ fun DeparturesScreen(
         ) {
         // The lifts of the station, where a lift source has a key (see LiftUi).
         if (!nearby) StationLiftStatus(selected)
+        // The second row of the header (#223): the time ("Jetzt ▾"), the stops ("500 m ▾": this
+        // one or all around), then the kinds of transport ("Alle · S · U · <bus>") and the lines.
+        // The live status is in the line below the name of the stop; the notices are the chip below.
         val chipScroll = rememberScrollState()
+        var radiusOpen by remember { mutableStateOf(false) }
+        val radiusText = radiusLabel(nearbyRadius)
+        val modes = departureModeFilters(DEPARTURE_PRODUCTS, products)
         Row(
             modifier = Modifier
                 .fadeEdges(chipScroll, horizontal = true)
                 .horizontalScroll(chipScroll),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // The time the list starts at: now, or what the user picked.
-            TimeChip(choice = time, onClick = onTime)
-            // All stops around the user at once, merged by time; the filters below still apply.
-            ChoiceChip(
-                text = stringResource(R.string.departures_nearby, nearbyRadius),
-                active = nearby,
-                onClick = { onNearby(!nearby) },
-            )
-            if (lines.size > 1) {
-                ChoiceChip(
-                    text = stringResource(R.string.all_lines),
-                    active = picked == null,
-                    onClick = { setFilter(product, null) },
-                    strong = true,
-                )
-                lines.forEach { name ->
-                    ChoiceChip(text = badgeLine(name) ?: name, active = picked == name, onClick = { setFilter(product, name) }, strong = true)
-                }
+            // The time the list starts at: now, or what the user picked (opens the time sheet).
+            val timeLabel = when {
+                time == null -> stringResource(R.string.time_now)
+                time.arrival -> stringResource(R.string.time_arrive_by, dateTimeLabel(time.time))
+                else -> dateTimeLabel(time.time)
             }
-        }
-        // The kinds of transport that leave here, when there is more than one.
-        if (products.size > 1) {
-            val productScroll = rememberScrollState()
-            Row(
-                modifier = Modifier
-                    .fadeEdges(productScroll, horizontal = true)
-                    .horizontalScroll(productScroll),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                ChoiceChip(
-                    text = stringResource(R.string.all_lines),
-                    active = pickedProduct == null,
-                    onClick = { setFilter(null, line) },
+            HeaderDropChip(
+                text = timeLabel,
+                open = false,
+                active = time != null,
+                onClick = onTime,
+                description = stringResource(R.string.time_chip, timeLabel),
+            )
+            // This stop only, or all stops around the user at once, merged by time; the filters still apply.
+            val onlyStop = selected?.name?.shortStopName()
+            val nearbyAll = stringResource(R.string.r7search_nearby_all, radiusText)
+            Box {
+                HeaderDropChip(
+                    text = radiusText,
+                    open = radiusOpen,
+                    active = nearby,
+                    onClick = { radiusOpen = true },
+                    description = stringResource(
+                        R.string.r7search_radius_choice,
+                        if (nearby || onlyStop == null) nearbyAll else stringResource(R.string.r7search_only_stop, onlyStop),
+                    ),
                 )
-                products.forEach { key ->
-                    ChoiceChip(
-                        text = stringResource(productName(key)),
-                        active = pickedProduct == key,
-                        onClick = { setFilter(key, null) },
+                DropdownMenu(expanded = radiusOpen, onDismissRequest = { radiusOpen = false }) {
+                    if (onlyStop != null) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = stringResource(R.string.r7search_only_stop, onlyStop),
+                                    fontWeight = if (!nearby) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            },
+                            onClick = {
+                                radiusOpen = false
+                                if (nearby) onNearby(false)
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(text = nearbyAll, fontWeight = if (nearby) FontWeight.Bold else FontWeight.Normal) },
+                        onClick = {
+                            radiusOpen = false
+                            if (!nearby) onNearby(true)
+                        },
                     )
                 }
             }
+            // The kinds of transport that leave here, when there is more than one.
+            if (modes.isNotEmpty()) {
+                HeaderDivider()
+                ModeFilterChip(product = null, active = pickedProduct == null, onClick = { setFilter(null, line) })
+                modes.forEach { key ->
+                    ModeFilterChip(product = key, active = pickedProduct == key, onClick = { setFilter(key, null) })
+                }
+            }
+            // The lines, when there is more than one.
+            if (lines.size > 1) {
+                HeaderDivider()
+                ChoiceChip(
+                    text = stringResource(R.string.r7search_all_lines),
+                    active = picked == null,
+                    onClick = { setFilter(product, null) },
+                    strong = true,
+                    minHeight = 40.dp,
+                )
+                lines.forEach { name ->
+                    ChoiceChip(text = badgeLine(name) ?: name, active = picked == name, onClick = { setFilter(product, name) }, strong = true, minHeight = 40.dp)
+                }
+            }
         }
-        AnimatedVisibility(
-            visible = loaded && notices.isNotEmpty(),
-            enter = if (animationsOn) expandVertically() + fadeIn() else EnterTransition.None,
-            exit = if (animationsOn) shrinkVertically() + fadeOut() else ExitTransition.None,
+        // The third row: the order ("Nach Abfahrt | Wann los?") and, at its end, the notices of the stop.
+        // The toggle keeps its whole width (#234): with a weight it got at most half of the free
+        // row and "Wann los?" was cut to "Wa…" or nothing; where both do not fit, the chip of the
+        // notices moves to the next line instead.
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BoardDisruptionLine(
-                items = lastNotices[0],
-                onClick = { noticesOpen = true },
-                modifier = Modifier.padding(start = 8.dp),
+            LeaveOrderToggle(
+                leaveOrder = leaveOrder,
+                onLeaveOrder = onLeaveOrder,
+                unavailable = leaveUnavailable,
             )
+            AnimatedVisibility(
+                visible = loaded && notices.isNotEmpty(),
+                enter = if (animationsOn) fadeIn() + scaleIn(initialScale = 0.8f) else EnterTransition.None,
+                exit = if (animationsOn) fadeOut() + scaleOut(targetScale = 0.8f) else ExitTransition.None,
+            ) {
+                DisruptionCountChip(count = lastNotices[0].size, onClick = { noticesOpen = true })
+            }
         }
-        LeaveOrderToggle(leaveOrder = leaveOrder, onLeaveOrder = onLeaveOrder, unavailable = leaveUnavailable)
         }
         } // The part that folds away; what is inside keeps its old indent.
         if (noticesOpen && notices.isNotEmpty()) {
@@ -1463,7 +1829,7 @@ fun DeparturesScreen(
                     when {
                         statusText != null -> item(key = "status") {
                             Text(
-                                text = statusText,
+                                text = problemText(statusText),
                                 color = AppColors.Muted,
                                 modifier = rowMotion(animationsOn).padding(12.dp),
                             )
@@ -1892,7 +2258,18 @@ private fun DirectionChips(directions: LineDirections, onDirection: (Departure) 
 
 /** One tappable line with the sign of a place, used in lists. */
 @Composable
-private fun PlaceRow(place: Stop, shape: Shape, onClick: () -> Unit) {
+private fun PlaceRow(
+    place: Stop,
+    shape: Shape,
+    onClick: () -> Unit,
+    // A notice within the stop's reach (its bell on): a "!" that opens them.
+    badge: Boolean = false,
+    onBadge: () -> Unit = {},
+    // The key of its bell (see placeWatchKey); null: no bell.
+    bellKey: String? = null,
+    onBell: () -> Unit = {},
+    onWatchSettings: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1913,6 +2290,8 @@ private fun PlaceRow(place: Stop, shape: Shape, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        if (badge) PoppingWarning(modifier = Modifier.clip(CircleShape).clickable(role = Role.Button, onClick = onBadge))
+        if (bellKey != null) DisruptionBell(watchKey = bellKey, onChange = onBell, onSettings = onWatchSettings, size = 40.dp)
     }
 }
 
@@ -1996,6 +2375,8 @@ fun FavoritesScreen(
     onPlaceChoose: (Int) -> Unit = {},
     onPlaceRemove: (Int) -> Unit = {},
     onPlaceAdd: () -> Unit = {},
+    // The favourite places in a new order (a tile dragged in the grid).
+    onPlacesOrder: (List<FavoritePlace>) -> Unit = {},
     patterns: List<SavedPattern> = emptyList(),
     onOpenPattern: (SavedPattern) -> Unit = {},
     onRemovePattern: (SavedPattern) -> Unit = {},
@@ -2020,8 +2401,31 @@ fun FavoritesScreen(
     val pageContent: @Composable (FavoritesPage?) -> Unit = { target ->
         if (target != null && disruptions != null) {
             when (target) {
-                FavoritesPage.AllDisruptions ->
-                    AllDisruptionsPage(access = disruptions, onBack = onPageBack, onShowOnMap = onShowStopOnMap)
+                FavoritesPage.AllDisruptions -> {
+                    // The region: around home and where the user is. The watched ways count
+                    // wherever they are: the lines of routes with a bell, places and stops with one.
+                    val context = LocalContext.current
+                    val watched = remember { DisruptionWatch.watched(context) }
+                    val home = places.firstOrNull { it.icon == PlaceIcon.Home }?.place?.position
+                    val watchedLines = remember(watched, routes) {
+                        routes.filter { it.id in watched }.flatMap { route ->
+                            DisruptionWatch.statusOf(context, route.id)?.let { status -> status.lines + status.next.flatMap { it.second } }.orEmpty()
+                        }.toSet()
+                    }
+                    val watchedSpots = remember(watched, places, savedPlaces, favorites) {
+                        (places.mapNotNull { it.place } + savedPlaces.map { it.place } + favorites)
+                            .filter { place -> placeWatchKey(place)?.let { it in watched } == true }
+                            .mapNotNull { it.position }
+                    }
+                    AllDisruptionsPage(
+                        access = disruptions,
+                        onBack = onPageBack,
+                        onShowOnMap = onShowStopOnMap,
+                        anchors = listOfNotNull(home, here),
+                        watchedLines = watchedLines,
+                        watchedSpots = watchedSpots,
+                    )
+                }
                 is FavoritesPage.PlaceDisruptionsPage ->
                     AllDisruptionsPage(access = disruptions, onBack = onPageBack, place = target, onShowOnMap = onShowStopOnMap)
             }
@@ -2043,6 +2447,7 @@ fun FavoritesScreen(
                 onPlaceChoose = onPlaceChoose,
                 onPlaceRemove = onPlaceRemove,
                 onPlaceAdd = onPlaceAdd,
+                onPlacesOrder = onPlacesOrder,
                 patterns = patterns,
                 onOpenPattern = onOpenPattern,
                 onRemovePattern = onRemovePattern,
@@ -2090,7 +2495,14 @@ fun FavoritesScreen(
     }
 }
 
-/** The first page of "My routes" (see [FavoritesScreen]). */
+/**
+ * The first page of "My routes" (see [FavoritesScreen]), design "E2": one page, no tabs.
+ * From the top: the planned trips, the map of the user's ways with the strip of the own
+ * statistics below it, the disruptions on the user's ways, the favourite places as a grid of
+ * four, the routes and connections in one list, the further places, the favourite stops and
+ * the statistics in detail. A lazy list: what is off screen is not composed; the sections come
+ * in staggered once (see waysAppear). Nothing is asked while the tab is not shown.
+ */
 @Composable
 private fun FavoritesStartPage(
     tiles: List<PlaceTile>,
@@ -2110,6 +2522,7 @@ private fun FavoritesStartPage(
     onPlaceChoose: (Int) -> Unit = {},
     onPlaceRemove: (Int) -> Unit = {},
     onPlaceAdd: () -> Unit = {},
+    onPlacesOrder: (List<FavoritePlace>) -> Unit = {},
     patterns: List<SavedPattern> = emptyList(),
     onOpenPattern: (SavedPattern) -> Unit = {},
     onRemovePattern: (SavedPattern) -> Unit = {},
@@ -2122,6 +2535,9 @@ private fun FavoritesStartPage(
     onShowArea: ((List<Pair<Double, Double>>) -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    // A bell switched on or off: the watched keys are read again.
+    var bellVersion by remember { mutableIntStateOf(0) }
+    val watchedKeys = remember(bellVersion) { DisruptionWatch.watched(context) }
     // The routes whose next journeys are checked: the saved routes, and the ends of the saved
     // connections (their notices are those on the connection's lines).
     val checkedRoutes = remember(routes, patterns) { (routes + patterns.map { SavedRoute(it.from, it.to) }).distinctBy { it.id } }
@@ -2137,8 +2553,10 @@ private fun FavoritesStartPage(
             checkedRoutes.mapNotNull { route -> DisruptionWatch.statusOf(context, route.id)?.let { route.id to it } }.toMap()
         }
     }
+    // The favourite stops with a bell count as places: the notices within their reach.
+    val belledStops = remember(favorites, watchedKeys) { favorites.filter { stop -> placeWatchKey(stop)?.let { it in watchedKeys } == true } }
     // The notices around the favourite and the saved places, asked as the routes' are.
-    val placeStops = places.mapNotNull { it.place } + savedPlaces.map { it.place }
+    val placeStops = places.mapNotNull { it.place } + savedPlaces.map { it.place } + belledStops
     val placeRun = rememberPlaceDisruptionsVersion(placeStops, disruptions, radius)
     val placeVersion = placeRun.version
     val placeFound = remember(placeVersion, placeStops, radius) {
@@ -2147,7 +2565,7 @@ private fun FavoritesStartPage(
     fun aroundOf(place: Stop?): PlaceDisruptions? =
         if (disruptions == null || place == null) null else placeDisruptionKey(place)?.let { placeFound[it] }
     // Every notice once, and each card's: a notice on two cards is one in the pill and the sheet.
-    val notices = remember(statuses, placeFound, patterns, routes, places, savedPlaces, disruptions) {
+    val notices = remember(statuses, placeFound, patterns, routes, places, savedPlaces, belledStops, disruptions) {
         if (disruptions == null) {
             WayNotices.NONE
         } else {
@@ -2162,6 +2580,7 @@ private fun FavoritesStartPage(
                     routes.forEach { route -> add(routeCardKey(route) to statuses[route.id]?.disruptions().orEmpty()) }
                     places.forEachIndexed { at, favorite -> add(placeCardKey(at) to aroundOf(favorite.place)?.disruptions.orEmpty()) }
                     savedPlaces.forEach { saved -> add(savedPlaceCardKey(saved) to aroundOf(saved.place)?.disruptions.orEmpty()) }
+                    belledStops.forEach { stop -> add(WAYS_STOP_KEY + stop.id to aroundOf(stop)?.disruptions.orEmpty()) }
                 },
             )
         }
@@ -2180,282 +2599,376 @@ private fun FavoritesStartPage(
     var sheet by remember { mutableStateOf<Pair<String, String>?>(null) }
     // The sheet of the notices hidden from the maps.
     var hiddenOpen by remember { mutableStateOf(false) }
-    val scroll = rememberScrollState()
     // The favourite places are managed here (not in the settings): a long press on a tile, or
     // "Edit", opens the editor of the places, that tile's place unfolded.
     var editing by rememberSaveable { mutableStateOf(false) }
     var openPlace by remember { mutableStateOf<Int?>(null) }
+    // The statistics in detail, unfolded by a tap on the strip or their title.
+    var statsOpen by rememberSaveable { mutableStateOf(false) }
     val allTitle = if (pill.count > 0) {
         context.resources.getQuantityString(R.plurals.ways_disruptions_title, pill.count, pill.count)
     } else {
         stringResource(R.string.ways_pill_clear)
     }
-    Column(
+    val now = rememberMinuteClock()
+    val today = remember(now) { now.atZoneSameInstant(java.time.ZoneId.systemDefault()).toLocalDate() }
+    // The planned trips, read from the device once (see PlannedTrips).
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            PlannedTrips.load(context.applicationContext)
+            PlannedTrips.prune(context.applicationContext)
+        }
+    }
+    val planned by PlannedTrips.trips.collectAsState()
+    val upcoming = remember(planned, now) { planned.filter { !it.leaveAt.isBefore(now) }.sortedBy { it.leaveAt }.take(MAX_PLANNED_SHOWN) }
+    // A planned trip cancelled from its card folds away, and comes back with "Undo".
+    val plannedMotion = rememberAnimationsOn()
+    // The own statistics: read once from the device, off the main thread.
+    val recordsRead by TripStats.records.collectAsState()
+    LaunchedEffect(Unit) { if (TripStats.records.value == null) withContext(Dispatchers.IO) { TripStats.load(context.applicationContext) } }
+    val records = recordsRead.orEmpty()
+    val summary = remember(records, today) { tripSummary(records, today) }
+    val seen = remember { WaysAppearance() }
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    // A tap on a notification of the disruption watch (see DisruptionTap): the section comes into
+    // view and the notices it reported light up briefly; one alone opens as from its row. What is
+    // still being asked gets a moment first; what is over is said so (by AppRoot).
+    var tapHighlight by remember { mutableStateOf(emptySet<String>()) }
+    val tap by DisruptionTap.pending.collectAsState()
+    val tapNotices by rememberUpdatedState(notices.all)
+    val tapIndex by rememberUpdatedState(waysDisruptionsIndex(upcoming.size, showMap))
+    val checksDone = statusRun.done && placeRun.done
+    LaunchedEffect(tap, checksDone) {
+        val request = tap ?: return@LaunchedEffect
+        if (!checksDone) delay(TAP_WAIT_MILLIS)
+        val target = if (disruptions == null) DisruptionTapTarget.Gone else disruptionTapTarget(request, tapNotices)
+        // Taken: clearing it restarts this effect, so what follows runs in the page's scope.
+        DisruptionTap.pending.value = null
+        if (target == DisruptionTapTarget.Gone) {
+            DisruptionTap.gone.value = true
+            return@LaunchedEffect
+        }
+        scope.launch {
+            if (plannedMotion) list.animateScrollToItem(tapIndex) else list.scrollToItem(tapIndex)
+            tapHighlight = when (target) {
+                is DisruptionTapTarget.One -> setOf(target.id)
+                is DisruptionTapTarget.Several -> target.ids.toSet()
+                else -> emptySet()
+            }
+            if (target is DisruptionTapTarget.One) {
+                animationDelay(TAP_SHEET_DELAY_MILLIS)
+                tapNotices.firstOrNull { it.id == target.id }?.let { item -> sheet = (NOTICE_KEY + item.id) to item.summary.ifEmpty { item.text } }
+            }
+            delay(TAP_HIGHLIGHT_MILLIS)
+            tapHighlight = emptySet()
+        }
+    }
+    // The tiles of the favourite places only (the start page's row has those of routes too).
+    val placeTiles = tiles.filter { it.key.startsWith("place") && it.key.removePrefix("place").toIntOrNull() != null }
+    // Keys of the favourite places that follow a place when the order changes (the tiles'
+    // own keys are by position): a dropped tile stays where it was let go.
+    val placeKeys = remember(places) {
+        val counts = HashMap<String, Int>()
+        places.map { favorite ->
+            val base = favorite.icon.name + "|" + favorite.name + "|" + favorite.place?.id
+            val seenBefore = counts[base] ?: 0
+            counts[base] = seenBefore + 1
+            "$base#$seenBefore"
+        }
+    }
+    LazyColumn(
+        state = list,
         modifier = Modifier
             .fillMaxSize()
-            .fadeEdges(scroll, horizontal = false)
-            .verticalScroll(scroll)
+            .fadeEdges(horizontal = false, cutAtStart = { list.canScrollBackward }, cutAtEnd = { list.canScrollForward })
             .padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 4.dp, top = 14.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.tab_favorites),
-                fontWeight = FontWeight.Bold,
-                fontSize = 30.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            // The disruptions on the user's ways, known but small (see WaysStatusPill).
-            if (disruptions != null && !pill.unknown) WaysStatusPill(pill = pill, onClick = { sheet = WAYS_ALL to allTitle })
+        item(key = "title") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp, end = 4.dp, top = 14.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.tab_favorites),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 30.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                // The disruptions on the user's ways, known but small (see WaysStatusPill).
+                if (disruptions != null && !pill.unknown) WaysStatusPill(pill = pill, onClick = { sheet = WAYS_ALL to allTitle })
+            }
         }
-        // The map of the user's world: the places, the notices at their stops, the routes.
-        // Not where the user has switched the map off.
+        // a. The planned trips, soonest first.
+        items(upcoming, key = { "planned:" + it.id }) { trip ->
+            PlannedTripCard(trip = trip, now = now, modifier = rowMotion(plannedMotion).waysAppear("planned:" + trip.id, 0, seen))
+        }
+        // b. The map of the user's world, and the strip of the own statistics under it.
         if (showMap) {
-            val mapPlaces = buildList<WaysMapPlace> {
-                places.forEachIndexed { at, favorite ->
-                    val position = favorite.place?.position ?: return@forEachIndexed
-                    val tile = tiles.firstOrNull { it.key == "place$at" }
-                    add(
-                        WaysMapPlace(
-                            key = placeCardKey(at),
-                            glyph = placeGlyph(favorite.icon),
-                            name = tile?.title ?: favorite.name,
-                            position = position,
-                            minutes = tile?.takeIf { !it.here }?.journey?.durationMinutes?.toInt(),
-                            affected = notices.of(placeCardKey(at)).isNotEmpty(),
-                            onClick = tile?.onClick ?: {},
-                        ),
-                    )
-                }
-                savedPlaces.forEach { saved ->
-                    val position = saved.place.position ?: return@forEach
-                    add(
-                        WaysMapPlace(
-                            key = savedPlaceCardKey(saved),
-                            glyph = placeGlyph(saved.icon),
-                            name = savedPlaceName(saved),
-                            position = position,
-                            minutes = null,
-                            affected = notices.of(savedPlaceCardKey(saved)).isNotEmpty(),
-                            onClick = { onOpenSaved(saved) },
-                        ),
+            item(key = "map") {
+                Box(modifier = Modifier.waysAppear("map", 1, seen)) {
+                    WaysMap(
+                        tiles = tiles,
+                        places = places,
+                        savedPlaces = savedPlaces,
+                        routes = routes,
+                        patterns = patterns,
+                        statuses = statuses,
+                        notices = notices,
+                        radius = radius,
+                        here = here,
+                        onOpenSaved = onOpenSaved,
+                        onNotice = { id ->
+                            val notice = notices.all.firstOrNull { it.id == id }
+                            if (notice != null) sheet = (NOTICE_KEY + id) to notice.summary.ifEmpty { notice.text }
+                        },
+                        onShowArea = onShowArea,
                     )
                 }
             }
-            val mapRoutes = routes.mapNotNull { route ->
-                val from = route.from.position ?: return@mapNotNull null
-                val to = route.to.position ?: return@mapNotNull null
-                WaysMapRoute(from, to)
+        }
+        item(key = "strip") {
+            WaysStatsStrip(
+                summary = summary,
+                onClick = {
+                    statsOpen = true
+                    scope.launch {
+                        // The details are the last but one item; scrolled to once they are there.
+                        list.animateScrollToItem((list.layoutInfo.totalItemsCount - 2).coerceAtLeast(0))
+                    }
+                },
+                modifier = Modifier.waysAppear("strip", 2, seen),
+            )
+        }
+        // c. The disruptions on the user's ways.
+        if (disruptions != null) {
+            item(key = "disruptions") {
+                Box(modifier = Modifier.waysAppear("disruptions", 3, seen)) {
+                    WaysDisruptionsSection(
+                        items = notices.all,
+                        known = !pill.unknown && pill.count == 0 && statusRun.done && placeRun.done,
+                        onItem = { item -> sheet = (NOTICE_KEY + item.id) to item.summary.ifEmpty { item.text } },
+                        onMore = { sheet = WAYS_ALL to allTitle },
+                        onAll = { onPage(FavoritesPage.AllDisruptions) },
+                        highlight = tapHighlight,
+                    )
+                }
             }
-            // The radius around each place, and around the start, the end and the changes of
-            // each saved route and connection: in the colour of warnings where a notice lies in it.
-            val mapAreas = remember(mapPlaces, statuses, routes, patterns, notices, radius) {
-                val placeAreas = mapPlaces.map { WaysMapArea(it.position, radius, it.affected) }
-                val wayAreas = (routes.map { routeCardKey(it) to it } + patterns.map { patternCardKey(it) to SavedRoute(it.from, it.to) })
-                    .flatMap { (key, route) ->
-                        val status = statuses[route.id]?.takeIf { it.radiusMeters == radius } ?: return@flatMap emptyList<WaysMapArea>()
-                        val found = notices.of(key)
-                        status.spots.mapNotNull { spot ->
-                            val position = spot.position ?: return@mapNotNull null
-                            val touched = found.any { item -> item.stops.any { stop -> stop.position?.let { spotMeters(position, it) <= radius } == true } }
-                            WaysMapArea(position, radius, touched)
+        }
+        // d. The favourite places, two by two.
+        item(key = "places") {
+            Column(modifier = Modifier.waysAppear("places", 4, seen), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(stringResource(R.string.ways_places_title), modifier = Modifier.weight(1f))
+                    Text(
+                        text = stringResource(if (editing) R.string.places_edit_done else R.string.places_edit),
+                        color = AppColors.Blue,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                editing = !editing
+                                if (!editing) openPlace = null
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+                PlaceTileGrid(
+                    tiles = placeTiles.map { tile ->
+                        val at = tile.key.removePrefix("place").toIntOrNull() ?: 0
+                        val key = placeCardKey(at)
+                        tile.copy(
+                            key = placeKeys.getOrElse(at) { tile.key },
+                            onLongClick = {
+                                editing = true
+                                openPlace = at
+                            },
+                            disruptions = notices.of(key),
+                            onDisruptions = { sheet = key to tile.title },
+                            disruptionRadius = radius,
+                        )
+                    },
+                    now = now,
+                    onMove = { keys ->
+                        // The places in the new order of their keys.
+                        val moved = keys.mapNotNull { key -> placeKeys.indexOf(key).takeIf { it >= 0 }?.let { places[it] } }
+                        if (moved.size == places.size) onPlacesOrder(moved)
+                    },
+                )
+                AnimatedVisibility(visible = editing) {
+                    FavoritePlacesEditor(
+                        places = places,
+                        openPlace = openPlace,
+                        onOpenPlace = { openPlace = it },
+                        onPlaceChange = onPlaceChange,
+                        onPlaceChoose = onPlaceChoose,
+                        onPlaceRemove = onPlaceRemove,
+                        onPlaceAdd = onPlaceAdd,
+                        onBell = { bellVersion++ },
+                        onWatchSettings = onWatchSettings,
+                    )
+                }
+            }
+        }
+        // e. The saved routes and connections, one list, each with its kind.
+        item(key = "routes") {
+            Box(modifier = Modifier.waysAppear("routes", 5, seen)) {
+                if (patterns.isEmpty() && routes.isEmpty()) {
+                    EmptySectionLine(stringResource(R.string.ways_routes_title), stringResource(R.string.ways_empty_routes))
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SectionLabel(stringResource(R.string.ways_routes_title))
+                        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+                            // A card that goes or comes moves the others softly (see softSize).
+                            Column(modifier = Modifier.softSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                val last = patterns.size + routes.size - 1
+                                val nowMillis = now.toInstant().toEpochMilli()
+                                routes.forEachIndexed { index, route ->
+                                    key(routeCardKey(route)) {
+                                        val cardKey = routeCardKey(route)
+                                        val title = stringResource(R.string.route_pair, route.from.name.shortStopName(), route.to.name.shortStopName())
+                                        // The next journey: of its tile where the start page has one, else as last checked.
+                                        val next = tiles.firstOrNull { it.key == route.id }?.journey?.departure?.toInstant()?.toEpochMilli()
+                                            ?.takeIf { it >= nowMillis }
+                                            ?: statuses[route.id]?.nextDeparture(nowMillis)
+                                        Column {
+                                            WaysTypeLine(pattern = false, next = next, now = now)
+                                            RouteRow(
+                                                route = route,
+                                                shape = groupShape(index, last),
+                                                onClick = { onOpenRoute(route) },
+                                                onRemove = { onRemoveRoute(route) },
+                                                disruptions = notices.of(cardKey),
+                                                cancelled = route in cancelledRoutes,
+                                                onDisruptions = { sheet = cardKey to title },
+                                                bell = disruptions != null,
+                                                onWatchSettings = onWatchSettings,
+                                            )
+                                        }
+                                    }
+                                }
+                                patterns.forEachIndexed { index, pattern ->
+                                    key(patternCardKey(pattern)) {
+                                        val cardKey = patternCardKey(pattern)
+                                        val next = statuses[SavedRoute(pattern.from, pattern.to).id]?.nextDeparture(nowMillis, pattern.lines)
+                                        Column {
+                                            WaysTypeLine(pattern = true, next = next, now = now)
+                                            PatternRow(
+                                                pattern = pattern,
+                                                shape = groupShape(routes.size + index, last),
+                                                onClick = { onOpenPattern(pattern) },
+                                                onRemove = { onRemovePattern(pattern) },
+                                                disruptions = notices.of(cardKey),
+                                                onDisruptions = { sheet = cardKey to pattern.label },
+                                                bellKey = if (disruptions != null) SavedRoute(pattern.from, pattern.to).id else null,
+                                                onWatchSettings = onWatchSettings,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                // A spot of two routes, or of a route and a place, is one circle; touched when one of them is.
-                (placeAreas + wayAreas).groupBy { it.position }.map { (position, same) -> WaysMapArea(position, radius, same.any { it.affected }) }
-            }
-            WaysMapHeader(
-                here = here,
-                places = mapPlaces,
-                notices = remember(notices, mapAreas) { noticeSpots(notices.all, mapAreas) },
-                routes = mapRoutes,
-                areas = mapAreas,
-                onNotice = { id ->
-                    val notice = notices.all.firstOrNull { it.id == id }
-                    if (notice != null) sheet = (NOTICE_KEY + id) to notice.summary.ifEmpty { notice.text }
-                },
-                onMap = { points -> onShowArea?.invoke(points) },
-            )
-        }
-        // Remembered connections first: they are what is opened most.
-        if (patterns.isEmpty()) {
-            EmptySectionLine(stringResource(R.string.saved_patterns), stringResource(R.string.ways_empty_patterns))
-        } else {
-            SectionLabel(stringResource(R.string.saved_patterns))
-            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
-                // A card that goes or comes moves the others softly (see softSize).
-                Column(modifier = Modifier.softSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    patterns.forEachIndexed { index, pattern ->
-                        val key = patternCardKey(pattern)
-                        val title = pattern.label
-                        PatternRow(
-                            pattern = pattern,
-                            shape = groupShape(index, patterns.lastIndex),
-                            onClick = { onOpenPattern(pattern) },
-                            onRemove = { onRemovePattern(pattern) },
-                            disruptions = notices.of(key),
-                            onDisruptions = { sheet = key to title },
-                        )
-                    }
                 }
             }
         }
-        if (routes.isEmpty()) {
-            EmptySectionLine(stringResource(R.string.saved_routes), stringResource(R.string.ways_empty_routes))
-        } else {
-            SectionLabel(stringResource(R.string.saved_routes), modifier = Modifier.padding(top = 8.dp))
-            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
-                Column(modifier = Modifier.softSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    routes.forEachIndexed { index, route ->
-                        val key = routeCardKey(route)
-                        val title = stringResource(R.string.route_pair, route.from.name.shortStopName(), route.to.name.shortStopName())
-                        RouteRow(
-                            route = route,
-                            shape = groupShape(index, routes.lastIndex),
-                            onClick = { onOpenRoute(route) },
-                            onRemove = { onRemoveRoute(route) },
-                            disruptions = notices.of(key),
-                            cancelled = route in cancelledRoutes,
-                            onDisruptions = { sheet = key to title },
+        // f. The further places, as many as the user keeps.
+        item(key = "saved") {
+            Box(modifier = Modifier.waysAppear("saved", 6, seen)) {
+                if (savedPlaces.isEmpty()) {
+                    EmptySectionLine(stringResource(R.string.ways_more_places), stringResource(R.string.ways_empty_places))
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SectionLabel(stringResource(R.string.ways_more_places))
+                        SavedPlacesList(
+                            places = savedPlaces,
+                            onOpen = onOpenSaved,
+                            onChange = onSavedChange,
+                            disruptionsOf = { saved -> notices.of(savedPlaceCardKey(saved)) },
+                            onDisruptions = { saved -> sheet = savedPlaceCardKey(saved) to savedPlaceName(saved) },
+                            disruptionRadius = radius,
                             bell = disruptions != null,
+                            onBell = { bellVersion++ },
                             onWatchSettings = onWatchSettings,
                         )
                     }
                 }
             }
         }
-        Row(modifier = Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel(stringResource(R.string.places_from_here), modifier = Modifier.weight(1f))
-            Text(
-                text = stringResource(if (editing) R.string.places_edit_done else R.string.places_edit),
-                color = AppColors.Blue,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable {
-                        editing = !editing
-                        if (!editing) openPlace = null
-                    }
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-            )
-        }
-        PlaceTiles(
-            tiles.map { tile ->
-                val at = tile.key.removePrefix("place").toIntOrNull()
-                if (tile.key.startsWith("place") && at != null) {
-                    val key = placeCardKey(at)
-                    tile.copy(
-                        onLongClick = {
-                            editing = true
-                            openPlace = at
-                        },
-                        disruptions = notices.of(key),
-                        onDisruptions = { sheet = key to tile.title },
-                        disruptionRadius = radius,
-                    )
+        // The favourite stops and the stops kept together, each stop with its bell.
+        item(key = "stops") {
+            Box(modifier = Modifier.waysAppear("stops", 6, seen)) {
+                if (favorites.isEmpty() && stopGroups.isEmpty()) {
+                    EmptySectionLine(stringResource(R.string.favorite_stops), stringResource(R.string.ways_empty_stops))
                 } else {
-                    tile
-                }
-            },
-        )
-        AnimatedVisibility(visible = editing) {
-            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
-                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    val canAdd = places.size < MAX_FAVORITE_PLACES
-                    val lastRow = if (canAdd) places.size else places.lastIndex
-                    places.forEachIndexed { index, favorite ->
-                        FavoritePlaceRow(
-                            shape = groupShape(index, lastRow),
-                            favorite = favorite,
-                            open = openPlace == index,
-                            onToggle = { openPlace = if (openPlace == index) null else index },
-                            onChange = { onPlaceChange(index, it) },
-                            onChoose = { onPlaceChoose(index) },
-                            onRemove = {
-                                openPlace = null
-                                onPlaceRemove(index)
-                            },
-                        )
-                    }
-                    if (canAdd) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(groupShape(places.size, lastRow))
-                                .background(AppColors.Card)
-                                .clickable {
-                                    openPlace = places.size
-                                    onPlaceAdd()
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SectionLabel(stringResource(R.string.favorite_stops))
+                        val lastRow = favorites.size + stopGroups.size - 1
+                        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+                            Column(modifier = Modifier.softSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                favorites.forEachIndexed { index, stop ->
+                                    key(stop.id) {
+                                        val stopKey = WAYS_STOP_KEY + stop.id
+                                        PlaceRow(
+                                            place = stop,
+                                            shape = groupShape(index, lastRow),
+                                            onClick = { onOpen(stop) },
+                                            badge = notices.of(stopKey).isNotEmpty(),
+                                            onBadge = { sheet = stopKey to stop.name.shortStopName() },
+                                            bellKey = if (disruptions != null) placeWatchKey(stop) else null,
+                                            onBell = { bellVersion++ },
+                                            onWatchSettings = onWatchSettings,
+                                        )
+                                    }
                                 }
-                                .defaultMinSize(minHeight = 56.dp)
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            GlyphIcon(Glyph.Plus, color = AppColors.Blue)
-                            Text(
-                                text = stringResource(R.string.place_add),
-                                color = AppColors.Blue,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp,
-                            )
+                                stopGroups.forEachIndexed { index, group ->
+                                    key(group.id) {
+                                        StopGroupRow(
+                                            group = group,
+                                            shape = groupShape(favorites.size + index, lastRow),
+                                            onClick = { onOpenGroup(group) },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        if (savedPlaces.isNotEmpty()) {
-            SectionLabel(stringResource(R.string.saved_places_list), modifier = Modifier.padding(top = 8.dp))
-            SavedPlacesList(
-                places = savedPlaces,
-                onOpen = onOpenSaved,
-                onChange = onSavedChange,
-                disruptionsOf = { saved -> notices.of(savedPlaceCardKey(saved)) },
-                onDisruptions = { saved -> sheet = savedPlaceCardKey(saved) to savedPlaceName(saved) },
-                disruptionRadius = radius,
-            )
-        }
-        if (favorites.isEmpty() && stopGroups.isEmpty()) {
-            EmptySectionLine(stringResource(R.string.favorite_stops), stringResource(R.string.ways_empty_stops))
-        } else {
-            SectionLabel(stringResource(R.string.favorite_stops), modifier = Modifier.padding(top = 8.dp))
-            // The single stops, then the stops kept together; one card for both.
-            val lastRow = favorites.size + stopGroups.size - 1
-            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
-                Column(modifier = Modifier.softSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    favorites.forEachIndexed { index, stop ->
-                        PlaceRow(place = stop, shape = groupShape(index, lastRow), onClick = { onOpen(stop) })
-                    }
-                    stopGroups.forEachIndexed { index, group ->
-                        key(group.id) {
-                            StopGroupRow(
-                                group = group,
-                                shape = groupShape(favorites.size + index, lastRow),
-                                onClick = { onOpenGroup(group) },
-                            )
-                        }
-                    }
+        // g. The own trips in detail: only what the strip does not show.
+        item(key = "stats") {
+            Column(modifier = Modifier.waysAppear("stats", 6, seen), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(role = Role.Button) { statsOpen = !statsOpen }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SectionLabel(stringResource(R.string.ways_stats_title), modifier = Modifier.weight(1f))
+                    Chevron(open = statsOpen, modifier = Modifier.padding(end = 8.dp))
+                }
+                AnimatedVisibility(visible = statsOpen) {
+                    WaysStatsDetails(records = records, today = today, summary = summary)
                 }
             }
         }
-        // No saved place yet: one quiet line at the very end.
-        if (savedPlaces.isEmpty()) {
-            EmptySectionLine(stringResource(R.string.saved_places_list), stringResource(R.string.ways_empty_places))
+        item(key = "end") {
+            Column {
+                // The notices hidden from the maps, to show again; only while there are any.
+                HiddenNoticesLink(onClick = { hiddenOpen = true })
+                Spacer(modifier = Modifier.height(LocalNavInset.current))
+            }
         }
-        // All current disruptions, for those who do not tap the pill.
-        if (disruptions != null) AllDisruptionsLink(onClick = { onPage(FavoritesPage.AllDisruptions) })
-        // The notices hidden from the maps, to show again; only while there are any.
-        HiddenNoticesLink(onClick = { hiddenOpen = true })
-        Spacer(modifier = Modifier.height(LocalNavInset.current))
     }
     if (hiddenOpen) HiddenNoticesSheet(onDismiss = { hiddenOpen = false })
     val open = sheet
@@ -2464,7 +2977,7 @@ private fun FavoritesStartPage(
         val all = key == WAYS_ALL
         val items = when {
             all -> notices.all
-            // One notice, from its marker on the map.
+            // One notice, from its marker on the map or its row.
             key.startsWith(NOTICE_KEY) -> notices.all.filter { it.id == key.removePrefix(NOTICE_KEY) }
             else -> notices.of(key)
         }
@@ -2472,7 +2985,7 @@ private fun FavoritesStartPage(
         val around = radiusLabel(radius)
         val subtitle = when {
             key.startsWith(WAYS_ROUTE_KEY) || key.startsWith(WAYS_PATTERN_KEY) -> stringResource(R.string.ways_sheet_route_radius, around)
-            key.startsWith(WAYS_PLACE_KEY) || key.startsWith(WAYS_SAVED_KEY) ->
+            key.startsWith(WAYS_PLACE_KEY) || key.startsWith(WAYS_SAVED_KEY) || key.startsWith(WAYS_STOP_KEY) ->
                 pluralStringResource(R.plurals.disruptions_within, items.size, items.size, around)
             else -> null
         }
@@ -2497,31 +3010,147 @@ private fun FavoritesStartPage(
     }
 }
 
-/** The quiet row at the end of "My routes" that opens all current disruptions. */
+/**
+ * The map of "My routes" (see WaysMapHeader): the favourite and saved places as pins, the
+ * notices at their stops, the saved routes, and the radius around each place and spot.
+ */
 @Composable
-private fun AllDisruptionsLink(onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .padding(top = 8.dp)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(role = Role.Button, onClick = onClick)
-            .defaultMinSize(minHeight = 48.dp)
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        WarningMark(size = 15.dp)
-        Text(
-            text = stringResource(R.string.disruptions_all),
-            color = AppColors.Muted,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Chevron(open = false, modifier = Modifier.rotate(-90f))
+private fun WaysMap(
+    tiles: List<PlaceTile>,
+    places: List<FavoritePlace>,
+    savedPlaces: List<SavedPlace>,
+    routes: List<SavedRoute>,
+    patterns: List<SavedPattern>,
+    statuses: Map<String, StoredRouteStatus>,
+    notices: WayNotices,
+    radius: Int,
+    here: Pair<Double, Double>?,
+    onOpenSaved: (SavedPlace) -> Unit,
+    onNotice: (String) -> Unit,
+    onShowArea: ((List<Pair<Double, Double>>) -> Unit)?,
+) {
+    val mapPlaces = buildList<WaysMapPlace> {
+        places.forEachIndexed { at, favorite ->
+            val position = favorite.place?.position ?: return@forEachIndexed
+            val tile = tiles.firstOrNull { it.key == "place$at" }
+            add(
+                WaysMapPlace(
+                    key = placeCardKey(at),
+                    glyph = placeGlyph(favorite.icon),
+                    name = tile?.title ?: favorite.name,
+                    position = position,
+                    minutes = tile?.takeIf { !it.here }?.journey?.durationMinutes?.toInt(),
+                    affected = notices.of(placeCardKey(at)).isNotEmpty(),
+                    onClick = tile?.onClick ?: {},
+                ),
+            )
+        }
+        savedPlaces.forEach { saved ->
+            val position = saved.place.position ?: return@forEach
+            add(
+                WaysMapPlace(
+                    key = savedPlaceCardKey(saved),
+                    glyph = placeGlyph(saved.icon),
+                    name = savedPlaceName(saved),
+                    position = position,
+                    minutes = null,
+                    affected = notices.of(savedPlaceCardKey(saved)).isNotEmpty(),
+                    onClick = { onOpenSaved(saved) },
+                ),
+            )
+        }
+    }
+    val mapRoutes = routes.mapNotNull { route ->
+        val from = route.from.position ?: return@mapNotNull null
+        val to = route.to.position ?: return@mapNotNull null
+        WaysMapRoute(from, to)
+    }
+    // The radius around each place, and around the start, the end and the changes of
+    // each saved route and connection: in the colour of warnings where a notice lies in it.
+    val mapAreas = remember(mapPlaces, statuses, routes, patterns, notices, radius) {
+        val placeAreas = mapPlaces.map { WaysMapArea(it.position, radius, it.affected) }
+        val wayAreas = (routes.map { routeCardKey(it) to it } + patterns.map { patternCardKey(it) to SavedRoute(it.from, it.to) })
+            .flatMap { (key, route) ->
+                val status = statuses[route.id]?.takeIf { it.radiusMeters == radius } ?: return@flatMap emptyList<WaysMapArea>()
+                val found = notices.of(key)
+                status.spots.mapNotNull { spot ->
+                    val position = spot.position ?: return@mapNotNull null
+                    val touched = found.any { item -> item.stops.any { stop -> stop.position?.let { spotMeters(position, it) <= radius } == true } }
+                    WaysMapArea(position, radius, touched)
+                }
+            }
+        // A spot of two routes, or of a route and a place, is one circle; touched when one of them is.
+        (placeAreas + wayAreas).groupBy { it.position }.map { (position, same) -> WaysMapArea(position, radius, same.any { it.affected }) }
+    }
+    WaysMapHeader(
+        here = here,
+        places = mapPlaces,
+        notices = remember(notices, mapAreas) { noticeSpots(notices.all, mapAreas) },
+        routes = mapRoutes,
+        areas = mapAreas,
+        onNotice = onNotice,
+        onMap = { points -> onShowArea?.invoke(points) },
+    )
+}
+
+/** The editor of the favourite places, under their grid: one row per place (with its bell), and "Add". */
+@Composable
+private fun FavoritePlacesEditor(
+    places: List<FavoritePlace>,
+    openPlace: Int?,
+    onOpenPlace: (Int?) -> Unit,
+    onPlaceChange: (Int, FavoritePlace) -> Unit,
+    onPlaceChoose: (Int) -> Unit,
+    onPlaceRemove: (Int) -> Unit,
+    onPlaceAdd: () -> Unit,
+    onBell: () -> Unit,
+    onWatchSettings: (() -> Unit)?,
+) {
+    GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            val canAdd = places.size < MAX_FAVORITE_PLACES
+            val lastRow = if (canAdd) places.size else places.lastIndex
+            places.forEachIndexed { index, favorite ->
+                FavoritePlaceRow(
+                    shape = groupShape(index, lastRow),
+                    favorite = favorite,
+                    open = openPlace == index,
+                    onToggle = { onOpenPlace(if (openPlace == index) null else index) },
+                    onChange = { onPlaceChange(index, it) },
+                    onChoose = { onPlaceChoose(index) },
+                    onRemove = {
+                        onOpenPlace(null)
+                        onPlaceRemove(index)
+                    },
+                    onBell = onBell,
+                    onWatchSettings = onWatchSettings,
+                )
+            }
+            if (canAdd) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(groupShape(places.size, lastRow))
+                        .background(AppColors.Card)
+                        .clickable {
+                            onOpenPlace(places.size)
+                            onPlaceAdd()
+                        }
+                        .defaultMinSize(minHeight = 56.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    GlyphIcon(Glyph.Plus, color = AppColors.Blue)
+                    Text(
+                        text = stringResource(R.string.place_add),
+                        color = AppColors.Blue,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -2550,14 +3179,23 @@ private fun EmptySectionLine(label: String, hint: String) {
 // The keys of the cards of "My routes" for their notices (see wayNotices), and of the sheet of all of them.
 private const val WAYS_ALL = "*"
 private const val NOTICE_KEY = "notice:"
+// A tap on a disruption notification: how long the checks may still answer, when the one
+// notice opens (x the animator scale) and how long the reported notices stay lit.
+private const val TAP_WAIT_MILLIS = 6_000L
+private const val TAP_SHEET_DELAY_MILLIS = 450L
+private const val TAP_HIGHLIGHT_MILLIS = 1_600L
 private const val WAYS_PATTERN_KEY = "pattern:"
 private const val WAYS_ROUTE_KEY = "route:"
 private const val WAYS_PLACE_KEY = "place:"
 private const val WAYS_SAVED_KEY = "saved:"
+private const val WAYS_STOP_KEY = "stop:"
 private fun patternCardKey(pattern: SavedPattern): String = WAYS_PATTERN_KEY + pattern.id
 private fun routeCardKey(route: SavedRoute): String = WAYS_ROUTE_KEY + route.id
 private fun placeCardKey(at: Int): String = WAYS_PLACE_KEY + at
 private fun savedPlaceCardKey(saved: SavedPlace): String = WAYS_SAVED_KEY + saved.id
+
+// The planned trips shown at most at the top of "My routes".
+private const val MAX_PLANNED_SHOWN = 2
 
 // The last row of the connections group of the settings.
 private const val SEARCH_LAST = 8
@@ -2705,6 +3343,29 @@ fun SettingsScreen(
                     sticky = sticky,
                 ) {
                     AppearanceSettings(delayDisplay = delayDisplay, onDelayDisplay = onDelayDisplay)
+                    // Haptics (release 0.2); the battery saver has its own category below.
+                    ComfortSettings()
+                    // How the details of a connection look below their head (#129): new or classic.
+                    // Before the Live-Fahrt (#199): a connection is looked at before it is ridden.
+                    DetailStyleSettings()
+                    // How the companion looks during a ride (calm, with map, classic).
+                    io.github.jnbp.nextstop.ui.companion.CompanionLayoutSettings()
+                    // Beside them (#201, #203): what the detail and the Live-Fahrt show at the changes and walks.
+                    io.github.jnbp.nextstop.ui.companion.TripFoldSettings(
+                        connectionChoice = connectionChoice,
+                        onConnectionChoice = onConnectionChoice,
+                    )
+                }
+                // The battery saver, as a category of its own so it is easy to find.
+                SettingsCategory(
+                    id = SettingsCategoryId.BATTERY,
+                    title = stringResource(R.string.settings_group_battery),
+                    summary = batterySaverSummary(),
+                    open = openCategories,
+                    onOpen = onOpen,
+                    sticky = sticky,
+                ) {
+                    BatterySaverSettings()
                 }
                 SettingsCategory(
                     id = SettingsCategoryId.MAP,
@@ -2744,20 +3405,19 @@ fun SettingsScreen(
                             text = stringResource(R.string.products_text),
                         ) {
                             val labels = PRODUCT_KEYS.associateWith { stringResource(productLabel(it)) }
-                            PRODUCT_KEYS.chunked(3).forEach { row ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    row.forEach { product ->
-                                        val on = product in options.products
-                                        ToggleChip(
-                                            text = labels.getValue(product),
-                                            on = on,
-                                            onClick = {
-                                                val changed = if (on) options.products - product else options.products + product
-                                                // A search without any product finds nothing: the last one stays on.
-                                                if (changed.isNotEmpty()) onOptions(options.copy(products = changed))
-                                            },
-                                        )
-                                    }
+                            // The chips wrap onto further lines where they do not fit.
+                            WrapRow {
+                                PRODUCT_KEYS.forEach { product ->
+                                    val on = product in options.products
+                                    ToggleChip(
+                                        text = labels.getValue(product),
+                                        on = on,
+                                        onClick = {
+                                            val changed = if (on) options.products - product else options.products + product
+                                            // A search without any product finds nothing: the last one stays on.
+                                            if (changed.isNotEmpty()) onOptions(options.copy(products = changed))
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -2775,6 +3435,7 @@ fun SettingsScreen(
                             title = stringResource(R.string.view_title),
                             text = stringResource(R.string.view_text),
                             preview = { ConnectionsViewPreview(listView) },
+                            previewPick = { index -> onListView(index == 1) },
                         ) {
                             SegmentedToggle(
                                 labels = listOf(stringResource(R.string.view_chart), stringResource(R.string.view_list)),
@@ -2807,6 +3468,10 @@ fun SettingsScreen(
                             // The choice fills the width of the row: it needs the bounded width, not a sideways scroll.
                             scroll = false,
                             preview = { ChartTotalTimePreview(chartTotalTime) },
+                            previewTap = {
+                                val all = ChartTotalTime.entries
+                                onChartTotalTime(all[cycleIndex(all.indexOf(chartTotalTime), all.size)])
+                            },
                         ) {
                             ChartTotalTimeToggle(selected = chartTotalTime, onSelect = onChartTotalTime)
                         }
@@ -2817,6 +3482,7 @@ fun SettingsScreen(
                             // The choice fills the width of the row: it needs the bounded width, not a sideways scroll.
                             scroll = false,
                             preview = { ChartShortLegsPreview(ChartShortLegsSetting.load(LocalContext.current)) },
+                            previewPick = LocalContext.current.let { context -> { index: Int -> ChartShortLegsSetting.update(context, ChartShortLegs.entries[index]) } },
                         ) {
                             ChartShortLegsToggle()
                         }
@@ -2834,16 +3500,17 @@ fun SettingsScreen(
                     sticky = sticky,
                 ) {
                     CompanionGroup(
-                        connectionChoice = connectionChoice,
-                        onConnectionChoice = onConnectionChoice,
                         boardingHints = boardingHints,
                         onBoardingHints = onBoardingHints,
                     )
                     AlightReminderGroup()
+                    TripAlarmsGroup()
                     NotificationLookCard()
                     Box(modifier = Modifier.onGloballyPositioned { watchTarget.target = it }) {
                         DisruptionWatchGroup(onOpenWays = onOpenWays)
                     }
+                    // Forgets the recorded trips behind the statistics of "My ways" (#135).
+                    StatsResetGroup()
                 }
                 SettingsCategory(
                     id = SettingsCategoryId.START,
@@ -2958,42 +3625,30 @@ fun SettingsScreen(
 }
 
 /**
- * What the trip companion shows on the way: the choice of connecting departures at changes
- * (also in the connection detail), and whether the small maps of walks start unfolded.
+ * What the trip companion shows on the way: the boarding hints, the position and Google Maps.
+ * The choice of connecting departures at changes and the small maps of walks stand under
+ * Darstellung (TripFoldSettings, #201, #202).
  */
 @Composable
 internal fun CompanionGroup(
-    connectionChoice: Boolean,
-    onConnectionChoice: (Boolean) -> Unit,
     boardingHints: Boolean,
     onBoardingHints: (Boolean) -> Unit,
 ) {
-    val context = LocalContext.current
     SettingsGroup(label = stringResource(R.string.settings_group_on_the_way)) {
+        // "Anschluss unterwegs wählen" and "Minikarte für Fußwege" stand under Darstellung beside
+        // the Live-Fahrt now (#201, #202).
         SwitchRow(
             shape = groupShape(0, 2),
-            title = stringResource(R.string.connection_choice_title),
-            text = stringResource(R.string.connection_choice_text),
-            preview = { ConnectionChoicePreview(connectionChoice) },
-            checked = connectionChoice,
-            onChange = onConnectionChoice,
-        )
-        SwitchRow(
-            shape = groupShape(1, 2),
-            title = stringResource(R.string.walk_maps_open_title),
-            text = stringResource(R.string.walk_maps_open_text),
-            preview = { WalkMapsPreview(WalkMapSetting.open) },
-            checked = WalkMapSetting.load(context),
-            onChange = { value -> WalkMapSetting.update(context, value) },
-        )
-        SwitchRow(
-            shape = groupShape(2, 2),
             title = stringResource(R.string.boarding_hints_title),
             text = stringResource(R.string.boarding_hints_text),
             preview = { BoardingHintsPreview(boardingHints) },
             checked = boardingHints,
             onChange = onBoardingHints,
         )
+        // "Standort im Begleiter nutzen": the position only while the companion runs.
+        CompanionLocationRow(shape = groupShape(1, 2))
+        // What "Google Maps" does on the last way of a trip (#143).
+        MapsHandoffRow(shape = groupShape(2, 2))
     }
 }
 
@@ -3027,7 +3682,7 @@ private fun TicketGroup(options: SearchOptions, onOptions: (SearchOptions) -> Un
             },
         )
         SwitchRow(
-            shape = groupShape(2, 2),
+            shape = groupShape(2, if (options.bikeCombo) 3 else 2),
             title = stringResource(R.string.bike_combo_title),
             text = stringResource(R.string.bike_combo_text),
             checked = options.bikeCombo,
@@ -3036,6 +3691,10 @@ private fun TicketGroup(options: SearchOptions, onOptions: (SearchOptions) -> Un
                 onOptions(options.copy(bikeCombo = value))
             },
         )
+        // The pace of the stretches by bike, only with the bike combo.
+        SettingReveal(visible = options.bikeCombo) {
+            BikeSpeedRow(shape = groupShape(3, 3))
+        }
     }
 }
 
@@ -3054,8 +3713,8 @@ internal fun DisruptionWatchGroup(onOpenWays: (() -> Unit)? = null) {
     var watched by remember { mutableStateOf(DisruptionWatch.watched(context)) }
     var places by remember { mutableStateOf(DisruptionWatch.checkPlaces(context)) }
     var radius by remember { mutableIntStateOf(DisruptionWatch.radiusMeters(context)) }
-    var period by remember { mutableIntStateOf(DisruptionWatch.periodMinutes(context)) }
     var times by remember { mutableStateOf(DisruptionWatch.checkTimes(context)) }
+    var period by remember { mutableIntStateOf(DisruptionWatch.periodMinutes(context)) }
     val askNotify = rememberNotificationAsk()
     // Something is watched: a route with the bell on, or the places (when there is one).
     val active = routes.any { it.id in watched } || (places && placeCount > 0)
@@ -3111,9 +3770,16 @@ internal fun DisruptionWatchGroup(onOpenWays: (() -> Unit)? = null) {
             }
             routes.forEach { route ->
                 val on = route.id in watched
+                val ticks = rememberTicks()
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .toggleable(value = on, role = Role.Switch) { value ->
+                            ticks.toggle(value)
+                            watched = if (value) watched + route.id else watched - route.id
+                            DisruptionWatch.setWatched(context, route.id, value)
+                            if (value) askNotify()
+                        }
                         .defaultMinSize(minHeight = 44.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -3125,14 +3791,7 @@ internal fun DisruptionWatchGroup(onOpenWays: (() -> Unit)? = null) {
                         fontWeight = FontWeight.Normal,
                         modifier = Modifier.weight(1f),
                     )
-                    Switch(
-                        checked = on,
-                        onCheckedChange = { value ->
-                            watched = if (value) watched + route.id else watched - route.id
-                            DisruptionWatch.setWatched(context, route.id, value)
-                            if (value) askNotify()
-                        },
-                    )
+                    Switch(checked = on, onCheckedChange = null, modifier = Modifier.minimumInteractiveComponentSize())
                 }
             }
         }
@@ -3165,25 +3824,18 @@ internal fun DisruptionWatchGroup(onOpenWays: (() -> Unit)? = null) {
                 ground = AppColors.Chip,
             )
         }
+        // "Unterwegs prüfen": a check every n minutes, opt-in and paused while the battery
+        // saver is active (battery rule). Besides, the watch checks when the app opens and at
+        // the times below, each a single job.
         Box(modifier = inactive) {
-            SettingsRow(
+            CheckOnTheWayRow(
                 shape = groupShape(4, WATCH_LAST),
-                title = stringResource(R.string.dwatch_period_title),
-                text = stringResource(R.string.dwatch_period_text),
-            ) {
-                SegmentedToggle(
-                    labels = WATCH_PERIODS.map { minutes ->
-                        if (minutes == 0) stringResource(R.string.dwatch_period_off) else stringResource(R.string.dwatch_period_minutes, minutes)
-                    },
-                    selected = WATCH_PERIODS.indexOf(period).coerceAtLeast(0),
-                    onSelect = { index ->
-                        period = WATCH_PERIODS[index]
-                        DisruptionWatch.setPeriodMinutes(context, period)
-                    },
-                    minHeight = 40.dp,
-                    ground = AppColors.Chip,
-                )
-            }
+                period = period,
+                onPeriod = { value ->
+                    period = value
+                    DisruptionWatch.setPeriodMinutes(context, value)
+                },
+            )
         }
         Box(modifier = inactive) {
             SettingsRow(
@@ -3274,9 +3926,10 @@ internal fun AlightReminderGroup() {
     var shortcut by remember { mutableStateOf(prefs.shortcutAlert) }
     var sameComfort by remember { mutableStateOf(prefs.shortcutSameComfort) }
     var quietStart by remember { mutableStateOf(prefs.shortcutQuietStart) }
-    // The two options of the shortcut alert show only while it is on (they fold away when off;
+    var minutes by remember { mutableStateOf(prefs.shortcutMinutes) }
+    // The three options of the shortcut alert show only while it is on (they fold away when off;
     // the rows below keep their shapes either way).
-    val options = 2
+    val options = 3
     val last = channels.size + 1 + options
     SettingsGroup(label = stringResource(R.string.setup_notifications_title)) {
         SwitchRow(
@@ -3304,8 +3957,25 @@ internal fun AlightReminderGroup() {
         )
         SettingReveal(visible = shortcut) {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                SwitchRow(
+                // "Ab wie vielen Minuten": 3 by default; "Jede Minute zählt" always takes one minute.
+                SettingsRow(
                     shape = groupShape(2, last),
+                    title = stringResource(R.string.shortcut_minutes_title),
+                    text = stringResource(R.string.shortcut_minutes_text),
+                ) {
+                    SegmentedToggle(
+                        labels = SHORTCUT_MINUTE_CHOICES.map { stringResource(R.string.wake_minutes_choice, it) },
+                        selected = SHORTCUT_MINUTE_CHOICES.indexOf(minutes).coerceAtLeast(0),
+                        onSelect = { index ->
+                            minutes = SHORTCUT_MINUTE_CHOICES[index]
+                            prefs.shortcutMinutes = minutes
+                        },
+                        minHeight = 40.dp,
+                        ground = AppColors.Chip,
+                    )
+                }
+                SwitchRow(
+                    shape = groupShape(3, last),
                     title = stringResource(R.string.shortcut_same_comfort),
                     text = stringResource(R.string.shortcut_same_comfort_text),
                     checked = sameComfort,
@@ -3315,7 +3985,7 @@ internal fun AlightReminderGroup() {
                     },
                 )
                 SwitchRow(
-                    shape = groupShape(3, last),
+                    shape = groupShape(4, last),
                     title = stringResource(R.string.shortcut_quiet_start),
                     text = stringResource(R.string.shortcut_quiet_start_text),
                     checked = quietStart,
@@ -3553,7 +4223,7 @@ internal fun DataSourceGroup(
                     textStyle = TextStyle(color = AppColors.Ink, fontSize = 14.sp, fontFamily = AppFont),
                     cursorBrush = SolidColor(AppColors.Blue),
                     modifier = Modifier
-                        .width(240.dp)
+                        .weight(1f, fill = false).width(240.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(AppColors.Chip)
                         .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -3645,12 +4315,14 @@ private fun BackendRow(
     onChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val ticks = rememberTicks()
     Row(
         modifier = modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) { customActions = moveActions }
             .clip(shape)
             .background(AppColors.Card)
+            .toggleable(value = checked, role = Role.Switch) { value -> ticks.toggle(value); onChange(value) }
             .defaultMinSize(minHeight = 56.dp)
             .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -3669,7 +4341,7 @@ private fun BackendRow(
             SettingText(title, text)
             SourceLinks(links)
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = null, modifier = Modifier.minimumInteractiveComponentSize())
     }
 }
 
@@ -3828,7 +4500,7 @@ private fun SecretField(value: String, onValue: (String) -> Unit) {
             textStyle = TextStyle(color = AppColors.Ink, fontSize = 14.sp, fontFamily = AppFont),
             cursorBrush = SolidColor(AppColors.Blue),
             modifier = Modifier
-                .width(200.dp)
+                .weight(1f, fill = false).width(200.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(AppColors.Chip)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -3913,13 +4585,14 @@ private fun CheckRow(
             .clip(shape)
             .background(AppColors.Card)
             .graphicsLayer { alpha = if (enabled) 1f else 0.55f }
+            .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onChange)
             .defaultMinSize(minHeight = 56.dp)
             .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         SettingText(title, text, modifier = Modifier.weight(1f))
-        Checkbox(checked = checked, onCheckedChange = onChange, enabled = enabled)
+        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled, modifier = Modifier.minimumInteractiveComponentSize())
     }
 }
 
@@ -3933,12 +4606,25 @@ internal fun SettingsGroup(label: String?, content: @Composable ColumnScope.() -
         // Without a label the card belongs to the group above it; in a folding category of the
         // settings a label the same as the category's title is left out (its header says it).
         if (label != null && label != LocalSettingsCategory.current) SectionLabel(label)
-        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
-            Column(
-                modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(GroupRowGap),
-                content = content,
-            )
+        if (LocalFlatSettingsGroups.current) {
+            // Under the glass header of an open category (or on the page "Advanced"): the rows
+            // are the one surface, no glass frame around them (a card in a card, #133). The depth
+            // stays one deeper, so glass inside a row keeps its inner look.
+            CompositionLocalProvider(LocalGlassDepth provides LocalGlassDepth.current + 1) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(GroupRowGap),
+                    content = content,
+                )
+            }
+        } else {
+            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+                Column(
+                    modifier = Modifier.padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(GroupRowGap),
+                    content = content,
+                )
+            }
         }
     }
 }
@@ -3972,11 +4658,16 @@ internal fun TransferChoiceRow(
             .fillMaxWidth()
             .clip(shape)
             .background(AppColors.Card)
-            .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 10.dp),
+            .padding(bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        // The switch's row reaches to the card's edges, so all of it toggles and ripples.
+        val ticks = rememberTicks()
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(value = on, role = Role.Switch) { value -> ticks.toggle(value); onChange(value) }
+                .padding(start = 16.dp, end = 12.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -3985,34 +4676,39 @@ internal fun TransferChoiceRow(
                 stringResource(R.string.comfort_choice_text),
                 modifier = Modifier.weight(1f),
             )
-            Switch(checked = on, onCheckedChange = onChange)
+            Switch(checked = on, onCheckedChange = null, modifier = Modifier.minimumInteractiveComponentSize())
         }
-        SettingReveal(visible = on) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // The schematic change of the setup: its gap as wide as the level lets a change be.
-                if (preview) TransferSketch(level = level)
-                LevelSelector(
-                    level = level,
-                    onLevel = onLevel,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SettingReveal(visible = on) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // The schematic change of the setup: its gap as wide as the level lets a change be.
+                    if (preview) TransferSketch(level = level)
+                    LevelSelector(
+                        level = level,
+                        onLevel = onLevel,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
-        }
-        // How changes are rated, in a sheet built from the numbers the rating uses.
-        TransferRatingInfoLink()
-        // The buffers of the rating, to tune; folded away as most never need them.
-        Text(
-            text = stringResource(if (more) R.string.comfort_less else R.string.rating_tuning_show),
-            color = AppColors.Blue,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .clickable { more = !more }
-                .padding(vertical = 4.dp),
-        )
-        SettingReveal(visible = more) {
-            TransferTuningControls()
+            // How changes are rated, in a sheet built from the numbers the rating uses.
+            TransferRatingInfoLink()
+            // The buffers of the rating, to tune; folded away as most never need them.
+            Text(
+                text = stringResource(if (more) R.string.comfort_less else R.string.rating_tuning_show),
+                color = AppColors.Blue,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { more = !more }
+                    .padding(vertical = 4.dp),
+            )
+            SettingReveal(visible = more) {
+                TransferTuningControls()
+            }
         }
     }
 }
@@ -4026,8 +4722,11 @@ internal fun SettingsRow(
     shape: Shape,
     title: String,
     text: String,
-    scroll: Boolean = true,
+    @Suppress("UNUSED_PARAMETER") scroll: Boolean = true,
     preview: (@Composable () -> Unit)? = null,
+    // A tap on the preview changes the value (e.g. the next one of a choice), a tap on one of its options picks it.
+    previewTap: (() -> Unit)? = null,
+    previewPick: ((Int) -> Unit)? = null,
     control: @Composable () -> Unit,
 ) {
     Column(
@@ -4039,15 +4738,18 @@ internal fun SettingsRow(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         SettingText(title, text)
-        // A control wider than the row can be pushed sideways, for example with a large font.
-        // A control that fills the width itself ([scroll] false) needs the bounded width of the row.
+        // Nothing in the settings is pushed sideways: the control gets the width of the row, a
+        // choice that does not fit wraps into a grid or a list (LocalWrapChoices) and hints
+        // wrap onto further lines. [scroll] is kept for the callers; it no longer scrolls.
         Column(
-            modifier = if (scroll) Modifier.horizontalScroll(rememberScrollState()) else Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            control()
+            CompositionLocalProvider(LocalWrapChoices provides true) {
+                control()
+            }
         }
-        if (preview != null) PreviewExpander(key = title, content = preview)
+        if (preview != null) PreviewExpander(key = title, onTap = previewTap, onPick = previewPick, content = preview)
     }
 }
 
@@ -4064,11 +4766,15 @@ internal fun ToggleChip(text: String, on: Boolean, onClick: () -> Unit) {
         spring(stiffness = Spring.StiffnessMediumLow),
         label = "toggleInk",
     )
+    val ticks = rememberTicks()
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
             .background(ground)
-            .clickable(onClick = onClick)
+            .clickable {
+                ticks.tick()
+                onClick()
+            }
             .defaultMinSize(minHeight = 40.dp)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
@@ -4078,7 +4784,9 @@ internal fun ToggleChip(text: String, on: Boolean, onClick: () -> Unit) {
             color = ink,
             fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold,
             fontSize = 14.sp,
-            maxLines = 1,
+            // In a row that wraps, a name longer than the row takes a second line.
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -4100,6 +4808,8 @@ private fun FavoritePlaceRow(
     onChange: (FavoritePlace) -> Unit,
     onChoose: () -> Unit,
     onRemove: () -> Unit,
+    onBell: () -> Unit = {},
+    onWatchSettings: (() -> Unit)? = null,
 ) {
     val place = favorite.place
     val fallbackName = placeIconLabel(favorite.icon)
@@ -4135,6 +4845,10 @@ private fun FavoritePlaceRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+            // "Tell me about problems" near the place: the stops within its reach.
+            place?.let { placeWatchKey(it) }?.let { key ->
+                DisruptionBell(watchKey = key, onChange = onBell, onSettings = onWatchSettings, size = 40.dp)
             }
             Chevron(open = open)
         }
@@ -4173,31 +4887,7 @@ private fun FavoritePlaceRow(
                         }
                     },
                 )
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    PlaceIcon.entries.forEach { icon ->
-                        val picked = icon == favorite.icon
-                        val label = placeIconLabel(icon)
-                        val ground by animateColorAsState(
-                            if (picked) AppColors.Blue else AppColors.Chip,
-                            spring(stiffness = Spring.StiffnessMediumLow),
-                            label = "iconGround",
-                        )
-                        Box(
-                            modifier = Modifier
-                                .semantics { contentDescription = label }
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(ground)
-                                .clickable { onChange(favorite.copy(icon = icon)) }
-                                .size(44.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            GlyphIcon(placeGlyph(icon), color = if (picked) AppColors.OnBlue else AppColors.Ink)
-                        }
-                    }
-                }
+                IconPicker(selected = favorite.icon, onSelect = { onChange(favorite.copy(icon = it)) })
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     SecondaryButton(
                         text = stringResource(if (place == null) R.string.place_choose else R.string.place_change),
@@ -4278,20 +4968,31 @@ internal fun SwitchRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(AppColors.Card)
-            .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = if (preview != null) 4.dp else 8.dp),
+            .background(AppColors.Card),
     ) {
+        // The switch's row reaches to the card's edges, so all of it toggles and ripples.
+        val ticks = rememberTicks()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .toggleable(value = checked, role = Role.Switch) { value ->
+                    ticks.toggle(value)
+                    onChange(value)
+                }
+                .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = if (preview != null) 0.dp else 8.dp)
                 .defaultMinSize(minHeight = 40.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             SettingText(title, text, modifier = Modifier.weight(1f))
-            Switch(checked = checked, onCheckedChange = onChange)
+            Switch(checked = checked, onCheckedChange = null, modifier = Modifier.minimumInteractiveComponentSize())
         }
-        if (preview != null) PreviewExpander(key = title, content = preview)
+        // A tap on the preview turns the switch over, as the switch itself would.
+        if (preview != null) {
+            Box(modifier = Modifier.padding(start = 16.dp, end = 12.dp, bottom = 4.dp)) {
+                PreviewExpander(key = title, onTap = { onChange(!checked) }, content = preview)
+            }
+        }
     }
 }
 
@@ -4307,6 +5008,12 @@ fun PlanScreen(
     error: String?,
     count: Int,
     filteredCount: Int,
+    // Asks for the journeys again ([asked] by hand); its job, so the retries wait for it (#59).
+    onRetry: ((asked: Boolean) -> kotlinx.coroutines.Job?)? = null,
+    // The app is on screen: only then the failed search is asked again by itself.
+    active: Boolean = true,
+    // Asking again for the journeys shown failed: they stay, with a note.
+    stale: Boolean = false,
     filteredLevels: Set<TransferComfort>,
     tighterCount: Int,
     tighterLevel: TransferComfort?,
@@ -4525,12 +5232,19 @@ fun PlanScreen(
                     )
                 }
 
-                error != null -> GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
-                    Text(
-                        text = error,
-                        color = AppColors.Muted,
-                        modifier = Modifier.padding(18.dp),
-                    )
+                // A failed search says why, with a button to try again, and is asked again by
+                // itself while it is in view (#59).
+                error != null -> if (onRetry != null) {
+                    AutoRetry(enabled = active) { onRetry(false) }
+                    RetryCard(text = error, onRetry = { onRetry(true) })
+                } else {
+                    GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+                        Text(
+                            text = problemText(error),
+                            color = AppColors.Muted,
+                            modifier = Modifier.padding(18.dp),
+                        )
+                    }
                 }
 
                 // Connections were found, but the chips hide all of them: as on the connections page.
@@ -4546,11 +5260,23 @@ fun PlanScreen(
                     Text(text = stringResource(R.string.no_connections), modifier = Modifier.padding(18.dp))
                 }
 
-                else -> PrimaryButton(
-                    text = stringResource(R.string.show_connections, count),
-                    onClick = onConfirm,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                else -> {
+                    // Asking again failed: the options stay, with a note and a retry (#59).
+                    if (stale && onRetry != null) {
+                        AutoRetry(enabled = active) { onRetry(false) }
+                        RetryCard(
+                            text = stringResource(R.string.r5search_refresh_failed),
+                            onRetry = { onRetry(true) },
+                            compact = true,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    }
+                    PrimaryButton(
+                        text = stringResource(R.string.show_connections, count),
+                        onClick = onConfirm,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
         if (side) Spacer(modifier = Modifier.fillMaxWidth().coversMapBottom())

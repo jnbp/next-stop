@@ -1,9 +1,9 @@
-Next Stop begleitet dich nicht nur bei der Suche, sondern auf der ganzen Fahrt: Es sagt dir, wie knapp ein Umstieg wirklich ist, wo du einsteigen solltest, wann es einen schnelleren Weg gibt und wann du aussteigen musst. Auf dem Handy, auf der Uhr und auf einer Seite, der deine Freunde folgen können.
+Next Stop hilft dir nicht nur bei der Suche, sondern auf der ganzen Fahrt: Es sagt dir, wie knapp ein Umstieg wirklich ist, wo du einsteigen solltest, wann es einen schnelleren Weg gibt und wann du aussteigen musst. Auf dem Handy, auf der Uhr und auf einer Seite, der deine Freunde folgen können.
 
 Berlin zuerst, ganz Europa an Bord: Fahrpläne für Berlin und Brandenburg von VBB und BVG, für den Rest inklusive Fernverkehr von Transitous (Schwerpunkt Deutschland). Stationsdetails gibt es in Deutschland, aus OpenStreetMap.
 
 PLANEN
-• Umstiegsstufen: Jeder Umstieg wird nach dem Gehtempo bewertet, das er braucht – entspannt, normal, knapp oder Sprint. Du bestimmst, wie knapp.
+• Umstiegsstufen: Jeder Umstieg wird nach dem Gehtempo bewertet, das er braucht – relaxed, normal, knapp oder Sprint. Du bestimmst, wie knapp.
 • Exakte Umstiegswege: gemessen auf den Fußwegen aus OpenStreetMap, mit Treppen, Aufzügen und Bahnsteigen. Mit Gepäck, Kinderwagen oder Gehhilfe zählt jeder Weg 1,3-mal so lang.
 • Durchbindungen: Fährt dein Zug als andere Linie weiter, sagt die App „sitzen bleiben“.
 • Verkehrsmittel wählen: S-Bahn, U-Bahn, Tram, Bus, Fähre, Regional-, Fernverkehr und Fernbus. Ein Schalter blendet für das Deutschlandticket Fernverkehr aus.
@@ -13,7 +13,7 @@ PLANEN
 • Ergebnisse als Diagramm mit Zeitachse oder als Liste.
 
 UNTERWEGS
-• Reisebegleiter: Nächster Schritt, Countdown und verbleibende Halte mit Live-Zeiten – in der App und als Live-Benachrichtigung.
+• Live-Fahrt: Nächster Schritt, Countdown und verbleibende Halte mit Live-Zeiten – in der App und als Live-Benachrichtigung.
 • Einsteigehinweise: „Vorne, in der Mitte oder hinten einsteigen“.
 • Abkürzungs-Alarm: Die App sucht während der Fahrt weiter und meldet einen schnelleren Weg.
 • Aussteige-Erinnerung mit Ton und Vibration; Neuberechnung, wenn du den Fußweg verlässt.

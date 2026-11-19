@@ -90,8 +90,16 @@ import kotlin.math.roundToInt
  */
 internal val LocalSettingsCategory = staticCompositionLocalOf<String?> { null }
 
+/**
+ * True where a [SettingsGroup] draws its rows without a glass frame of its own: in an open
+ * category, under its glass header, and on the page "Advanced". The rows are then the one
+ * surface, so a group does not look like a card in a card (#133).
+ */
+internal val LocalFlatSettingsGroups = staticCompositionLocalOf { false }
+
 /** The ids of the categories of the settings page; kept in the saved state, so they stay as they are. */
 internal object SettingsCategoryId {
+    const val BATTERY = "battery"
     const val APPEARANCE = "appearance"
     const val MAP = "map"
     const val CONNECTIONS = "connections"
@@ -156,7 +164,7 @@ internal fun SettingsCategory(
                 .then(if (pinnedHere) Modifier.alpha(0f).clearAndSetSemantics { } else Modifier),
         )
         SettingReveal(visible = unfolded) {
-            CompositionLocalProvider(LocalSettingsCategory provides title) {
+            CompositionLocalProvider(LocalSettingsCategory provides title, LocalFlatSettingsGroups provides true) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

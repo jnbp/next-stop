@@ -37,7 +37,7 @@ class RidePlaceTest {
     @Test
     fun theU1OfBerlinHasTheColourOfTheNetworkMap() {
         LineColors.focus = bohemia
-        assertEquals(0xFF7DAD4C.toInt(), LineColors.rideStyle("U1", "subway", berlin)?.color)
+        assertEquals(0xFF419328.toInt(), LineColors.rideStyle("U1", "subway", berlin)?.color)
         // An extra S1 named "1" is the S1.
         assertEquals(0xFFDA6BA2.toInt(), LineColors.rideStyle("1", "suburban", berlin)?.color)
         assertEquals("S41", LineColors.berlinRapidName("S 41", "suburban"))

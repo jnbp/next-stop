@@ -11,8 +11,12 @@ import org.json.JSONObject
  * Neither the phone nor the watch on its own found journeys or departures. [phoneReached]
  * tells whether a phone with Next Stop answered at all ("Handy nicht erreichbar" when not).
  */
-class RouteUnavailableException(val phoneReached: Boolean, cause: Throwable?) :
-    IOException("no journeys or departures (phone ${if (phoneReached) "answered" else "not reachable"})", cause)
+class RouteUnavailableException(
+    val phoneReached: Boolean,
+    cause: Throwable?,
+    /** Whether the sources found nothing or none could be reached (#196, see loadFailureOf). */
+    val failure: LoadFailure = LoadFailure.NothingFound,
+) : IOException("no journeys or departures (phone ${if (phoneReached) "answered" else "not reachable"}, $failure)", cause)
 
 /**
  * Where the watch gets journeys, departures and places from. The phone first when it is
@@ -25,10 +29,14 @@ class RouteUnavailableException(val phoneReached: Boolean, cause: Throwable?) :
  * seconds); the phone only stands in when BVG fails.
  */
 object TransitRouter {
+    // Stops whose empty BVG board the phone could not fill either, and when it was asked (see phoneCheckDue).
+    private val emptyPhoneAsks = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     private val bvg = BvgClient()
 
     /**
-     * Journeys from [from] (a stop, or a position as "address:lat,lon") to [to], leaving now.
+     * Journeys from [from] (a stop, or a position as "address:lat,lon") to [to], leaving now;
+     * without a cancelled way to a train another of them rides (#233, see withoutCancelledVariants).
      * Throws [RouteUnavailableException] when neither the phone nor the watch found any answer.
      */
     suspend fun journeys(context: Context, from: Place, to: Place, results: Int, comfort: TransferComfort): List<Journey> {
@@ -39,19 +47,24 @@ object TransitRouter {
             .put("comfort", comfort.name)
         val answer = PhoneQuery.ask(context, PhoneQuery.KIND_JOURNEYS, body, PHONE_JOURNEYS_MILLIS)
         if (answer != null && answer.optBoolean("ok", false)) {
-            return parseJourneysJson(answer.optJSONArray("journeys")).sortedWith(searchOrder).take(results)
+            // A current phone app sends only journeys within the level; an older one all of them.
+            return withoutCancelledVariants(journeysWithin(parseJourneysJson(answer.optJSONArray("journeys")), comfort)).sortedWith(searchOrder).take(results)
         }
         if (answer != null) Log.d(LOG_TAG, "router: the phone found no journeys: ${answer.optString("error")}")
         val inVbb = inVbbArea(from) && inVbbArea(to)
         val first = if (inVbb) Backend.Bvg else Backend.Transitous
         val second = if (inVbb) Backend.Transitous else Backend.Bvg
-        val tried = attempt(LOCAL_MILLIS) { localJourneys(first, from, to, results, comfort) }
-        tried.getOrNull()?.let { return it.sortedWith(searchOrder) }
+        // A few more than shown: those with a change tighter than the level are left out (see journeysWithin).
+        val asked = results + extraFor(comfort)
+        val tried = attempt(LOCAL_MILLIS) { localJourneys(first, from, to, asked, comfort) }
+        tried.getOrNull()?.let { return withoutCancelledVariants(journeysWithin(it, comfort)).sortedWith(searchOrder).take(results) }
         Log.d(LOG_TAG, "router: $first failed: ${tried.exceptionOrNull()}")
-        val backup = attempt(LOCAL_MILLIS) { localJourneys(second, from, to, results, comfort) }
-        backup.getOrNull()?.let { return it.sortedWith(searchOrder) }
+        val backup = attempt(LOCAL_MILLIS) { localJourneys(second, from, to, asked, comfort) }
+        backup.getOrNull()?.let { return withoutCancelledVariants(journeysWithin(it, comfort)).sortedWith(searchOrder).take(results) }
         Log.d(LOG_TAG, "router: $second failed: ${backup.exceptionOrNull()}")
-        throw RouteUnavailableException(phoneReached = answer != null, cause = tried.exceptionOrNull())
+        // Both of the watch's own failed: down only where the first could not reach its service as well.
+        val failure = failureAfter(answer, tried.exceptionOrNull(), backup.exceptionOrNull())
+        throw RouteUnavailableException(phoneReached = answer != null, cause = tried.exceptionOrNull(), failure = failure)
     }
 
     private suspend fun localJourneys(
@@ -60,35 +73,71 @@ object TransitRouter {
         to: Place,
         results: Int,
         comfort: TransferComfort,
-    ): List<Journey> = when (backend) {
-        Backend.Bvg -> bvg.journeys(from, to, results, comfort)
-        Backend.Transitous -> TransitousClient.journeys(from, to, results, comfort)
+    ): List<Journey> {
+        // As the phone's own searches: its walking pace, step-free ways and products.
+        val options = WatchStore.places.value.phoneSearch
+        return when (backend) {
+            Backend.Bvg -> bvg.journeys(from, to, results, comfort, options)
+            Backend.Transitous -> TransitousClient.journeys(from, to, results, comfort, options)
+        }
     }
 
     /**
      * The next departures at [stop]. A stop of the VBB: BVG, the phone when that fails (else
-     * the failure of BVG, as before). Any other stop: the phone, else Transitous; throws
+     * the failure of BVG, as before) or lists nothing to catch (#235, see boardNeedsPhone). Any other stop: the phone, else Transitous; throws
      * [RouteUnavailableException] when neither answers.
      */
     suspend fun departures(context: Context, stop: Place, results: Int): List<Departure> {
         if (isVbbStop(stop)) {
             val direct = attempt(LOCAL_MILLIS) { bvg.departures(stop.id, results) }
-            direct.getOrNull()?.let { return it }
-            phoneDepartures(context, stop, results)?.let { return it }
-            throw direct.exceptionOrNull() ?: BvgException(BvgFailure.Unreachable, "departures failed")
+            direct.getOrNull()?.let { board ->
+                val now = System.currentTimeMillis()
+                if (!boardNeedsPhone(board, now)) return board
+                // Asked a moment ago and the phone knew nothing either: BVG's empty board stands.
+                if (!phoneCheckDue(emptyPhoneAsks[stop.id], now)) return board
+                // #235: BVG listed nothing to catch; the phone's whole chain may well know the runs.
+                val checked = phoneDeparturesAnswer(context, stop, results)?.takeIf { it.optBoolean("ok", false) }
+                    ?.let { departureBoard(parseDeparturesJson(it.optJSONArray("departures"))) }
+                val shown = boardWithPhone(board, checked, System.currentTimeMillis())
+                if (boardNeedsPhone(shown, System.currentTimeMillis())) emptyPhoneAsks[stop.id] = now else emptyPhoneAsks.remove(stop.id)
+                return shown
+            }
+            val answer = phoneDeparturesAnswer(context, stop, results)
+            if (answer != null && answer.optBoolean("ok", false)) return departureBoard(parseDeparturesJson(answer.optJSONArray("departures")))
+            val failed = direct.exceptionOrNull() ?: BvgException(BvgFailure.Unreachable, "departures failed")
+            // BVG and the phone could not reach any service: say so, not why BVG alone failed (#196).
+            val failure = failureAfter(answer, failed)
+            if (failure != LoadFailure.NothingFound) throw RouteUnavailableException(phoneReached = answer != null, cause = failed, failure = failure)
+            throw failed
         }
         val answer = phoneDeparturesAnswer(context, stop, results)
         if (answer != null && answer.optBoolean("ok", false)) return departureBoard(parseDeparturesJson(answer.optJSONArray("departures")))
         val local = attempt(LOCAL_MILLIS) { TransitousClient.departures(stop, results) }
         local.getOrNull()?.let { return it }
         Log.d(LOG_TAG, "router: departures of ${stop.id} failed: ${local.exceptionOrNull()}")
-        throw RouteUnavailableException(phoneReached = answer != null, cause = local.exceptionOrNull())
+        val failure = failureAfter(answer, local.exceptionOrNull())
+        throw RouteUnavailableException(phoneReached = answer != null, cause = local.exceptionOrNull(), failure = failure)
     }
 
-    private suspend fun phoneDepartures(context: Context, stop: Place, results: Int): List<Departure>? {
-        val answer = phoneDeparturesAnswer(context, stop, results) ?: return null
-        if (!answer.optBoolean("ok", false)) return null
-        return departureBoard(parseDeparturesJson(answer.optJSONArray("departures")))
+    /**
+     * What it means that the phone ([answer], null without one) and the watch's own requests
+     * ([local], each its failure) brought nothing (#196, see loadFailureOf): the watch's own
+     * failed to reach their service only when every one did.
+     */
+    private fun failureAfter(answer: JSONObject?, vararg local: Throwable?): LoadFailure {
+        val failures = local.map { (it as? BvgException)?.failure }
+        val down = failures.isNotEmpty() && failures.all { it == BvgFailure.NoNetwork || it == BvgFailure.Unreachable }
+        val phoneDown = answer != null && phoneAnswerDown(
+            ok = answer.optBoolean("ok", false),
+            down = if (answer.has("down")) answer.optBoolean("down", false) else null,
+            error = answer.optString("error", "").ifEmpty { null },
+        )
+        return loadFailureOf(
+            phoneAnswered = answer != null,
+            phoneDown = phoneDown,
+            localDown = down,
+            localOffline = down && failures.any { it == BvgFailure.NoNetwork },
+        )
     }
 
     private suspend fun phoneDeparturesAnswer(context: Context, stop: Place, results: Int): JSONObject? =
@@ -144,6 +193,9 @@ object TransitRouter {
     private const val PHONE_DEPARTURES_MILLIS = 15_000L
     private const val PHONE_SEARCH_MILLIS = 12_000L
     private const val LOCAL_MILLIS = 20_000L
+
+    // The journeys asked for beyond those shown where the level may leave some out ("Sprint" leaves out none).
+    private fun extraFor(comfort: TransferComfort): Int = if (comfort == TransferComfort.VeryRisky) 0 else 3
 }
 
 /** True for a stop of BVG (an id of digits) inside the VBB area, or without a position. */

@@ -85,22 +85,33 @@ const val QUIET_START_GAIN_SECONDS = 180L
  * is the user's own change level. [sameComfort] ("Nur gleich bequeme Alternativen") takes
  * only ways with no more changes ahead than the chosen one. [quietStart] ("Ruhe nach dem
  * Start") asks [QUIET_START_GAIN_SECONDS] during the first [QUIET_START_SECONDS] of the trip.
+ * [thresholdMinutes] is how much sooner a way must arrive without "Jede Minute zählt"
+ * ("ab 3 min" by default, see [shortcutThresholdSeconds]).
  */
 data class ShortcutRules(
     val everyMinute: Boolean,
     val userLevel: TransferComfort,
     val sameComfort: Boolean = false,
     val quietStart: Boolean = false,
+    val thresholdMinutes: Int = DEFAULT_SHORTCUT_MINUTES,
+)
+
+/**
+ * A way to offer: [option] as found, [gainSeconds] sooner than the followed journey, [action]
+ * what the traveller does differently (see [shortcutAction]) and [arrival] when [option]
+ * arrives on the own vehicle's current realtime (see [onOwnBasis]).
+ */
+data class ShortcutPick(
+    val option: Journey,
+    val gainSeconds: Long,
+    val action: ShortcutAction,
+    val arrival: OffsetDateTime,
 )
 
 /**
  * The way to offer from [options], found from [point] on the followed journey [current]
- * (with live times; its prognosis counts, see [Journey.plausible]), or null. Besides the
- * rules of [fasterOption] the way must be news since the choice ([known], see
- * [KnownWays.isNews]) unless the chosen journey can no longer be made as planned ahead of
- * [point] ([brokenAhead]), and follow [rules]: it leaves [point] no earlier than [current] does
- * ([leavesNoEarlier]) and every change from [point] on fits the level ([reachableAt]).
- * [startedAt] is when the trip was started.
+ * (with live times; its prognosis counts, see [Journey.plausible]), or null; see
+ * [shortcutPick]. As a pair of the way and the seconds it wins.
  */
 fun shortcutOffer(
     current: Journey,
@@ -111,24 +122,63 @@ fun shortcutOffer(
     rules: ShortcutRules,
     startedAt: OffsetDateTime,
     now: OffsetDateTime,
-): Pair<Journey, Long>? {
+): Pair<Journey, Long>? =
+    shortcutPick(current, point, options, ignored, known, rules, startedAt, now)?.let { it.option to it.gainSeconds }
+
+/**
+ * The way to offer from [options], found from [point] on the followed journey [current], or
+ * null. Only a real alternative counts: one that has the traveller do something else
+ * ([shortcutAction]: get off earlier, change elsewhere, take another line, stay seated),
+ * never the same rides found again under another label. Both ways are compared on the same
+ * basis, the own vehicle's current realtime ([onOwnBasis], [pointOnOwnBasis]): the change to
+ * another ride must be made from when the own vehicle really gets there, with the change time
+ * of the level ([reachableAt]). It must win at least the threshold of [rules]
+ * ([shortcutThresholdSeconds]; three minutes in the first minutes with a quiet start), leave
+ * [point] no earlier than [current] does ([leavesNoEarlier]), be news since the choice
+ * ([known], see [KnownWays.isNews]) unless the chosen journey can no longer be made as planned
+ * ahead of [point] ([brokenAhead]), and not be an action the user put aside ([ignored]: by
+ * [ShortcutAction.key], with the gain it had then) unless it wins [IGNORED_BETTER_SECONDS]
+ * more now. The most time won counts first, then fewer changes.
+ */
+fun shortcutPick(
+    current: Journey,
+    point: ReplanPoint,
+    options: List<Journey>,
+    ignored: Map<String, Long>,
+    known: KnownWays,
+    rules: ShortcutRules,
+    startedAt: OffsetDateTime,
+    now: OffsetDateTime,
+): ShortcutPick? {
     val shown = current.plausible()
     val level = shortcutComfort(rules.everyMinute, rules.userLevel)
     val broken = brokenAhead(shown, point)
     val ahead = boardingsAhead(shown.legs.drop(point.kept.size))
-    val allowed = options.filter { option ->
-        // Never a way that leaves before the chosen one, by the live or by the planned time;
-        // every change from where the traveller is on as the level allows (the change at the
-        // point itself included), and never one that cannot be made at all.
-        leavesNoEarlier(current, point, option) && reachableAt(point, option, level) &&
-            (rules.everyMinute || !rules.sameComfort || optionBoardings(point, option) <= ahead)
-    }
+    val ownPoint = pointOnOwnBasis(shown, point)
     val quiet = !rules.everyMinute && rules.quietStart &&
         now.isBefore(startedAt.plusSeconds(QUIET_START_SECONDS))
-    val minGain = if (quiet) QUIET_START_GAIN_SECONDS else MIN_GAIN_SECONDS
-    return fasterOption(shown, point, allowed, ignored) { option, gain ->
-        gain >= minGain && (broken || known.isNews(option, gain))
-    }
+    val threshold = shortcutThresholdSeconds(rules.everyMinute, rules.thresholdMinutes)
+    val minGain = if (quiet) maxOf(threshold, QUIET_START_GAIN_SECONDS) else threshold
+    return options
+        .asSequence()
+        .filter { !it.cancelled && it.rides.isNotEmpty() && !it.departure.isBefore(point.time.minusSeconds(GET_OFF_MARGIN_SECONDS)) }
+        // Never a way that leaves before the chosen one, by the live or by the planned time.
+        .filter { option -> leavesNoEarlier(current, point, option) }
+        .filter { option -> rules.everyMinute || !rules.sameComfort || optionBoardings(point, option) <= ahead }
+        .mapNotNull { option ->
+            val action = shortcutAction(shown, point, option) ?: return@mapNotNull null
+            val own = onOwnBasis(shown, point, option)
+            // Every change from where the traveller is on as the level allows, from when the own vehicle gets there.
+            if (!reachableAt(ownPoint, own, level)) return@mapNotNull null
+            ShortcutPick(option, gainSeconds(shown, own), action, own.arrival)
+        }
+        .filter { pick ->
+            pick.gainSeconds >= minGain &&
+                ignored[pick.action.key]?.let { pick.gainSeconds >= it + IGNORED_BETTER_SECONDS } != false &&
+                (broken || known.isNews(pick.option, pick.gainSeconds))
+        }
+        .sortedWith(compareByDescending<ShortcutPick> { it.gainSeconds }.thenBy { it.option.transfers })
+        .firstOrNull()
 }
 
 /** The rides boarded on [legs]. */

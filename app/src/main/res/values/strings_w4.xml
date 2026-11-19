@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Release 0.2: handling and battery (BatterySaver, HapticSetting). -->
+    <string name="settings_group_comfort">Handling</string>
+    <string name="battery_saver_title">Battery saver</string>
+    <string name="battery_saver_text">No background map (a map only when you open one, e.g. the Map tab), no live vehicles, the live trip without a map, widgets refresh only when tapped or when the app opens, no location in the background.</string>
+    <string name="battery_saver_off">Off</string>
+    <string name="battery_saver_auto">Automatic</string>
+    <string name="battery_saver_always">Always</string>
+    <string name="battery_saver_auto_text">Automatic: on while the battery saver of the system is on.</string>
+    <string name="battery_saver_now_on">Saving battery right now</string>
+    <string name="battery_saver_now_off">Not saving right now</string>
+    <string name="haptics_title">Haptics</string>
+    <string name="haptics_text">A light tick on chips, switches, tabs and when pulling to refresh.</string>
+
+    <!-- The delay display "Takt style" (DelayDisplay.StruckPlanned). -->
+    <string name="delay_display_struck">Planned time struck + new time</string>
+    <string name="delay_display_struck_text">The timetable time struck through, the new time beside it.</string>
+
+    <!-- The side the sun shines in on a ride (SunSide). -->
+    <string name="sun_side_hint">Sun mostly on the %1$s – shady side: %2$s</string>
+    <string name="sun_side_left">left</string>
+    <string name="sun_side_right">right</string>
+
+    <!-- How full a ride is expected to be (Occupancy). -->
+    <string name="occupancy_low">Few passengers expected</string>
+    <string name="occupancy_medium">Moderately busy</string>
+    <string name="occupancy_high">Busy</string>
+    <string name="occupancy_full">Very busy</string>
+
+    <!-- The pace by bicycle (BikePace) and hints of a ride. -->
+    <string name="bike_speed_title">Cycling pace</string>
+    <string name="bike_speed_text">For the stretches by bike of the bike combo.</string>
+    <string name="bike_speed_relaxed">Relaxed</string>
+    <string name="bike_speed_normal">Normal</string>
+    <string name="bike_speed_fast">Fast</string>
+    <string name="bike_speed_custom">Own</string>
+    <string name="bike_speed_kmh">%1$d km/h</string>
+    <string name="bike_speed_custom_label">Own pace in km/h (%1$d–%2$d)</string>
+    <string name="ride_bike_carriage">Bicycles allowed</string>
+    <string name="ride_step_free">Step-free</string>
+
+    <!-- The start of the setup: detailed or skipped. -->
+    <string name="setup_mode_title">How would you like to set up?</string>
+    <string name="setup_mode_text">The detailed setup walks through every choice. Skipped, only the view of the connections is asked; the rest stays as it is and can be changed in the settings.</string>
+    <string name="setup_mode_detailed">Set up in detail</string>
+    <string name="setup_mode_skip">Skip</string>
+    <string name="setup_view_title">Connections as a list or a chart?</string>
+    <string name="setup_comfort_title">Handling &amp; battery</string>
+    <string name="setup_comfort_short">Save battery and feel the controls.</string>
+
+    <!-- Small polish. -->
+    <string name="appointments_after_title">Appointments after their start</string>
+    <string name="appointments_after_text">An appointment is still offered as a destination this long after it began.</string>
+    <string name="appointments_after_minutes">%1$d′</string>
+</resources>

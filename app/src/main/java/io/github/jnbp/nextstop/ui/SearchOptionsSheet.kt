@@ -1,8 +1,10 @@
 package io.github.jnbp.nextstop.ui
 
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.ui.semantics.Role
 import io.github.jnbp.nextstop.ui.theme.AppColors
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -164,7 +166,14 @@ fun SearchOptionsSheet(
                             )
                         }
                         ChartTotalTimeToggle(selected = totalTime, onSelect = onTotalTime)
-                        PreviewExpander(key = "chart_total_time") { ChartTotalTimePreview(totalTime) }
+                        // A tap on the preview shows the next place of the total time.
+                        PreviewExpander(
+                            key = "chart_total_time",
+                            onTap = {
+                                val all = io.github.jnbp.nextstop.data.ChartTotalTime.entries
+                                onTotalTime(all[cycleIndex(all.indexOf(totalTime), all.size)])
+                            },
+                        ) { ChartTotalTimePreview(totalTime) }
                         Column(modifier = Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(text = stringResource(R.string.chart_short_legs_title), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                             Text(
@@ -175,7 +184,11 @@ fun SearchOptionsSheet(
                             )
                         }
                         ChartShortLegsToggle()
-                        PreviewExpander(key = "chart_short_legs") {
+                        val legsContext = androidx.compose.ui.platform.LocalContext.current
+                        PreviewExpander(
+                            key = "chart_short_legs",
+                            onPick = { index -> ChartShortLegsSetting.update(legsContext, ChartShortLegs.entries[index]) },
+                        ) {
                             ChartShortLegsPreview(ChartShortLegsSetting.load(androidx.compose.ui.platform.LocalContext.current))
                         }
                     }
@@ -264,12 +277,17 @@ private fun SheetSwitchRow(
     onChange: (Boolean) -> Unit,
     enabled: Boolean = true,
 ) {
+    val ticks = rememberTicks()
+    val toggle: (Boolean) -> Unit = { value ->
+        ticks.toggle(value)
+        onChange(value)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(AppColors.Card)
-            .clickable(enabled = enabled) { onChange(!checked) }
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = toggle)
             .defaultMinSize(minHeight = 56.dp)
             .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -279,7 +297,7 @@ private fun SheetSwitchRow(
             Text(text = title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             Text(text = text, color = AppColors.Muted, fontSize = 12.sp, lineHeight = 16.sp)
         }
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled, modifier = Modifier.minimumInteractiveComponentSize())
     }
 }
 

@@ -12,7 +12,7 @@
         android:layout_height="wrap_content"
         android:maxLines="1"
         android:ellipsize="end"
-        android:text="3 min"
+        android:text="3′"
         android:textColor="#1B4FD8"
         android:textSize="24sp"
         android:textStyle="bold" />

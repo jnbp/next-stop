@@ -84,8 +84,8 @@ Companion files:
 
 *Play Console > Create app*
 
-- App name: `Next Stop – ÖPNV-Begleiter` (title text of the listing; the name under the icon on
-  the phone stays `Next Stop`).
+- App name: `Next Stop` (the store name, as in `fastlane/metadata/android/*/title.txt`; the same as
+  the name under the icon on the phone).
 - Default language: **German (Germany) – de-DE**; add English (United States) as a second language.
 - App or game: **App**. Free or paid: **Free** (cannot be changed to paid later).
 - Accept the declarations (Developer Program Policies, US export laws).

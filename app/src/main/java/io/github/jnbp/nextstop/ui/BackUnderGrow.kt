@@ -34,3 +34,19 @@ internal fun backUnderAlpha(shown: Float): Float {
  */
 internal fun backUnderPivot(cardCentre: Float, partHeight: Float): Float =
     if (partHeight <= 0f) 0.5f else cardCentre / partHeight
+
+/**
+ * Whether the page in front has been under a back gesture that led away from it: true while
+ * the gesture or its fade runs ([active]), and after that for as long as the page is [closed]
+ * (back was let go, the page is on its way out). A gesture called off leaves the page open,
+ * so it forgets the gesture as soon as that is over.
+ */
+internal fun backLeftSeen(active: Boolean, closed: Boolean, seenBefore: Boolean): Boolean =
+    active || (seenBefore && closed)
+
+/**
+ * The page in front is hidden: the fade of its back gesture is over ([active] false) but the
+ * transition has not taken it away yet ([seen], see [backLeftSeen]). It was faded out already,
+ * so it must not stand there whole again for those last frames.
+ */
+internal fun backLeftHidden(active: Boolean, seen: Boolean): Boolean = !active && seen

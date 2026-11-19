@@ -150,18 +150,18 @@ fun CompactTripCard(
             // The highlight on the main colour: with the colours of some wallpapers the two lie
             // close, so it is moved until the big number reads (large text, 3:1).
             val countColor = readableOn(AppColors.Blue, AppColors.Lime, minimum = 3f)
-            // From an hour on in hours and minutes ("1 h 37 min"), never one big number; far
-            // ahead, the clock time says more.
-            val (hours, rest) = durationSpan(minutes)
+            // From an hour on in hours and minutes ("1:37" and a small "h"), never one big
+            // number; far ahead, the clock time says more.
+            val clock = durationClock(minutes)
             val parts = when {
                 minutes >= 100 -> listOf(step.time.clock() to null)
-                hours == null -> listOf(minutes.toString() to stringResource(R.string.minutes_unit))
-                else -> listOfNotNull(
-                    hours.toString() to stringResource(R.string.hours_unit),
-                    rest?.let { it.toString() to stringResource(R.string.minutes_unit) },
-                )
+                clock == null -> listOf(minutes.toString() to stringResource(R.string.minutes_unit))
+                else -> listOf(clock to stringResource(R.string.hours_unit))
             }
-            Row(verticalAlignment = Alignment.Bottom) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                modifier = if (minutes >= 100) Modifier else Modifier.speaks(spokenDuration(minutes)),
+            ) {
                 parts.forEachIndexed { index, (number, unit) ->
                     Text(
                         text = number,
@@ -177,9 +177,9 @@ fun CompactTripCard(
                             text = unit,
                             color = countColor,
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 20.sp,
+                            fontSize = unitSize(unit, 20.sp, 40.sp),
                             maxLines = 1,
-                            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
+                            modifier = Modifier.padding(start = unitGap(unit, 6.dp), bottom = if (unit == MINUTE_PRIME) 4.dp else 8.dp),
                         )
                     }
                 }

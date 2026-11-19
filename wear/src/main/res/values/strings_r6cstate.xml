@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- What a screen reader says for the state of a trip in a complication (its icon); %1$s the line. -->
+    <string name="r6cstate_wait">Waiting for %1$s</string>
+    <string name="r6cstate_wait_plain">Waiting for the departure</string>
+    <string name="r6cstate_ride">Riding %1$s</string>
+    <string name="r6cstate_ride_plain">Riding</string>
+    <string name="r6cstate_get_off">Get off soon</string>
+    <string name="r6cstate_change">Change</string>
+    <string name="r6cstate_walk">On foot</string>
+    <string name="r6cstate_cycle">By bike</string>
+    <string name="r6cstate_arrived">Arrived</string>
+    <!-- After the state: the minutes of the countdown. -->
+    <plurals name="r6cstate_minutes_left">
+        <item quantity="one">%d minute left</item>
+        <item quantity="other">%d minutes left</item>
+    </plurals>
+</resources>

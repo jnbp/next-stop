@@ -60,6 +60,10 @@ import io.github.jnbp.nextstop.wear.data.Departure
 import io.github.jnbp.nextstop.wear.data.badgeLine
 import io.github.jnbp.nextstop.wear.data.TravelMode
 import io.github.jnbp.nextstop.wear.data.modeHint
+import io.github.jnbp.nextstop.wear.data.SevLine
+import io.github.jnbp.nextstop.wear.data.sevLineOf
+import io.github.jnbp.nextstop.wear.data.sevReplacedProduct
+import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.CornerRadius
@@ -75,11 +79,18 @@ import io.github.jnbp.nextstop.wear.data.DelayTone
 import io.github.jnbp.nextstop.wear.data.MinutesTone
 import io.github.jnbp.nextstop.wear.data.delayTone
 import io.github.jnbp.nextstop.wear.data.minutesTone
+import io.github.jnbp.nextstop.wear.data.countedTime
 import io.github.jnbp.nextstop.wear.data.onLineArgb
 
 /** The badge of a line in its colour, as on the phone; [color] the colour the phone sent for the ride. */
 @Composable
 fun LineBadge(line: String?, product: String, modifier: Modifier = Modifier, color: Long? = null) {
+    // A rail replacement (SEV) as on the phone: "SEV" and the line it stands in for.
+    val sev = remember(line, product) { sevLineOf(line, product) }
+    if (sev != null) {
+        SevBadge(line, product, sev, modifier, color)
+        return
+    }
     val argb = lineArgb(line, product, color)
     val mode = modeHint(line, product)
     val spoken = mode?.let { listOfNotNull(modeWord(it), line).joinToString(" ") }
@@ -115,6 +126,40 @@ fun modeWord(mode: TravelMode): String =
     stringResource(if (mode == TravelMode.Bus) R.string.mode_bus else R.string.mode_train)
 
 /** A small icon of a bus or a train in [color], as on the phone's badges (twin of its ModeMark). */
+/**
+ * The badge of a rail replacement service, as the phone's (RailReplacementBadge there): the bus
+ * mark, "SEV" and the line it stands in for, outlined in the colour of that line (of the bus
+ * itself where the line is not known) on a plain ground, so it never passes for the train.
+ */
+@Composable
+private fun SevBadge(line: String?, product: String, sev: SevLine, modifier: Modifier, color: Long?) {
+    val replaced = sev.replaced
+    val outline = Color(if (replaced != null) lineArgb(replaced, sevReplacedProduct(replaced)) else lineArgb(line, product, color))
+    val label = stringResource(R.string.r6par_rail_replacement)
+    val spoken = listOfNotNull(label, replaced ?: line?.takeIf { it.isNotBlank() }).joinToString(" ")
+    val ink = MaterialTheme.colorScheme.onSurface
+    val shape = RoundedCornerShape(6.dp)
+    Row(
+        modifier = modifier
+            .clearAndSetSemantics { contentDescription = spoken }
+            .widthIn(min = 30.dp, max = 104.dp)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .border(1.5.dp, outline, shape)
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // A replacement is a bus, whatever its name: the mark says so.
+        ModeMark(TravelMode.Bus, ink, 10.dp)
+        Text(SEV_MARK, color = ink, fontSize = if (replaced != null) 10.sp else 13.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        if (replaced != null) Text(replaced, color = ink, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+    }
+}
+
+// The mark of a rail replacement on its badge, the same in every language (as on the signs and the phone).
+private const val SEV_MARK = "SEV"
+
 @Composable
 fun ModeMark(mode: TravelMode, color: Color, size: Dp, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.size(size)) {
@@ -140,7 +185,7 @@ fun ModeMark(mode: TravelMode, color: Color, size: Dp, modifier: Modifier = Modi
     }
 }
 
-/** "now", "5 min", or from an hour on "2 h 23 min" until [time] (see [hoursAndMinutes]). */
+/** "now", "5 min", or from an hour on "2:23 h" until [time] (see [hoursAndMinutes]). */
 @Composable
 fun minutesLabel(time: Long?): String {
     if (time == null) return "–"
@@ -154,7 +199,7 @@ fun minutesLabel(time: Long?): String {
     }
 }
 
-/** "5 min", or from an hour on "2 h 23 min", for [minutes], outside of the interface (a tile). */
+/** "5 min", or from an hour on "2:23 h", for [minutes], outside of the interface (a tile). */
 fun spanText(context: Context, minutes: Long): String {
     val (hours, rest) = hoursAndMinutes(minutes)
     return when {
@@ -220,7 +265,12 @@ fun DepartureRow(departure: Departure, now: Long, details: Boolean = false, modi
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     // Marked as on the phone (see DepartureTones): the minutes in lime from three minutes on,
     // "now" included, late or not; the delay beside them red when late, green when early.
-    val minutes = departure.time?.let { minutesUntil(it, now) }
+    // With "planned + delay" the minutes count to the timetable time, as on the phone (#227b);
+    // a late run counted so has not left yet: never shown as gone.
+    val display = rememberDelayDisplay()
+    val counted = countedTime(display, departure.time, departure.plannedTime)
+    val fromTimetable = counted != null && counted != departure.time
+    val minutes = counted?.let { minutesUntil(it, now) }?.let { if (fromTimetable) it.coerceAtLeast(0L) else it }
     val minutesColor = when (minutesTone(minutes, departure.cancelled)) {
         MinutesTone.Cancelled -> if (details) muted else MaterialTheme.colorScheme.error
         MinutesTone.Gone -> muted
@@ -246,8 +296,8 @@ fun DepartureRow(departure: Departure, now: Long, details: Boolean = false, modi
         if (details) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    LineBadge(departure.line, departure.product)
-                    val platform = platformText(departure.platform, departure.line)
+                    LineBadge(departure.line, departure.product, color = departure.color)
+                    val platform = platformText(departure.platform, departure.line, departure.product)
                     if (platform != null) {
                         Spacer(Modifier.width(6.dp))
                         Text(
@@ -291,7 +341,7 @@ fun DepartureRow(departure: Departure, now: Long, details: Boolean = false, modi
                 )
             }
         } else {
-            LineBadge(departure.line, departure.product)
+            LineBadge(departure.line, departure.product, color = departure.color)
             Spacer(Modifier.width(6.dp))
             Text(
                 text = departure.direction,
@@ -319,7 +369,7 @@ fun DepartureRow(departure: Departure, now: Long, details: Boolean = false, modi
         // The minutes roll as they count down (see WatchSwap).
         val bigText = !departure.cancelled || details
         WatchSwap(
-            target = if (bigText) bigMinutesLabel(departure.time, now) else stringResource(R.string.cancelled),
+            target = if (bigText) bigMinutesLabel(counted, now) else stringResource(R.string.cancelled),
             roll = !departure.cancelled,
             contentAlignment = Alignment.CenterEnd,
             modifier = Modifier.widthIn(min = MINUTES_MIN_WIDTH),
@@ -459,8 +509,9 @@ fun ProgressBar(progress: Float, modifier: Modifier = Modifier) {
 }
 
 /**
- * A small action: a compact pill of one line with an optional icon, filled for the one main
- * action of a page ([primary]), tonal for the others.
+ * An action of a page with an optional icon, filled for the one main action of a page
+ * ([primary]), tonal for the others: the full-width M3 button of [WatchAction] (#145); with
+ * [compact] the pill of one line, for an action floating over a map.
  */
 @Composable
 fun SmallAction(
@@ -469,7 +520,13 @@ fun SmallAction(
     icon: Int? = null,
     primary: Boolean = false,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    widthFraction: Float = 1f,
 ) {
+    if (!compact) {
+        WatchAction(text, onClick, icon = icon, primary = primary, modifier = modifier, widthFraction = widthFraction)
+        return
+    }
     // Gives way a little under the finger and springs back, as the buttons of the phone do.
     val press = remember { MutableInteractionSource() }
     CompactButton(

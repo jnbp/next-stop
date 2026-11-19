@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r6s2_services_down">Dienste nicht erreichbar</string>
+    <string name="r6s2_check_internet">Prüfe deine Internetverbindung</string>
+    <string name="r6s2_try_later">Bitte später erneut versuchen</string>
+    <!-- #198: "Langsamer unterwegs" with an own factor. -->
+    <string name="r6s2_pace_off">Aus</string>
+    <string name="r6s2_pace_slower">1,3-mal</string>
+    <string name="r6s2_pace_own">Eigener Faktor</string>
+    <string name="r6s2_pace_own_value">%1$s× – %2$d min werden zu %3$d min</string>
+    <!-- #201: "Anschluss unterwegs wählen" as one setting (off, or how the pickers show). -->
+    <string name="r6s2_off">Aus</string>
+    <string name="r6s2_on">An</string>
+    <string name="r6s2_fold_folded">Eingeklappt</string>
+    <string name="r6s2_fold_next_picker">Nur nächstes ausgeklappt</string>
+    <string name="r6s2_fold_all">Alle ausgeklappt</string>
+    <string name="r6s2_fold_next_short">Nur nächstes</string>
+    <string name="r6s2_fold_all_short">Alle</string>
+    <!-- #202: "Minikarte für Fußwege" in three ways. -->
+    <string name="r6s2_fold_next_map">Nur nächste ausgeklappt</string>
+    <string name="r6s2_fold_next_map_short">Nur nächste</string>
+    <string name="r6s2_walk_maps_title">Minikarte für Fußwege</string>
+    <string name="r6s2_walk_maps_text">Welche Fußwege ihre kleine Karte gleich zeigen – in der Live-Fahrt und in den Verbindungsdetails.</string>
+    <string name="r6s2_walk_maps_folded_text">Jeder Fußweg zeigt seine Karte auf Tipp auf „Karte zeigen“.</string>
+    <string name="r6s2_walk_maps_next_text">Die Karte des nächsten Fußwegs klappt von selbst auf: in den Verbindungsdetails der erste Fußweg, in der Live-Fahrt der nächste Fußweg oder Umstieg. Die anderen auf Tipp.</string>
+    <string name="r6s2_walk_maps_all_text">Jeder Fußweg zeigt seine Karte gleich.</string>
+</resources>

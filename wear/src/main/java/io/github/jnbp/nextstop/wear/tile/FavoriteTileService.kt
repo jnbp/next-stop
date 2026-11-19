@@ -3,6 +3,7 @@ package io.github.jnbp.nextstop.wear.tile
 import android.content.Context
 import android.util.Log
 import androidx.wear.protolayout.ActionBuilders
+import androidx.wear.protolayout.DimensionBuilders
 import androidx.wear.protolayout.LayoutElementBuilders
 import androidx.wear.protolayout.ModifiersBuilders
 import androidx.wear.protolayout.TimelineBuilders
@@ -24,6 +25,7 @@ import io.github.jnbp.nextstop.wear.data.LOG_TAG
 import io.github.jnbp.nextstop.wear.data.WatchStore
 import io.github.jnbp.nextstop.wear.data.currentPosition
 import io.github.jnbp.nextstop.wear.data.minutesUntil
+import io.github.jnbp.nextstop.wear.data.shownPlaceName
 import io.github.jnbp.nextstop.wear.ui.MainActivity
 import io.github.jnbp.nextstop.wear.ui.OpenRequest
 import io.github.jnbp.nextstop.wear.ui.clock
@@ -50,7 +52,7 @@ class FavoriteTileService : Material3TileService() {
             button = service.getString(R.string.choose)
             request = OpenRequest.TileTarget
         } else {
-            title = target.name
+            title = shownPlaceName(target)
             button = service.getString(R.string.open)
             request = OpenRequest.Results(target)
             val position = currentPosition(service, waitForFix = false)
@@ -95,7 +97,10 @@ class FavoriteTileService : Material3TileService() {
                     .build(),
             )
             .build()
+        // The whole content opens the app too (#270), not only the button at the edge.
         val column = LayoutElementBuilders.Column.Builder()
+            .setWidth(DimensionBuilders.expand())
+            .setModifiers(ModifiersBuilders.Modifiers.Builder().setClickable(clickable).build())
         lines.forEachIndexed { index, line ->
             column.addContent(
                 text(
@@ -138,7 +143,7 @@ class FavoriteTileService : Material3TileService() {
 private fun journeyLines(context: Context, journey: Journey): List<String> {
     val minutes = minutesUntil(journey.departure)
     val rides = journey.rides.mapNotNull { it.line }.take(3).joinToString(" › ")
-    val head = listOf(rides.ifEmpty { "🚶" }, "$minutes'").joinToString(" · ")
+    val head = listOf(rides.ifEmpty { context.getString(R.string.r6comp_on_foot) }, "$minutes'").joinToString(" · ")
     val times = "${clock(journey.departure)}–${clock(journey.arrival)}"
     val changes = if (journey.transfers == 0) context.getString(R.string.direct) else context.getString(R.string.changes, journey.transfers)
     return listOf(head, times, changes)

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #212: a ride named by its kind -->
+    <string name="r7p_missed_bus">Bus verpasst</string>
+    <string name="r7p_missed_tram">Tram verpasst</string>
+    <string name="r7p_missed_ubahn">U-Bahn verpasst</string>
+    <string name="r7p_missed_sbahn">S-Bahn verpasst</string>
+    <string name="r7p_missed_ferry">Fähre verpasst</string>
+    <string name="r7p_missed_ride">Fahrt verpasst</string>
+    <string name="r7p_late_bus">Mein Bus ist zu spät / fällt aus</string>
+    <string name="r7p_late_tram">Meine Tram ist zu spät / fällt aus</string>
+    <string name="r7p_late_ubahn">Meine U-Bahn ist zu spät / fällt aus</string>
+    <string name="r7p_late_sbahn">Meine S-Bahn ist zu spät / fällt aus</string>
+    <string name="r7p_late_ferry">Meine Fähre ist zu spät / fällt aus</string>
+    <string name="r7p_late_ride">Meine Fahrt ist zu spät / fällt aus</string>
+    <string name="r7p_wrong_bus">Ich sitze im falschen Bus</string>
+    <string name="r7p_wrong_tram">Ich sitze in der falschen Tram</string>
+    <string name="r7p_wrong_ubahn">Ich sitze in der falschen U-Bahn</string>
+    <string name="r7p_wrong_sbahn">Ich sitze in der falschen S-Bahn</string>
+    <string name="r7p_wrong_ferry">Ich bin auf der falschen Fähre</string>
+    <string name="r7p_wrong_ride">Ich sitze im falschen Fahrzeug</string>
+    <string name="r7p_where_ride">Wo ist mein Fahrzeug?</string>
+    <!-- #217: the line under each entry of the sheets of the Live-Fahrt bar -->
+    <string name="r7p_missed_text">Sucht die nächsten Verbindungen ab der Haltestelle, an der du los wolltest</string>
+    <string name="r7p_wrong_text">Neue Verbindungen ab da, wo du gerade bist – auch mitten in der Fahrt</string>
+    <string name="r7p_retarget_text">Ein anderes Ziel wählen und den Weg ab hier finden</string>
+    <string name="r7p_other_connection_text">Am nächsten Umstieg einen anderen Anschluss nehmen</string>
+    <string name="r7p_other_ways_text">Sucht andere Wege ab dem nächsten Umstieg</string>
+    <string name="r7p_shortcuts_text">Meldet sich, wenn ein schnellerer Weg auftaucht</string>
+    <string name="r7p_every_minute_text">Sprint-Umstiege und Alarm schon ab einer Minute schneller</string>
+    <string name="r7p_wake_text">Klingelt, bevor du aussteigen musst</string>
+</resources>

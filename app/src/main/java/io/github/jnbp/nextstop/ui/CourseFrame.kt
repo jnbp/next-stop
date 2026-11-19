@@ -205,3 +205,42 @@ fun courseView(
     val targetY = centreY - (top - bottom) / 2.0 / world
     return CourseView(latitudeOf(targetY), targetX * 360.0 - 180.0, shownZoom)
 }
+
+/** The share of the free part of a map in which a followed vehicle may move before the camera pans. */
+const val FOLLOW_INNER_SHARE = 0.6
+
+/**
+ * Whether the camera following a vehicle at ([x], [y]) has to pan: the vehicle left the free
+ * part of the map ([left]..[right], [top]..[bottom]), or it left the inner [share] of it, a box
+ * that size around ([anchorX], [anchorY]), where the last frame put the vehicle (the middle of
+ * the free part when framed around it; near the edge it comes from when framed with its next
+ * stops). Otherwise the camera rests. A NaN anchor (no frame yet) pans only at the free part's edge.
+ */
+fun followPanDue(
+    x: Double,
+    y: Double,
+    anchorX: Double,
+    anchorY: Double,
+    left: Double,
+    top: Double,
+    right: Double,
+    bottom: Double,
+    share: Double = FOLLOW_INNER_SHARE,
+): Boolean {
+    if (x.isNaN() || y.isNaN()) return false
+    if (x < left || x > right || y < top || y > bottom) return true
+    if (anchorX.isNaN() || anchorY.isNaN()) return false
+    val slack = (1.0 - share) / 2.0
+    return abs(x - anchorX) > (right - left) * slack || abs(y - anchorY) > (bottom - top) * slack
+}
+
+/**
+ * The layers among [layers] (id and source of each symbol layer of the style) that hold the
+ * map's own labels: all but those of the app (its sources begin with "ns-": vehicles, stops,
+ * notices). Only these are asked whether the map writes a station's name itself.
+ */
+fun mapLabelLayers(layers: List<Pair<String, String>>): Array<String> =
+    layers.filter { (_, source) -> !source.startsWith(APP_SOURCE_PREFIX) }.map { it.first }.toTypedArray()
+
+// The sources the app adds to the map's style begin with this.
+private const val APP_SOURCE_PREFIX = "ns-"

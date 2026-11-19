@@ -1,5 +1,8 @@
 package io.github.jnbp.nextstop.ui
 
+import io.github.jnbp.nextstop.data.TimeTone
+import io.github.jnbp.nextstop.data.distinctStopNames
+import io.github.jnbp.nextstop.data.StopAction
 import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalAnimationApi
@@ -47,6 +50,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +64,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -67,6 +72,8 @@ import androidx.compose.ui.unit.sp
 import android.graphics.RectF
 import java.time.OffsetDateTime
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.geojson.Point
 import kotlin.math.sqrt
 import kotlin.math.cos
@@ -330,7 +337,9 @@ private fun CourseStops(
     val stops = course.stops
     // The first stop the vehicle has not left yet; everything before it lies behind.
     val ahead = stops.indexOfFirst { (it.departure ?: it.arrival)?.isAfter(now) == true }
-    val focus = stops.indexOfFirst { it.name == fromStop }
+    // The stop it was opened from; on a ring, which calls there more than once, its next call.
+    val focus = (ahead.coerceAtLeast(0) until stops.size).firstOrNull { stops[it].name == fromStop }
+        ?: stops.indexOfFirst { it.name == fromStop }
     val scroll = rememberScrollState()
     val rowPixels = with(LocalDensity.current) { COURSE_ROW.toPx() }
     // Once per trip the list moves to the stop that matters, with one stop before it in view.
@@ -341,6 +350,8 @@ private fun CourseStops(
     // The town of the course (of the stop it was opened from, else of its first stop that names
     // one): stops in another town say theirs ("Kirchstr. · Zagelsdorf").
     val town = remember(stops, fromStop) { townOf(fromStop) ?: stops.firstNotNullOfOrNull { townOf(it.name) } }
+    // Never two different stops alike in the list (#278).
+    val names = remember(stops, town) { distinctStopNames(stops.map { it.name }, stops.map { townedStopName(it.name, town) }) }
     val clock = remember(stops) { StopClock(stops) }
     val uncertain = remember(stops) { stops.any { it.estimated } }
     val beat = rememberBeat()
@@ -376,7 +387,7 @@ private fun CourseStops(
                         last = index == stops.lastIndex,
                         passed = ahead < 0 || index < ahead,
                         strong = index == focus,
-                        town = town,
+                        name = names.getOrNull(index) ?: townedStopName(stop.name, town),
                         onShowStop = onShowStop,
                         onStopAction = onStopAction,
                     )
@@ -431,7 +442,7 @@ private fun CourseRow(
     last: Boolean,
     passed: Boolean,
     strong: Boolean,
-    town: String?,
+    name: String,
     onShowStop: (Stop) -> Unit,
     onStopAction: (Stop, StopAction) -> Unit,
 ) {
@@ -472,15 +483,17 @@ private fun CourseRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
             ) {
                 // With the delay next to it; live times are green or red, timetable times dark.
-                // A time the app estimated is grey with "ca." and without a delay: it is a guess.
+                // A time the app estimated is blue with "ca." and without a delay (#277): it is a guess.
                 if (stop.estimated && !passed) {
                     Text(
                         text = stringResource(R.string.estimated_prefix),
-                        color = AppColors.Muted,
+                        color = timeToneColor(TimeTone.Estimated, AppColors.Ink),
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
                         maxLines = 1,
                     )
+                } else if (delayMinutes != null && delayMinutes != 0 && !passed && display.strikesPlanned && planned != null) {
+                    StruckTime(planned)
                 } else if (delayMinutes != null && delayMinutes != 0 && !passed && display.showsDelay) {
                     Text(
                         text = stringResource(R.string.delay_short, delayMinutes),
@@ -493,7 +506,8 @@ private fun CourseRow(
                 Text(
                     text = time?.let { (if (stop.estimated) it else display.clockOf(it, planned)).clock() } ?: "",
                     color = when {
-                        passed || stop.estimated -> AppColors.Muted
+                        passed -> AppColors.Muted
+                        stop.estimated -> timeToneColor(TimeTone.Estimated, AppColors.Ink)
                         else -> display.timeColor(delayMinutes != null, (delayMinutes ?: 0).toLong(), AppColors.Ink)
                     },
                     fontWeight = FontWeight.Bold,
@@ -519,7 +533,7 @@ private fun CourseRow(
                 }
             }
             Text(
-                text = townedStopName(stop.name, town),
+                text = name,
                 color = if (passed) AppColors.Muted else AppColors.Ink,
                 fontWeight = if (strong) FontWeight.ExtraBold else FontWeight.SemiBold,
                 fontSize = 15.sp,
@@ -536,6 +550,7 @@ private fun CourseRow(
                         open = menuOpen,
                         onDismiss = { menuOpen = false },
                         onAction = { action -> onStopAction(place, action) },
+                        place = place,
                     )
                 }
             }
@@ -571,11 +586,14 @@ fun CourseMarkers(
     // projected all at once for each frame: no LatLng or PointF per ring and frame.
     val ringPlaces = remember(placed) { coordinatesOf(placed, extra = 0) }
     val ringPoints = remember(placed) { DoubleArray(placed.size * 2) }
+    // The stroke of the rings, made once (not in every frame of a moving map).
+    val ringDensity = LocalDensity.current
+    val ring = remember(ringDensity) { Stroke(with(ringDensity) { 2.5.dp.toPx() }) }
     Canvas(modifier = Modifier.fillMaxSize()) {
         // Read here, so the rings are redrawn whenever the map moves.
         cameraTick()
+        if (!MapAlive.alive(map)) return@Canvas
         if (ringPlaces.isNotEmpty()) map.projection.toScreenLocations(ringPlaces, ringPoints)
-        val ring = Stroke(2.5.dp.toPx())
         for (index in placed.indices) {
             val spot = Offset(ringPoints[2 * index].toFloat(), ringPoints[2 * index + 1].toFloat())
             drawCircle(AppColors.Card, radius = 5.5.dp.toPx(), center = spot)
@@ -585,23 +603,38 @@ fun CourseMarkers(
     val named = placed.filterIndexed { index, (stop, _) ->
         index == 0 || index == placed.lastIndex || stop.name == fromStop
     }
-    // Which of the names the map already writes itself, next to their ring: looked at now and
-    // then (the map places its own names after it moved), the names placed again on a change.
+    // Which of the names the map already writes itself, next to their ring: looked at once the
+    // camera comes to rest (the map places its own names after it moved), and once more a moment
+    // later for the tiles that came in meanwhile; the names placed again on a change. Only the
+    // label layers of the map are asked (see mapLabelLayers).
     val onMap = remember(named) { BooleanArray(named.size) }
     val onMapTick = remember { mutableIntStateOf(0) }
     val reach = with(LocalDensity.current) { MAP_NAME_REACH.toPx() }
+    val labelLayers = remember { arrayOfNulls<Any>(2) }
     LaunchedEffect(named) {
-        while (true) {
-            var changed = false
-            named.forEachIndexed { index, (stop, position) ->
-                val shown = mapWritesName(map, position, stop.name, reach)
-                if (shown != onMap[index]) {
-                    onMap[index] = shown
-                    changed = true
+        // Each rest of the camera (and the start) looks again; a new move ends a look not yet done.
+        snapshotFlow { MapCamera.rests }.collectLatest {
+            repeat(2) {
+                delay(MAP_NAME_CHECK_MILLIS)
+                // Not while the app is in the background (battery rule).
+                AppVisibility.awaitVisible()
+                val style = map.style ?: return@collectLatest
+                if (labelLayers[0] !== style) {
+                    labelLayers[0] = style
+                    labelLayers[1] = mapLabelLayers(style.layers.filterIsInstance<SymbolLayer>().map { it.id to it.sourceId })
                 }
+                @Suppress("UNCHECKED_CAST")
+                val layers = labelLayers[1] as Array<String>
+                var changed = false
+                named.forEachIndexed { index, (stop, position) ->
+                    val shown = mapWritesName(map, position, stop.name, reach, layers)
+                    if (shown != onMap[index]) {
+                        onMap[index] = shown
+                        changed = true
+                    }
+                }
+                if (changed) onMapTick.intValue++
             }
-            if (changed) onMapTick.intValue++
-            delay(MAP_NAME_CHECK_MILLIS)
         }
     }
     // The places of the names and, last, of the vehicle ([latitude, longitude] each) and their
@@ -644,6 +677,7 @@ fun CourseMarkers(
             // between the header and the list (see mapLabelSpot).
             cameraTick()
             onMapTick.intValue
+            if (!MapAlive.alive(map)) return@layout
             val count = named.size
             val vehicle = vehicleAt(vehicleSpot)
             labelPlaces[2 * count] = vehicleSpot[0]
@@ -749,7 +783,7 @@ private val VEHICLE_HALF_WIDTH = 26.dp
 private val VEHICLE_ABOVE = 40.dp
 private val VEHICLE_BELOW = 10.dp
 
-// How often the names the map writes itself are looked at.
+// How long after the camera came to rest the names the map writes itself are looked at (and again as long after).
 private const val MAP_NAME_CHECK_MILLIS = 700L
 
 // How far around a ring the map's own name of its station is looked for.
@@ -759,13 +793,13 @@ private val MAP_NAME_REACH = 36.dp
  * Whether the map writes the name of the station [name] itself near [position]: a placed
  * label of a point (the map's own station or stop name) whose name matches it.
  */
-private fun mapWritesName(map: MapLibreMap, position: Pair<Double, Double>, name: String, reach: Float): Boolean {
+private fun mapWritesName(map: MapLibreMap, position: Pair<Double, Double>, name: String, reach: Float, layers: Array<String>): Boolean {
     val wanted = bareStationName(name)
-    if (wanted.length < 3) return false
+    if (wanted.length < 3 || layers.isEmpty() || !MapAlive.alive(map)) return false
     return try {
         val point = map.projection.toScreenLocation(LatLng(position.first, position.second))
         val area = RectF(point.x - reach, point.y - reach, point.x + reach, point.y + reach)
-        map.queryRenderedFeatures(area).any { feature ->
+        map.queryRenderedFeatures(area, *layers).any { feature ->
             feature.geometry() is Point && MAP_NAME_KEYS.any { key ->
                 feature.hasProperty(key) && feature.getStringProperty(key)?.let { bareStationName(it) }?.let { label ->
                     label.length >= 3 && (label == wanted || label.contains(wanted) || wanted.contains(label))

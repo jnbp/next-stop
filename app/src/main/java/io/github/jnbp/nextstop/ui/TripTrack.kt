@@ -31,20 +31,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
+import io.github.jnbp.nextstop.data.RideTracker
 import io.github.jnbp.nextstop.data.Stopover
 import io.github.jnbp.nextstop.data.plausible
 import io.github.jnbp.nextstop.data.ridePlace
 import io.github.jnbp.nextstop.data.TripCourse
+import io.github.jnbp.nextstop.data.TripMatch
 import io.github.jnbp.nextstop.data.Vehicle
 import io.github.jnbp.nextstop.data.movesWithoutWay
 import io.github.jnbp.nextstop.data.parkedStop
@@ -57,6 +60,13 @@ const val LEAD_MILLIS = 120_000L
 
 // A live position farther than this from the way of a trip is not put on its track.
 private const val OFF_TRACK_METRES = 400.0
+
+// OFF_TRACK_METRES in squared degrees, as progressAt measures.
+private const val OFF_TRACK_SQUARED = (OFF_TRACK_METRES / 111_320.0) * (OFF_TRACK_METRES / 111_320.0)
+
+// How much a metre along the way from the timetable's place weighs against a metre off the way
+// when a position is placed on a ring (see TripTrack.progressAt).
+private const val HINT_WEIGHT = 0.05
 
 // A live position moves along the way the provider gives with it over this time.
 const val LIVE_GLIDE_MILLIS = 30_000L
@@ -103,12 +113,16 @@ class Glide(size: Int) {
     private val values = DoubleArray(size) { Double.NaN }
     private var at = 0L
 
-    /** Moves the followed numbers towards [target] for the time [millis] and writes them back into [target]. */
-    fun follow(target: DoubleArray, millis: Long) {
+    /**
+     * Moves the followed numbers towards [target] for the time [millis] and writes them back
+     * into [target]; the glide lasts [scale] (the system's animator duration scale) times as long.
+     */
+    fun follow(target: DoubleArray, millis: Long, scale: Float = SystemAnimation.now) {
         if (values[0].isNaN()) {
             target.copyInto(values)
         } else {
-            val share = 1.0 - exp(-(millis - at).coerceAtLeast(0L) / GLIDE_MILLIS)
+            // At the system's animator duration scale; straight there without animations.
+            val share = followShare(millis - at, GLIDE_MILLIS, scale)
             for (index in values.indices) values[index] += (target[index] - values[index]) * share
             values.copyInto(target)
         }
@@ -131,7 +145,8 @@ fun rememberBeat(): IntState {
     val beat = remember { mutableIntStateOf(0) }
     LaunchedEffect(beat) {
         while (true) {
-            delay(BEAT_MILLIS)
+            // Fewer beats while the battery saver is active (see BatterySaver).
+            delay(BatterySaver.pace(BEAT_MILLIS))
             withFrameMillis { beat.intValue++ }
         }
     }
@@ -254,23 +269,12 @@ class TripTrack(course: TripCourse, private val lead: Long = LEAD_MILLIS) {
             )
         }
         stopAlong = FloatArray(course.stops.size)
-        // Each stop lies at the point of the way nearest to it, and never behind the stop before it.
-        var from = 0
-        course.stops.forEachIndexed { index, stop ->
-            val position = stop.place?.position
-            if (position != null && way.isNotEmpty()) {
-                var best = from
-                var bestDistance = Float.MAX_VALUE
-                for (point in from until way.size) {
-                    val distance = metres(position.first, position.second, latitudes[point], longitudes[point])
-                    if (distance < bestDistance) {
-                        bestDistance = distance
-                        best = point
-                    }
-                }
-                from = best
-            }
-            stopAlong[index] = if (way.isEmpty()) 0f else along[from]
+        // Each stop lies at the point of the way nearest to it, and never behind the stop before it:
+        // on the first pass of the way that reaches it (see TripMatch.stopPathIndices). A ring line
+        // runs past the same station more than once, and the nearest point of all may lie a lap ahead.
+        if (way.isNotEmpty()) {
+            val atPoint = TripMatch.stopPathIndices(way, stopPoints)
+            for (index in atPoint.indices) stopAlong[index] = along[atPoint[index]]
         }
         usable = way.size >= 2 && course.stops.size >= 2
         parked = movesWithoutWay(course.product, course.path, stopPoints.filterNotNull())
@@ -278,11 +282,13 @@ class TripTrack(course: TripCourse, private val lead: Long = LEAD_MILLIS) {
 
     /**
      * Writes latitude and longitude of the vehicle at [millis] into [out]. False when the
-     * track has nothing to draw or the vehicle is not on the road.
+     * track has nothing to draw or the vehicle is not on the road. With [holdStop] (an index of
+     * its stops) the vehicle goes no farther than that stop: the traveller waits there for it
+     * and nothing says it has left (#184, see boardingHolds).
      */
-    fun locate(millis: Long, out: DoubleArray): Boolean {
+    fun locate(millis: Long, out: DoubleArray, holdStop: Int = -1): Boolean {
         if (!usable || !clock.active(millis, lead)) return false
-        val at = clock.progress(millis)
+        val at = io.github.jnbp.nextstop.data.heldProgress(clock.progress(millis), holdStop)
         if (parked || at.toInt() in airHops) {
             // At the stop it stands at, and once it has left, at the one it is heading to (see
             // parkedStop): never on an air line through the fields. A stop without a position
@@ -334,13 +340,19 @@ class TripTrack(course: TripCourse, private val lead: Long = LEAD_MILLIS) {
     /**
      * Where a vehicle at [latitude] and [longitude] stands on this track, counted in stops as
      * [StopClock.progress] counts them (1.5 is halfway from the second stop to the third);
-     * null when the track has nothing to draw or the position lies off its way.
+     * null when the track has nothing to draw or the position lies off its way. Where the way
+     * passes the place more than once (a ring line on its next lap), [near] (in stops, as
+     * the timetable has it) picks the pass: the one closest to it along the way.
      */
-    fun progressAt(latitude: Double, longitude: Double): Float? {
+    fun progressAt(latitude: Double, longitude: Double, near: Float? = null): Float? {
         if (!usable) return null
         // The nearest point on the way, as a distance along it.
         val scale = cos(Math.toRadians(latitude))
+        // With a hint, a point far along the way from it counts as farther off (HINT_WEIGHT metres off per
+        // metre along): a whole lap away loses, a few hundred metres within the right pass do not matter.
+        val hintAlong = near?.let { alongAtProgress(it) }
         var best = Double.MAX_VALUE
+        var bestScore = Double.MAX_VALUE
         var bestAlong = 0f
         for (index in 0 until along.size - 1) {
             val ax = (longitudes[index] - longitude) * scale
@@ -352,9 +364,20 @@ class TripTrack(course: TripCourse, private val lead: Long = LEAD_MILLIS) {
             val px = ax + dx * share
             val py = ay + dy * share
             val distance = px * px + py * py
-            if (distance < best) {
-                best = distance
-                bestAlong = along[index] + (along[index + 1] - along[index]) * share.toFloat()
+            if (hintAlong == null) {
+                if (distance < best) {
+                    best = distance
+                    bestAlong = along[index] + (along[index + 1] - along[index]) * share.toFloat()
+                }
+            } else if (distance <= OFF_TRACK_SQUARED) {
+                val at = along[index] + (along[index + 1] - along[index]) * share.toFloat()
+                val off = sqrt(distance) * 111_320.0
+                val score = off + abs(at - hintAlong) * HINT_WEIGHT
+                if (score < bestScore) {
+                    bestScore = score
+                    best = distance
+                    bestAlong = at
+                }
             }
         }
         if (sqrt(best) * 111_320.0 > OFF_TRACK_METRES) return null
@@ -367,6 +390,15 @@ class TripTrack(course: TripCourse, private val lead: Long = LEAD_MILLIS) {
             }
         }
         return null
+    }
+
+    // The distance along the way of a place counted in stops (see progressAt).
+    private fun alongAtProgress(progress: Float): Float {
+        if (stopAlong.isEmpty()) return 0f
+        val stop = progress.toInt().coerceIn(0, (stopAlong.size - 2).coerceAtLeast(0))
+        if (stop + 1 >= stopAlong.size) return stopAlong[stop]
+        val part = (progress - stop).coerceIn(0f, 1f)
+        return stopAlong[stop] + (stopAlong[stop + 1] - stopAlong[stop]) * part
     }
 
     // Near enough for a few kilometres: a degree of longitude shrinks with the latitude.
@@ -432,6 +464,7 @@ fun TrackMarkers(
     live: Map<String, LiveVehicle> = emptyMap(),
     realtime: Set<String> = emptySet(),
     own: OwnDot? = null,
+    holds: Map<String, Int> = emptyMap(),
 ) {
     if (map == null) return
     val beat = rememberBeat()
@@ -444,14 +477,24 @@ fun TrackMarkers(
                 val glide = remember { Glide(2) }
                 var carrying by remember { mutableStateOf(false) }
                 var atStop by remember { mutableStateOf(false) }
+                // Placed by its times, not by a position (#184): drawn lighter, its dot hollow.
+                var estimated by remember { mutableStateOf(false) }
                 if (own != null) {
                     DisposableEffect(own, track.tripId) {
                         onDispose { if (own.carriedBy == track.tripId) own.carriedBy = null }
                     }
                 }
+                // Where it is drawn, for the grey of the way, which never runs ahead of it (#119).
+                DisposableEffect(track.tripId) {
+                    onDispose { DrawnVehicles.remove(track.tripId) }
+                }
                 val beside by animateFloatAsState(if (atStop) 1f else 0f, label = "badge-beside")
                 val color = track.color
                 val rim = badgeRim(color)
+                // The badge's own outline only where its colour melts into the map (see
+                // LineCasing.kt); its shadow sets it off from the line it rides on.
+                val ground = currentMapGround()
+                val edge = remember(color, ground) { LineCasings.of(color.toArgb(), ground).takeIf { it != 0 }?.let { Color(it) } }
                 val shape = RoundedCornerShape(8.dp)
                 Box(
                     modifier = Modifier
@@ -459,6 +502,7 @@ fun TrackMarkers(
                         .offset {
                             cameraTick()
                             beat.intValue
+                            if (!MapAlive.alive(map)) return@offset IntOffset(MAP_GONE_OFFSET, MAP_GONE_OFFSET)
                             val millis = System.currentTimeMillis()
                             // A live position of the vehicle goes first, as on the map of all
                             // vehicles; the timetable only stands in without one.
@@ -468,9 +512,20 @@ fun TrackMarkers(
                             val found = if (reported != null) {
                                 reported.locate(SystemClock.uptimeMillis(), spot)
                             } else {
-                                track.locate(millis, spot)
+                                // By its times only: it stays at the stop where the traveller waits for it (#184).
+                                track.locate(millis, spot, holds[track.tripId] ?: -1)
                             }
-                            if (found) {
+                            // On board by position past the end of its timetable (late, standing before the
+                            // station, #170): the vehicle is still where the traveller is.
+                            val carriesOwn = own != null && RideTracker.onBoardTripId == track.tripId && own.shown(ownSpot)
+                            if (found || carriesOwn) {
+                                // On board by position (see RideTracker): the traveller's own position is
+                                // where this vehicle is. Its badge goes with the blue dot instead of
+                                // lagging at the timetable's place; the glide makes the move soft.
+                                if (carriesOwn) {
+                                    spot[0] = ownSpot[0]
+                                    spot[1] = ownSpot[1]
+                                }
                                 // Fresh live data replaces the track: the mark glides to its new place.
                                 glide.follow(spot, millis)
                                 // Standing at a stop, and the traveller in or at the vehicle: placed while
@@ -489,9 +544,14 @@ fun TrackMarkers(
                                 if (mine != carrying) carrying = mine
                                 val standing = stop != null && !carried
                                 if (standing != atStop) atStop = standing
+                                // Only where it is: by a reported position or with the traveller on board.
+                                val guessed = reported == null && !carriesOwn
+                                if (guessed != estimated) estimated = guessed
+                                DrawnVehicles.put(track.tripId, spot[0], spot[1])
                                 val point = map.projection.toScreenLocation(LatLng(spot[0], spot[1]))
                                 IntOffset(point.x.roundToInt(), point.y.roundToInt())
                             } else {
+                                DrawnVehicles.remove(track.tripId)
                                 glide.reset()
                                 if (carrying) carrying = false
                                 if (own != null && own.carriedBy == track.tripId) own.carriedBy = null
@@ -505,7 +565,10 @@ fun TrackMarkers(
                             translationY = -size.height + TRACK_DOT_SIZE.toPx() / 2f
                         },
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.graphicsLayer { alpha = if (estimated) ESTIMATED_MARKER_ALPHA else 1f },
+                    ) {
                         Box(
                             modifier = Modifier.graphicsLayer {
                                 // At a stop: the badge beside the stop's ring, level with it,
@@ -522,7 +585,7 @@ fun TrackMarkers(
                                     .shadow(3.dp, shape)
                                     .clip(shape)
                                     .background(color)
-                                    .border(1.dp, rim, shape)
+                                    .then(if (edge != null) Modifier.border(1.dp, edge, shape) else Modifier)
                                     .padding(horizontal = 6.dp, vertical = 2.dp),
                             ) {
                                 Text(
@@ -568,7 +631,8 @@ fun TrackMarkers(
                                 .size(width = 2.dp, height = TRACK_STEM_HEIGHT)
                                 .background(rim),
                         )
-                        // The dot: the line's colour in its darker rim, exactly where the vehicle is.
+                        // The dot: the line's colour in its darker rim, exactly where the vehicle is;
+                        // hollow (a ring of the line's colour) where only its times place it (#184).
                         Box(
                             modifier = Modifier
                                 .size(TRACK_DOT_SIZE)
@@ -577,7 +641,14 @@ fun TrackMarkers(
                                 .background(rim)
                                 .padding(1.5.dp)
                                 .clip(CircleShape)
-                                .background(color),
+                                .background(color)
+                                .then(
+                                    if (estimated) {
+                                        Modifier.padding(ESTIMATED_DOT_RING).clip(CircleShape).background(AppColors.Card)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
                         )
                     }
                 }
@@ -585,3 +656,7 @@ fun TrackMarkers(
         }
     }
 }
+
+// A vehicle placed only by its times (#184): its marker this opaque, its dot a ring this wide.
+private const val ESTIMATED_MARKER_ALPHA = 0.72f
+private val ESTIMATED_DOT_RING = 2.dp

@@ -9,6 +9,7 @@ import io.github.jnbp.nextstop.data.changeWalkMinutes
 import io.github.jnbp.nextstop.data.journeyKey
 import io.github.jnbp.nextstop.data.searchOrder
 import io.github.jnbp.nextstop.data.spliceJourney
+import io.github.jnbp.nextstop.data.withSeatingInBounds
 
 /*
  * Tighter changes than the provider offers.
@@ -94,7 +95,8 @@ fun tighterAlternatives(journey: Journey, keepLegs: Int, options: List<Journey>)
  */
 fun withTighterJourneys(journeys: List<Journey>, added: List<Journey>): List<Journey> {
     val known = journeys.map { journeyKey(it) }.toMutableSet()
-    val fresh = added.filter { known.add(journeyKey(it)) }
+    // Each with its joined rides inside their bounds (see withSeatingInBounds, #57).
+    val fresh = added.filter { known.add(journeyKey(it)) }.map { withSeatingInBounds(it) }
     if (fresh.isEmpty()) return journeys
     return (journeys + fresh).sortedWith(searchOrder)
 }

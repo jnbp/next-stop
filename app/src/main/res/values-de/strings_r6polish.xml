@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings › On the move: reset the statistics of "Meine Wege" (#135). -->
+    <string name="r6_stats_group">Statistik</string>
+    <string name="r6_stats_reset_title">Statistik zurücksetzen</string>
+    <string name="r6_stats_reset_text">Vergisst die aufgezeichneten Fahrten hinter der Statistik in Meine Wege.</string>
+    <string name="r6_stats_reset_confirm">Alle aufgezeichneten Fahrten vergessen? Die Statistik beginnt wieder bei null. Das lässt sich nicht rückgängig machen.</string>
+    <string name="r6_stats_reset_yes">Zurücksetzen</string>
+    <!-- The menu of a stop (#139): keep it as a favourite stop, or let it go. -->
+    <string name="r6_stop_favorite_add">Als Lieblingshaltestelle</string>
+    <string name="r6_stop_favorite_remove">Keine Lieblingshaltestelle mehr</string>
+    <!-- The first row of the list of connections: loads earlier ones (#150). -->
+    <string name="r6_list_earlier">Frühere Verbindungen</string>
+    <!-- Google Maps on the last way of a trip (#143). -->
+    <string name="r6_handoff_title">Google Maps übernimmt</string>
+    <string name="r6_handoff_text">Den Rest des Weges führt dich Google Maps. Die Live-Fahrt kann jetzt enden oder bis zur Ankunft weiterlaufen.</string>
+    <string name="r6_handoff_open">Google Maps öffnen</string>
+    <string name="r6_handoff_open_end">Google Maps öffnen und Fahrt beenden</string>
+    <string name="r6_handoff_remember">Auswahl merken</string>
+    <string name="r6_handoff_setting_title">Google Maps am Ende der Fahrt</string>
+    <string name="r6_handoff_setting_text">Was der Knopf „Google Maps“ auf dem letzten Weg einer Fahrt tut. Auf den anderen Wegen öffnet er Google Maps direkt.</string>
+    <string name="r6_handoff_ask">Jedes Mal fragen</string>
+</resources>

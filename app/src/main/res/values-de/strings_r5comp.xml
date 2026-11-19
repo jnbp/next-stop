@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Runde 5 der Begleiter-Ansichten (ui/companion): Menü, Wecker-Chip und -Blatt, Fußwege, Kartenausschnitt. -->
+<resources>
+    <string name="r5c_menu_wake">Wecker …</string>
+    <string name="r5c_menu_view_map">Ansicht: mit Karte</string>
+    <string name="r5c_menu_view_calm">Ansicht: ohne Karte</string>
+    <string name="r5c_fresh_now">Live · jetzt</string>
+    <string name="r5c_wake_chip_on">Aufwach-Alarm um %1$s. Tippen: Zeit wählen, gedrückt halten: ausschalten.</string>
+    <string name="r5c_wake_chip_off">Aufwach-Alarm aus. Tippen: Zeit wählen, gedrückt halten: einschalten.</string>
+    <string name="r5c_wake_rings">Klingelt um %1$s</string>
+    <string name="r5c_wake_no_ring">Auf dieser Fahrt klingelt er nicht mehr</string>
+    <string name="r5c_wake_when">Wann soll er klingeln?</string>
+    <plurals name="r5c_wake_stops">
+        <item quantity="one">%d Halt vorher</item>
+        <item quantity="other">%d Halte vorher</item>
+    </plurals>
+    <string name="r5c_wake_exact">Genaue Uhrzeit …</string>
+    <string name="r5c_wake_exact_set">Um %1$s · ändern</string>
+    <string name="r5c_wake_pick_title">Weckzeit</string>
+    <string name="r5c_where_ride">Wo ist mein Zug?</string>
+    <string name="r5c_where_bahn">Wo ist meine Bahn?</string>
+    <string name="r5c_where_bus">Wo ist mein Bus?</string>
+    <string name="r5c_where_tram">Wo ist meine Tram?</string>
+    <string name="r5c_where_ferry">Wo ist meine Fähre?</string>
+    <string name="r5c_back_to_me">Zurück zu mir</string>
+    <string name="r5c_walk_show">Weg zeigen</string>
+    <string name="r5c_platform_walk">Weg zum %1$s</string>
+    <string name="r5c_platform_walk_plain">Weg zum Gleis</string>
+    <string name="r5c_map_bigger">Karte vergrößern</string>
+    <string name="r5c_map_smaller">Karte verkleinern</string>
+</resources>

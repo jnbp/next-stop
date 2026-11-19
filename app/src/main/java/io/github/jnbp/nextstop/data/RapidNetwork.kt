@@ -138,7 +138,7 @@ suspend fun loadTramNetwork(
 }
 
 /** [cached] with the [fresh] lines of a build at [now] merged in (see mergeNetwork); never fewer lines. */
-private fun mergedCache(cached: NetworkCache?, fresh: List<NetworkLine>, stale: Boolean, now: Long): NetworkCache {
+internal fun mergedCache(cached: NetworkCache?, fresh: List<NetworkLine>, stale: Boolean, now: Long): NetworkCache {
     val kept = cached?.kept.orEmpty()
     val merged = if (fresh.isEmpty()) kept else mergeNetwork(kept, fresh, now)
     return NetworkCache(
@@ -285,7 +285,7 @@ fun simplify(path: List<Pair<Double, Double>>, tolerance: Double): List<Pair<Dou
 
 // [legacy]: read from a file of before the lines kept their own times, which may hold a network
 // built at night with half the lines; it is merged with a new build at once.
-private class NetworkCache(
+internal class NetworkCache(
     val built: Long,
     val attempted: Long,
     val kept: List<KeptNetworkLine>,
@@ -297,7 +297,7 @@ private class NetworkCache(
 // Read as a stream: the file of a network is a few hundred kilobytes of numbers, and reading
 // it whole as text and then as a tree of JSON objects made several times that in garbage (each
 // number a string, then a boxed number in a list) right in the first seconds of the map.
-private fun readCache(file: File): NetworkCache? = try {
+internal fun readCache(file: File): NetworkCache? = try {
     if (!file.exists()) {
         null
     } else {
@@ -372,7 +372,7 @@ private fun readCachedLine(reader: JsonReader): KeptNetworkLine? {
     return if (name.isNotEmpty() && points.size >= 2) KeptNetworkLine(NetworkLine(name, points), seen, wayAt) else null
 }
 
-private fun writeCache(file: File, cache: NetworkCache) {
+internal fun writeCache(file: File, cache: NetworkCache) {
     val lines = JSONArray()
     for (kept in cache.kept) {
         val line = kept.line

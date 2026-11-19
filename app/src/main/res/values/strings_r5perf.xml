@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Developer options: the jank meter (JankStats per screen, the map's frames while it rests). -->
+    <string name="r5perf_jank_meter">Jank meter</string>
+    <string name="r5perf_jank_meter_text">Counts the frames of each screen: janky share, p95 and longest frame; and the frames the map draws while it rests.</string>
+    <string name="r5perf_jank_frames">frames</string>
+    <string name="r5perf_jank_janky">janky</string>
+    <string name="r5perf_jank_map">Map at rest</string>
+    <string name="r5perf_jank_map_fps">map fps while idle: %1$s</string>
+    <string name="r5perf_jank_map_none">No second of rest yet</string>
+    <string name="r5perf_jank_empty">No frames counted yet</string>
+    <string name="r5perf_jank_reset">Reset</string>
+    <string name="r5perf_jank_reset_text">Starts counting afresh.</string>
+    <string name="r5perf_jank_copy">Copy as text</string>
+    <string name="r5perf_jank_copy_text">The numbers to the clipboard; nothing else leaves the phone.</string>
+    <string name="r5perf_jank_copied">Copied</string>
+    <!-- The chip of the companion map's locate button (#104): to the route still to go, and back to the own position. -->
+    <string name="r5perf_companion_show_route">Route ahead</string>
+    <string name="r5perf_companion_my_position">My position</string>
+</resources>

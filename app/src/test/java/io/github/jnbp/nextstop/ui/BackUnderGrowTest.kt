@@ -44,4 +44,31 @@ class BackUnderGrowTest {
         assertEquals(3f, backUnderPivot(300f, 100f), 1e-6f)
         assertEquals(0.5f, backUnderPivot(300f, 0f), 1e-6f)
     }
+    @Test
+    fun pageLeftByBackStaysHiddenUntilGone() {
+        // The gesture runs: seen, shown with the gesture's own look.
+        var seen = backLeftSeen(active = true, closed = false, seenBefore = false)
+        assertTrue(seen)
+        assertEquals(false, backLeftHidden(active = true, seen = seen))
+        // Let go: the page is closed while the fade runs.
+        seen = backLeftSeen(active = true, closed = true, seenBefore = seen)
+        assertEquals(false, backLeftHidden(active = true, seen = seen))
+        // The fade is over before the transition took the page away: it stays hidden.
+        seen = backLeftSeen(active = false, closed = true, seenBefore = seen)
+        assertTrue(backLeftHidden(active = false, seen = seen))
+        seen = backLeftSeen(active = false, closed = true, seenBefore = seen)
+        assertTrue(backLeftHidden(active = false, seen = seen))
+    }
+
+    @Test
+    fun calledOffGestureOrPlainCloseNeverHides() {
+        // Called off: the page stays open, so the end of the gesture shows it as it was.
+        var seen = backLeftSeen(active = true, closed = false, seenBefore = false)
+        seen = backLeftSeen(active = false, closed = false, seenBefore = seen)
+        assertEquals(false, seen)
+        assertEquals(false, backLeftHidden(active = false, seen = seen))
+        // Closed without a gesture (the back arrow): it shrinks into its column as before.
+        seen = backLeftSeen(active = false, closed = true, seenBefore = seen)
+        assertEquals(false, backLeftHidden(active = false, seen = seen))
+    }
 }

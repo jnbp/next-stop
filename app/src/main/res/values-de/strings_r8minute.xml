@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r8m_every_minute_mark_click">erklären oder ausschalten</string>
+    <string name="r8m_setup_shortcut_looks">So sieht der Abkürzungs-Alarm aus</string>
+    <string name="r8m_setup_shortcut_try_hint">„Ausprobieren“ schickt dir so ein Angebot auch als Benachrichtigung.</string>
+    <string name="r8m_setup_every_minute_part">Für eine Fahrt: erlaubt Sprint-Umstiege und schaltet den Abkürzungs-Alarm ab 1 Minute ein. Du schaltest es mit dem Chip „Jede Minute zählt“ bei einer Verbindung oder in der Live-Fahrt ein – vor allem nützlich, wenn der Alarm nicht immer an ist.</string>
+    <string name="r9_sun_chip_legend">Dieses Zeichen an einer Fahrt zeigt die Sonnenseite. Tippe darauf, um diese Erklärung wieder zu öffnen.</string>
+</resources>

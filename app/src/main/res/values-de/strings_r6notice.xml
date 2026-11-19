@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A tap on a disruption notification whose notice is over (r6notice) -->
+    <string name="r6notice_gone">Diese Störung ist nicht mehr aktuell</string>
+</resources>

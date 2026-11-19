@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r6ideas_tt_at">um %1$s · %2$s</string>
+    <string name="r6ideas_tt_buffer">noch %1$d′ Puffer</string>
+    <string name="r6ideas_tt_short">%1$d′ zu knapp</string>
+    <!-- The short status of the trip on the watch face before the minutes ("Aussteigen 2'"). -->
+    <string name="r6ideas_ongoing_get_off">Aussteigen</string>
+    <string name="r6ideas_ongoing_change">Umsteigen</string>
+</resources>

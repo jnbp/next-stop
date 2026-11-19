@@ -18,20 +18,20 @@ class ChartTotalTimeTest {
         at(leaves + late), at(leaves), at(arrives + late), at(arrives), null, null, null, false,
     )
 
-    // The German strings of the app: "%d min", "%d Std", "%d Std %d min".
+    // The German strings of the app: "%d′", "%d:00 h", "%d:%02d h" (#106).
     private fun german(minutes: Long) = totalTimeText(
         minutes,
-        minutesOnly = { "$it min" },
-        wholeHours = { "$it Std" },
-        hoursAndMinutes = { hours, rest -> "$hours Std $rest min" },
+        minutesOnly = { "$it′" },
+        wholeHours = { "%d:00 h".format(it) },
+        hoursAndMinutes = { hours, rest -> "%d:%02d h".format(hours, rest) },
     )
 
     @Test
     fun countsTheWalksAtStartAndEnd() {
-        // 7 minutes on foot, a ride of 2 h 4 min, 12 minutes on foot again.
+        // 7 minutes on foot, a ride of 2:04 h, 12 minutes on foot again.
         val journey = Journey(listOf(leg(true, 0, 7), leg(false, 7, 131), leg(true, 131, 143)))
         assertEquals(143L, journeyTotalMinutes(journey))
-        assertEquals("2 Std 23 min", german(journeyTotalMinutes(journey)))
+        assertEquals("2:23 h", german(journeyTotalMinutes(journey)))
     }
 
     @Test
@@ -43,13 +43,16 @@ class ChartTotalTimeTest {
 
     @Test
     fun saysShortWholeAndMixedTimes() {
-        assertEquals("48 min", german(48))
-        assertEquals("0 min", german(0))
-        assertEquals("1 Std", german(60))
-        assertEquals("2 Std", german(120))
-        assertEquals("1 Std 1 min", german(61))
+        assertEquals("48′", german(48))
+        assertEquals("0′", german(0))
+        assertEquals("59′", german(59))
+        assertEquals("1:00 h", german(60))
+        assertEquals("2:00 h", german(120))
+        assertEquals("1:01 h", german(61))
+        assertEquals("1:05 h", german(65))
+        assertEquals("5:20 h", german(320))
         // Never below zero, even when live data puts the arrival before the departure.
-        assertEquals("0 min", german(-5))
+        assertEquals("0′", german(-5))
     }
 
     @Test

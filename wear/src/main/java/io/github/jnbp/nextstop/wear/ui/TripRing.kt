@@ -37,7 +37,7 @@ const val RING_START = -60f
 const val RING_SWEEP = 300f
 
 // Up to this many stops are dotted; a longer ride shows only its end. The small ring of the card has room for fewer.
-private const val MAX_STOP_TICKS = 24
+internal const val RING_MAX_STOP_TICKS = 24
 private const val MINI_RING_MAX_TICKS = 8
 
 /**
@@ -89,7 +89,7 @@ fun DrawScope.drawRideWay(
         }
     }
     // The stops between: dots, dark on the part behind, light on the part ahead.
-    if (!ambient && stops in 3..MAX_STOP_TICKS) {
+    if (!ambient && stops in 3..RING_MAX_STOP_TICKS) {
         for (k in 1 until stops - 1) {
             val t = k.toFloat() / (stops - 1)
             drawCircle(if (t <= done) ground.copy(alpha = 0.6f) else tick, radius = stroke * 0.2f, center = pointAt(t))

@@ -48,9 +48,14 @@ import io.github.jnbp.nextstop.data.Leg
 import io.github.jnbp.nextstop.data.OsmPlatform
 import io.github.jnbp.nextstop.data.OsmStation
 import io.github.jnbp.nextstop.data.OsmStations
+import io.github.jnbp.nextstop.data.PlaceKind
 import io.github.jnbp.nextstop.data.PlatformChange
 import io.github.jnbp.nextstop.data.SAME_SPOT_METERS
+import io.github.jnbp.nextstop.data.StationIdentity
+import io.github.jnbp.nextstop.data.Stop
 import io.github.jnbp.nextstop.data.Stopover
+import io.github.jnbp.nextstop.data.WalkTarget
+import io.github.jnbp.nextstop.data.WalkTargetKind
 import io.github.jnbp.nextstop.data.normalStationId
 import io.github.jnbp.nextstop.data.samePlatformByNumbers
 import io.github.jnbp.nextstop.data.samePlatformRecordAllowed
@@ -134,6 +139,13 @@ private fun sameStop(stop: Stopover, id: String?, name: String?): Boolean {
     val other = id?.let { normalStationId(it) }
     if (own != null && other != null && own.length == 9 && own.startsWith("900") && other.length == 9 && other.startsWith("900")) {
         return own == other
+    }
+    // The same stop place by its DHID or UIC code; never by a platform's last number alone.
+    val ownId = stop.place?.id
+    if (ownId != null && id != null && StationIdentity.stationKey(Stop(ownId, "", null, null, null)) != null &&
+        StationIdentity.sameStopPlaceId(ownId, id)
+    ) {
+        return true
     }
     val key = stationNameKey(stop.place?.name ?: stop.name)
     return key.isNotEmpty() && name != null && key == stationNameKey(name)
@@ -452,6 +464,45 @@ fun CarriageHint(
 }
 
 /**
+ * The hint of [CarriageHint] in a few words ("Board at the front"), for the one line of the
+ * compact blue box of the companion; null wherever [CarriageHint] shows nothing.
+ */
+@Composable
+internal fun shortCarriageHint(arriving: Leg, next: Leg): String? {
+    val position = shortCarriagePosition(arriving, next) ?: return null
+    return carriageText(LocalContext.current, position)
+}
+
+/** Where to board [arriving] for the change to [next], as [shortCarriageHint] decides it; null where it says nothing. */
+@Composable
+internal fun shortCarriagePosition(arriving: Leg, next: Leg): ChangePosition? {
+    if (!boardingHintsOn.value) return null
+    if (arriving.walking || next.walking || arriving.product in ROAD_PRODUCTS) return null
+    if (arriving.tripId != null && arriving.tripId == next.tripId) return null
+    if (samePlatformByNumbers(arriving, next)) return null
+    if (!changePositionsReady()) return null
+    val position = remember(arriving, next) { boardingPositionOf(arriving, next) } ?: return null
+    if (position.samePlatform) return null
+    return position
+}
+
+/**
+ * The small drawn train of [CarriageHint] alone, for the compact blue box of the companion
+ * (#89): the third to board ([position]) of [arriving] filled, in the colours for the blue ground.
+ */
+@Composable
+internal fun CarriageMark(arriving: Leg, position: ChangePosition) {
+    TrainGraphic(
+        part = position.part,
+        segments = segmentsOf(arriving.product),
+        line = AppColors.OnBlue,
+        body = AppColors.OnBlue.copy(alpha = 0.14f),
+        tint = Color.Transparent,
+        zoneAlpha = if (position.estimated) 0.55f else 1f,
+    )
+}
+
+/**
  * What to know at the change from [arriving] to [next] itself, with [walkMinutes] on foot
  * between them: "Same platform – change right here to the S85" where both platform numbers
  * at the station agree or the dataset says so; between two buses or trams whose stop
@@ -542,11 +593,17 @@ private fun HintRow(arriving: Leg, part: Int?, estimated: Boolean, text: String,
             fontWeight = if (estimated) FontWeight.SemiBold else FontWeight.Bold,
             fontSize = 13.sp,
             lineHeight = 16.sp,
-            maxLines = 2,
+            maxLines = LocalHintRowMaxLines.current,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
+
+/**
+ * How many lines the text of a boarding hint may take before it is cut: two in the classic
+ * views; the compact ride card lets it wrap on, it never cuts the hint (#236).
+ */
+val LocalHintRowMaxLines = androidx.compose.runtime.staticCompositionLocalOf { 2 }
 
 /** How many segments the train of [product] is drawn with: an S-Bahn as four, other trains as three. */
 private fun segmentsOf(product: String): Int = when (product) {
@@ -626,3 +683,68 @@ private fun SamePlatformGlyph(color: Color, quiet: Color) {
 }
 
 private const val LOG_TAG = "ChangePos"
+
+/**
+ * For a journey to a place (an address or a point of interest, not a station) that ends on
+ * foot after a train: where to board that last ride for the shortest way out of its station
+ * toward the place, by the exit the last walk leaves by (OpenStreetMap, see [Leg.walkExit]),
+ * else the place itself. The same map estimate as for a change to a bus (see
+ * [geometryPosition]): the exit stands in for the stop of the bus. Returns the ride and the
+ * position; null where it does not apply or is not known.
+ */
+fun destinationPositionOf(journey: Journey): Pair<Leg, ChangePosition>? {
+    val last = journey.legs.lastOrNull() ?: return null
+    if (!last.walking) return null
+    if (last.toPlace?.kind == PlaceKind.Stop) return null
+    val ride = journey.legs.lastOrNull { !it.walking } ?: return null
+    if (ride.product in ROAD_PRODUCTS || ride.cancelled) return null
+    val target = last.walkExit?.position ?: last.toPlace?.position ?: last.path.lastOrNull() ?: return null
+    // A made-up bus at the exit: the estimate leads to it as to a bus outside the station.
+    val probe = ride.copy(
+        line = null,
+        product = "bus",
+        tripId = null,
+        from = ride.to,
+        fromPlace = Stop("", "", target.first, target.second, null),
+        path = listOf(target),
+        boardingSpot = WalkTarget(WalkTargetKind.StopPosition, null, target.first, target.second),
+        stopovers = emptyList(),
+        throughRuns = emptyList(),
+    )
+    val position = try {
+        geometryPosition(ride, probe)
+    } catch (e: RuntimeException) {
+        DiagLog.w(LOG_TAG, e) { "destination geometry" }
+        null
+    } ?: return null
+    return ride to position
+}
+
+/** "Board at the rear – short way to exit B", outside of Compose; null where it is not known. */
+fun destinationText(context: Context, journey: Journey): String? {
+    val (_, position) = destinationPositionOf(journey) ?: return null
+    if (position.samePlatform) return null
+    // OSM names often start with the word themselves ("Ausgang Nord"): said once (#240).
+    val exit = journey.legs.lastOrNull()?.walkExit?.label?.let { io.github.jnbp.nextstop.data.doorLabelWithoutWord(it) }?.takeIf { it.isNotEmpty() }
+    return if (exit != null) {
+        context.getString(R.string.carriage_short_way_exit, carriageText(context, position), exit)
+    } else {
+        context.getString(R.string.carriage_short_way_out, carriageText(context, position))
+    }
+}
+
+/**
+ * Where to board the last ride of [journey] to a place for the shortest way out (see
+ * [destinationPositionOf]), drawn like the hint of a change; shown where that ride is boarded.
+ * Nothing for any other ride, without the hint, and while the setting is off.
+ */
+@Composable
+fun DestinationHint(journey: Journey, ride: Leg, modifier: Modifier = Modifier, onBlue: Boolean = false) {
+    if (!boardingHintsOn.value) return
+    if (ride.walking || ride.product in ROAD_PRODUCTS) return
+    if (journey.legs.lastOrNull { !it.walking } !== ride) return
+    val context = LocalContext.current
+    val found = remember(journey) { destinationPositionOf(journey) } ?: return
+    val text = remember(journey, found) { destinationText(context, journey) } ?: return
+    HintRow(arriving = ride, part = found.second.part, estimated = found.second.estimated, text = text, onBlue = onBlue, modifier = modifier)
+}

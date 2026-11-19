@@ -24,10 +24,10 @@ internal fun placeMarkPills(
     dotRadius: Float,
     gap: Float,
     out: FloatArray,
+    // The boxes taken by placed pills: left, top, right, bottom in turn (room for four per mark).
+    placed: FloatArray = FloatArray(xs.size * 4),
 ) {
     val count = xs.size
-    // The boxes taken by placed pills: left, top, right, bottom in turn.
-    val placed = FloatArray(count * 4)
     var placedCount = 0
     for (index in 0 until count) {
         out[index * 2] = Float.NaN

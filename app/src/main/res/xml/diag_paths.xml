@@ -2,4 +2,6 @@
 <!-- The bug report of the developer options, shared through DiagCapture (see ui/DiagCapture.kt). -->
 <paths>
     <cache-path name="report" path="diag/report/" />
+    <!-- The picture of the travel statistics of "My routes" (see ui/WaysSections.kt). -->
+    <cache-path name="share" path="share/" />
 </paths>

@@ -90,6 +90,44 @@ class TrackShapesTest {
         assertFalse(onAirLine(middle, null, bitterfeld, emptyList()))
     }
 
+    /**
+     * #280: Rejseplanen's copy of the Railjet Berlin - Hamburg comes from Transitous with no way
+     * of its own, only its two ends or the stations joined by straight lines. Every hop is an air
+     * line then, and DELFI's copy of the run ("ICE 384", the same number) lends its track.
+     */
+    @Test
+    fun aForeignCopyWithoutAWayBorrowsTheTrackOfAnotherCopy() {
+        // Berlin Hbf, Spandau, Wittenberge, Ludwigslust, Hamburg Hbf.
+        val ride = listOf(52.5251 to 13.3694, 52.5345 to 13.1968, 52.9994 to 11.7576, 53.3292 to 11.4924, 53.5530 to 10.0066)
+        assertEquals(setOf(0, 1, 2, 3), airHops(listOf(ride.first(), ride.last()), ride))
+        assertEquals(setOf(0, 1, 2, 3), airHops(ride, ride))
+        assertTrue(airHops(track(ride), ride).isEmpty())
+        val spliced = spliceTrack(listOf(ride.first(), ride.last()), ride, track(ride))
+        assertTrue(airHops(spliced, ride).isEmpty())
+
+        val planned = OffsetDateTime.parse("2026-11-19T10:37:00+01:00")
+        fun departure(line: String, minutes: Long, tripId: String, cancelled: Boolean = false) = Departure(
+            line = line, product = "express", direction = "Hamburg Hbf", time = planned.plusMinutes(minutes),
+            plannedTime = planned.plusMinutes(minutes), delaySeconds = null, platform = null, cancelled = cancelled, tripId = tripId,
+        )
+        val own = "20261119_10:37_dk-rejseplanen_1"
+        val found = listOf(
+            departure("RJ 384", 0, own),
+            departure("ICE 1384", 0, "other-number"),
+            departure("ICE 384", 0, "20261119_10:37_de-DELFI_2"),
+        )
+        assertEquals("20261119_10:37_de-DELFI_2", trackLender(found, own, "RJ 384", planned, "Hamburg Hbf"))
+        // Its own copy alone lends nothing; nor does the same number an hour later or cancelled.
+        assertEquals(null, trackLender(found.take(2), own, "RJ 384", planned, "Hamburg Hbf"))
+        assertEquals(null, trackLender(listOf(departure("ICE 384", 60, "late")), own, "RJ 384", planned, null))
+        assertEquals(null, trackLender(listOf(departure("ICE 384", 0, "gone", cancelled = true)), own, "RJ 384", planned, null))
+        assertEquals(2, trackRunScore(departure("ICE 384", 2, "x"), "RJ 384", planned))
+        assertEquals(3, trackRunScore(departure("RJ384", 0, "x"), "RJ 384", planned))
+        assertEquals(0, trackRunScore(departure("RE 384", 0, "x"), "RJ 384", planned))
+        // A ride of HAFAS (no own Transitous handle) takes the best run as before.
+        assertEquals(own, trackLender(found.take(2), null, "RJ 384", planned, "Hamburg Hbf"))
+    }
+
     @Test
     fun theSameRunIsFoundByLineAndPlannedTime() {
         val planned = OffsetDateTime.parse("2026-11-16T10:04:00+01:00")
@@ -171,6 +209,94 @@ class TrackShapesTest {
         assertEquals(null, TrackCache.get("t4", now = 4L * 60 * 1000))
         TrackCache.putFailure("t1", now = 0L)
         assertEquals(stops, TrackCache.get("t1", now = 60_000L))
+        TrackCache.clear()
+    }
+
+    // Berlin Hbf, Spandau, Wittenberge, Ludwigslust, Hamburg Hbf (see aForeignCopyWithoutAWayBorrowsTheTrackOfAnotherCopy).
+    private val railjet = listOf(52.5251 to 13.3694, 52.5345 to 13.1968, 52.9994 to 11.7576, 53.3292 to 11.4924, 53.5530 to 10.0066)
+
+    /**
+     * 19 Nov 2026 (#280): the RJ 382 of Rejseplanen asked at Spandau found the Dutch feed's copy of
+     * the run first, itself drawn from station to station, and kept that; DELFI's copy with the
+     * real way must be asked first, and a copy without a way never lends.
+     */
+    @Test
+    fun delfisCopyLendsFirstAndAnAirLineNever() {
+        val planned = OffsetDateTime.parse("2026-11-19T11:24:00+01:00")
+        fun departure(line: String, tripId: String) = Departure(
+            line = line, product = "express", direction = "Hamburg Hbf", time = planned,
+            plannedTime = planned, delaySeconds = null, platform = null, cancelled = false, tripId = tripId,
+        )
+        val own = "20261119_10:31_dk-rejseplanen_171255616"
+        val dutch = "20261119_15:09_nl-OpenOV_394276043"
+        val delfi = "20261119_10:31_de-DELFI_3486150000"
+        val found = listOf(departure("RJ 382", own), departure("RJ 382", dutch), departure("ICE 382", "20261119_10:31_de-VBB_1"), departure("RJ 382", delfi))
+        assertEquals(listOf(delfi, dutch, "20261119_10:31_de-VBB_1"), trackLenders(found, own, "RJ 382", planned, "Hamburg Hbf"))
+        assertEquals(delfi, trackLender(found, own, "RJ 382", planned, "Hamburg Hbf"))
+        assertEquals(0, lenderFeedRank(delfi))
+        assertEquals(0, lenderFeedRank("tr:$delfi"))
+        assertEquals(1, lenderFeedRank("20261119_10:31_de-VBB_1"))
+        assertEquals(2, lenderFeedRank("1|91935|0|86|19112026"))
+        assertEquals(2, lenderFeedRank(null))
+        assertEquals(3, lenderFeedRank(dutch))
+        assertEquals(3, lenderFeedRank(own))
+
+        // The stations joined by straight lines lend nothing; the real way does.
+        assertEquals(1.0, airShare(railjet), 1e-9)
+        assertFalse(lendsWay(railjet))
+        assertFalse(lendsWay(listOf(railjet.first(), railjet.last())))
+        assertTrue(lendsWay(track(railjet)))
+        assertEquals(0.0, airShare(track(railjet)), 1e-9)
+        // No way, or a point that is no place on the earth, is no way either.
+        assertFalse(lendsWay(emptyList()))
+        assertFalse(lendsWay(listOf(railjet.first())))
+        assertFalse(lendsWay(track(railjet) + listOf(Double.NaN to 10.0)))
+        assertFalse(lendsWay(listOf(railjet.first(), railjet.first())))
+    }
+
+    /** A track lent after a journey or a course was shown takes the place of its air lines there (#280). */
+    @Test
+    fun aTrackLentLaterIsTakenInPlace() {
+        val at = OffsetDateTime.parse("2026-11-19T11:24:00+01:00")
+        fun stop(position: Pair<Double, Double>) = Stop("s${position.first}", "x", position.first, position.second, null)
+        val ride = Leg(
+            line = "RJ 382", product = "express", walking = false, from = "Berlin Hbf", to = "Hamburg Hbf",
+            departure = at, plannedDeparture = at, arrival = at.plusMinutes(110), plannedArrival = at.plusMinutes(110),
+            departurePlatform = null, arrivalPlatform = null, direction = "Hamburg Hbf", cancelled = false,
+            path = railjet, fromPlace = stop(railjet.first()), toPlace = stop(railjet.last()),
+            stopovers = railjet.subList(1, 4).map { Stopover("x", at, at, place = stop(it)) },
+            tripId = "tr:20261119_10:31_dk-rejseplanen_171255616",
+        )
+        val journey = Journey(legs = listOf(ride))
+        // Nothing known yet: the very same journey.
+        assertTrue(withLentTracks(journey) { null } === journey)
+        val lent = withLentTracks(journey) { id -> if (id == ride.tripId) track(railjet) else null }
+        assertTrue(lent !== journey)
+        assertTrue(airHops(lent.legs[0].path, rideStopPositions(lent.legs[0])).isEmpty())
+        // A track that is itself an air line changes nothing.
+        assertTrue(withLentTracks(journey) { railjet } === journey)
+
+        val course = TripCourse(
+            tripId = ride.tripId!!, line = "RJ 382", product = "express", direction = "Hamburg Hbf",
+            stops = railjet.map { Stopover("x", at, at, place = stop(it)) }, path = railjet,
+            airHops = airHops(railjet, railjet),
+        )
+        assertTrue(withLentTrack(course) { null } === course)
+        val tracked = withLentTrack(course) { track(railjet) }
+        assertTrue(tracked.airHops.isEmpty())
+        assertTrue(tracked.path.size > railjet.size)
+        // Its vehicle no longer stands at stations: a course without air hops is left as it is.
+        assertTrue(withLentTrack(tracked) { track(railjet) } === tracked)
+    }
+
+    @Test
+    fun aKeptTrackCountsTheVersionUp() {
+        TrackCache.clear()
+        val before = TrackCache.version.value
+        TrackCache.put("miss", emptyList(), now = 0L)
+        assertEquals(before, TrackCache.version.value)
+        TrackCache.put("hit", track(railjet), now = 0L)
+        assertEquals(before + 1, TrackCache.version.value)
         TrackCache.clear()
     }
 }

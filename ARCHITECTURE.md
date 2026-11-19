@@ -158,6 +158,7 @@ tram stops, exact change walks, boarding positions) is shipped as assets and rea
 | `osm-berlin.json` | Station complexes with VBB ids, platform axes, entrances, lifts and escalators, bus and tram stop areas with their positions and lines | `OsmStations.load` |
 | `osm-change-positions.ndjson`, `vbb-change-positions.ndjson` | Where to board for changes between U-Bahn and S-Bahn lines (`vbb-change-positions` is an open dataset, the OSM one is derived) | `ChangePositions` |
 | `transfer-walks-berlin.json` | Measured walking seconds between platforms and stops per complex (with a step-free variant) | `OsmStations` (`TransferWalkIndex`) |
+| `rail-tunnels-germany.json` | Grid of ~50 m cells over Germany where rail ways (subway, light rail, rail) run in a tunnel, and the open cells near tunnels (any other cell counts as open), for the sunny-side hint (#219); built by `tools/build_tunnel_asset.py` | `RailTunnels` (`RAIL_TUNNELS_ASSET`, loaded by `SunSideSetting.load`) |
 | `osm-regions/index.json` | Per state, the 0.1 degree cells that hold stations or stops | `OsmStations.ensureRegions` |
 | `osm-regions/osm-<state>.json` | The pack of one of the other 15 states (same format as Berlin) | `OsmStations.ensureRegions` |
 | `osm-regions/transfer-walks-<state>.json`, `osm-change-positions-<state>.ndjson` | Walks and boarding positions of that state | loaded with the pack |

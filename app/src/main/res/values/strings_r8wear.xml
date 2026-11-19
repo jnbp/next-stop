@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Watch setting (#253): the watch complications show the trip state icon instead of the app icon. -->
+    <string name="r8wear_state_icons_title">Own icons in complications</string>
+    <string name="r8wear_state_icons_text">By default all complications and the trip chip at the foot of the watch face show the app icon. With this the complications show their own icons instead (the state of the trip such as waiting, vehicle or walking, home, disruptions, location); the chip keeps the app icon.</string>
+    <!-- Watch setting (#254): the crown on the watch trip overview shows the time travel pill. -->
+    <string name="r8wear_time_travel_title">Time travel with the crown</string>
+    <string name="r8wear_time_travel_text">Scrolling the overview of the live trip on the watch shows at the top when you will be at the row in the middle and how much time you have to change. Off: the crown just scrolls.</string>
+</resources>

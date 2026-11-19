@@ -217,7 +217,7 @@ fun setNoticeMarkers(style: Style, markers: List<NoticeMarker>, density: Float, 
     }
     NoticeSignSpots.columnTops = tops
     placedNotices = placed
-    source.setGeoJson(FeatureCollection.fromFeatures(features))
+    source.setGeoJsonSafely(FeatureCollection.fromFeatures(features))
 }
 
 private fun offsetArray(x: Float, y: Float): JsonArray = JsonArray().apply {

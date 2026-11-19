@@ -50,6 +50,9 @@ object FootPaths {
     private const val BASE_URL = "https://routing.openstreetmap.de/routed-foot/route/v1/foot/"
     // The bicycle router of the same servers, for the ways by bike of the bike combo (Leg.cycling).
     private const val BIKE_URL = "https://routing.openstreetmap.de/routed-bike/route/v1/bike/"
+    // The car router of the same servers, for the streets of a bus that has no way of its own (a
+    // rail replacement, see [roadWay]): through all its stops at once, one request per ride.
+    private const val ROAD_URL = "https://routing.openstreetmap.de/routed-car/route/v1/driving/"
     private const val USER_AGENT = "NextStop/0.1"
     private const val MIN_PAUSE_MILLIS = 1_000L
     private const val TIMEOUT_MILLIS = 8_000
@@ -61,6 +64,9 @@ object FootPaths {
     private const val MAX_METERS = 5_000.0
     // A way by bike may be longer: half an hour at a relaxed pace.
     private const val MAX_BIKE_METERS = 12_000.0
+    // A ride by road is asked for with at most this many stops and this long a way between them (straight).
+    private const val MAX_ROAD_STOPS = 25
+    private const val MAX_ROAD_METERS = 80_000.0
 
     private val cache = object : LinkedHashMap<String, List<Pair<Double, Double>>>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Pair<Double, Double>>>?): Boolean =
@@ -114,6 +120,22 @@ object FootPaths {
     fun knownWayMeters(start: Pair<Double, Double>, end: Pair<Double, Double>): Double? {
         val found = synchronized(cache) { cache[key(start, end)] } ?: return null
         return routeMeters(listOf(start) + found + listOf(end))
+    }
+
+    /**
+     * The streets a bus without a way of its own drives through [stops] (a rail replacement
+     * whose provider sends only the straight lines between its stops), where already known;
+     * null otherwise (see [wantRoad]).
+     */
+    fun roadWay(stops: List<Pair<Double, Double>>): List<Pair<Double, Double>>? {
+        if (stops.size < 2) return null
+        return synchronized(cache) { cache[roadKey(stops)] }
+    }
+
+    /** Asks for the streets through [stops] (see [roadWay]); returns at once, the way comes in as [version] counts up. */
+    fun wantRoad(stops: List<Pair<Double, Double>>) {
+        if (stops.size < 2 || stops.size > MAX_ROAD_STOPS) return
+        wantWays(listOf(Way(stops.first(), stops.last(), stops = stops)), urgent = false)
     }
 
     /** How the walk [leg] is drawn now (see [FootWay]). */
@@ -211,7 +233,14 @@ object FootPaths {
 
     private fun wantWays(ways: List<Way>, urgent: Boolean) {
         val wanted = ways
-            .filter { way -> distance(way.start, way.end) in MIN_METERS..maxMeters(way.bike) }
+            .filter { way ->
+                val stops = way.stops
+                if (stops != null) {
+                    stops.zipWithNext().sumOf { (a, b) -> distance(a, b) } in MIN_METERS..MAX_ROAD_METERS
+                } else {
+                    distance(way.start, way.end) in MIN_METERS..maxMeters(way.bike)
+                }
+            }
             .distinctBy { way -> way.key }
         if (wanted.isEmpty()) return
         synchronized(cache) {
@@ -287,14 +316,20 @@ object FootPaths {
     }
 
     private fun request(way: Way): FootAnswer {
-        val url = (if (way.bike) BIKE_URL else BASE_URL) + String.format(
-            Locale.ROOT,
-            "%.6f,%.6f;%.6f,%.6f?overview=full&geometries=polyline6",
-            way.start.second,
-            way.start.first,
-            way.end.second,
-            way.end.first,
-        )
+        val stops = way.stops
+        val url = if (stops != null) {
+            ROAD_URL + stops.joinToString(";") { (latitude, longitude) -> String.format(Locale.ROOT, "%.6f,%.6f", longitude, latitude) } +
+                "?overview=full&geometries=polyline6"
+        } else {
+            (if (way.bike) BIKE_URL else BASE_URL) + String.format(
+                Locale.ROOT,
+                "%.6f,%.6f;%.6f,%.6f?overview=full&geometries=polyline6",
+                way.start.second,
+                way.start.first,
+                way.end.second,
+                way.end.first,
+            )
+        }
         val connection = URL(url).openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = TIMEOUT_MILLIS
@@ -321,11 +356,20 @@ object FootPaths {
         (if (bike) "bike;" else "") +
             String.format(Locale.ROOT, "%.4f,%.4f;%.4f,%.4f", start.first, start.second, end.first, end.second)
 
+    // A ride by road by all its stops, rounded as the ends of a walk.
+    private fun roadKey(stops: List<Pair<Double, Double>>): String =
+        "road;" + stops.joinToString(";") { (latitude, longitude) -> String.format(Locale.ROOT, "%.4f,%.4f", latitude, longitude) }
+
     private fun maxMeters(bike: Boolean): Double = if (bike) MAX_BIKE_METERS else MAX_METERS
 
-    /** A way to ask for: on foot, or by [bike]. */
-    private data class Way(val start: Pair<Double, Double>, val end: Pair<Double, Double>, val bike: Boolean = false) {
-        val key: String get() = FootPaths.key(start, end, bike)
+    /** A way to ask for: on foot, by [bike], or by road through [stops] (a bus without a way of its own). */
+    private data class Way(
+        val start: Pair<Double, Double>,
+        val end: Pair<Double, Double>,
+        val bike: Boolean = false,
+        val stops: List<Pair<Double, Double>>? = null,
+    ) {
+        val key: String get() = stops?.let { FootPaths.roadKey(it) } ?: FootPaths.key(start, end, bike)
     }
 
     private fun distance(from: Pair<Double, Double>, to: Pair<Double, Double>): Double {

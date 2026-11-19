@@ -1,6 +1,9 @@
 package io.github.jnbp.nextstop.data
 
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlin.math.cos
 import kotlin.math.sqrt
 
@@ -34,9 +37,10 @@ object LineColors {
      * to a U-Bahn named U… or an S-Bahn named S… in the area of the VBB only (see [berlinRapid]).
      */
     val BERLIN_RAPID: Map<String, Int> = mapOf(
-        "U1" to 0xFF7DAD4C.toInt(), "U2" to 0xFFDA421E.toInt(), "U3" to 0xFF16683D.toInt(),
-        "U4" to 0xFFF0D722.toInt(), "U5" to 0xFF7E5330.toInt(), "U6" to 0xFF8C6DAB.toInt(),
-        "U7" to 0xFF528DBA.toInt(), "U8" to 0xFF224F86.toInt(), "U9" to 0xFFF3791D.toInt(),
+        // U-Bahn: the colours of the BVG's current line signs.
+        "U1" to 0xFF419328.toInt(), "U2" to 0xFFED3C12.toInt(), "U3" to 0xFF016144.toInt(),
+        "U4" to 0xFFFFC101.toInt(), "U5" to 0xFF603B2C.toInt(), "U6" to 0xFF504F87.toInt(),
+        "U7" to 0xFF0279BD.toInt(), "U8" to 0xFF013F75.toInt(), "U9" to 0xFFF96815.toInt(),
         "S1" to 0xFFDA6BA2.toInt(), "S2" to 0xFF007734.toInt(), "S25" to 0xFF007734.toInt(),
         "S26" to 0xFF007734.toInt(), "S3" to 0xFF0066AD.toInt(), "S41" to 0xFFAD5937.toInt(),
         "S42" to 0xFFCB6418.toInt(), "S45" to 0xFFCD9C53.toInt(), "S46" to 0xFFCD9C53.toInt(),
@@ -44,6 +48,14 @@ object LineColors {
         "S75" to 0xFF816DA6.toInt(), "S8" to 0xFF66AA22.toInt(), "S85" to 0xFF66AA22.toInt(),
         "S9" to 0xFF992746.toInt(),
     )
+
+    /**
+     * The colour of the text on the BVG's sign of a U-Bahn line of [BERLIN_RAPID]: white on every
+     * line but the U4, black on its yellow. Fixed, so no rule of lightness decides it (that rule
+     * put dark ink on the orange of the U9).
+     */
+    fun berlinSubwayText(name: String): Int =
+        if (name == "U4") 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
 
     /** A point in the middle of Berlin, for what belongs to Berlin's network by itself (its network map). */
     val BERLIN_CENTRE: Pair<Double, Double> = 52.52 to 13.405
@@ -64,10 +76,13 @@ object LineColors {
     @Volatile
     var focus: Pair<Double, Double>? = null
 
-    /** Counts up whenever colours were added, so that what was drawn with them can be drawn anew. */
-    @Volatile
-    var version: Int = 0
-        private set
+    private val counter = MutableStateFlow(0)
+
+    /**
+     * Counts up whenever colours were added or changed, so that what was drawn with them can be
+     * drawn anew: observed (collectAsState) only where colours are kept beyond one composition.
+     */
+    val version: StateFlow<Int> get() = counter
 
     /**
      * Notes the colour a provider sends for [line] of [product] at [place] ("e3000b" or
@@ -79,11 +94,15 @@ object LineColors {
         val key = key(line, product) ?: return
         val at = place ?: return
         val entry = Entry(color, parseHex(textHex), at.first, at.second)
+        var changed = false
         provider.compute(key) { _, old ->
             val rest = old.orEmpty().filter { meters(it.latitude to it.longitude, at) > SAME_PLACE_METERS }
+            // The same colour sent again for the same line nearby changes nothing that was drawn.
+            val replaced = old.orEmpty().filter { meters(it.latitude to it.longitude, at) <= SAME_PLACE_METERS }
+            changed = replaced.none { it.color == entry.color && it.text == entry.text }
             (listOf(entry) + rest).take(MAX_PROVIDER_PLACES)
         }
-        version++
+        if (changed) counter.update { it + 1 }
     }
 
     /**
@@ -99,7 +118,7 @@ object LineColors {
             grouped.getOrPut(e.mode + "|" + name) { ArrayList() }.add(Entry(color, null, e.latitude, e.longitude))
         }
         for ((key, list) in grouped) osm.merge(key, list) { old, more -> old + more }
-        version++
+        counter.update { it + 1 }
     }
 
     /** The colour of [line] of [product] near [focus], or near [at] where given; null where none is known. */
@@ -123,8 +142,10 @@ object LineColors {
 
     /**
      * The colour of a ride of [line] of [product] that runs at [at] (see [Leg.ridePlace]), in
-     * this order: the colour its provider sent with it ([provided], [providedText]); the
-     * colour of Berlin's network map for a U- or S-Bahn of Berlin ([berlinRapid]); the colour
+     * this order: for a U-Bahn of Berlin the colour and text of the BVG's line sign, before any
+     * colour a provider sent, so its badge is always the BVG's; the colour its provider sent
+     * with it ([provided], [providedText]); the colour of Berlin's network map for an S-Bahn of
+     * Berlin ([berlinRapid]); the colour
      * a provider or OpenStreetMap knows for a line of that name and product near [at]. Null
      * where none is known: the colour of its kind or product applies then.
      *
@@ -137,6 +158,7 @@ object LineColors {
         provided: Int? = null,
         providedText: Int? = null,
     ): Style? {
+        berlinSubwayStyle(line, product, at)?.let { return it }
         if (provided != null) return Style(provided, providedText)
         berlinRapid(line, product, at)?.let { return Style(it, null) }
         val known = lookup(rapidLineName(line, product), product, at ?: focus) ?: return null
@@ -153,6 +175,22 @@ object LineColors {
         val name = berlinRapidName(line, product) ?: return null
         if (!inHomeArea(at)) return null
         return BERLIN_RAPID[name]
+    }
+
+    /**
+     * The colour and text of the BVG's sign for a U-Bahn of Berlin (named U…, in the area of the
+     * VBB, see [berlinRapid]): [product] "subway", or no known product (""), as a notice may name
+     * its line, since a line named U1 to U9 in the VBB area is Berlin's U-Bahn (and the packs of
+     * OpenStreetMap may still carry older colours of it). Null for every other ride, an S-Bahn of
+     * Berlin included.
+     */
+    fun berlinSubwayStyle(line: String?, product: String, at: Pair<Double, Double>?): Style? {
+        if (product != "subway" && product != "") return null
+        // Of no known product only a name with its U ("U9", never a bare "9").
+        if (product == "" && nameKey(line)?.firstOrNull() != 'U') return null
+        val name = berlinRapidName(line, "subway") ?: return null
+        val color = berlinRapid(line, "subway", at) ?: return null
+        return Style(color, berlinSubwayText(name))
     }
 
     /**
@@ -185,7 +223,7 @@ object LineColors {
         provider.clear()
         osm.clear()
         focus = null
-        version++
+        counter.update { it + 1 }
     }
 
     // The entry nearest to [at] within MAX_FOCUS_METERS; without [at] the only one of a line

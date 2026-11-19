@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #208: headings of the sections of a search for places. -->
+    <string name="r7search_local_transport">Nahverkehr</string>
+    <string name="r7search_places">Orte</string>
+    <!-- #223: the departures header. -->
+    <string name="r7search_mode_long_distance">Fern</string>
+    <string name="r7search_all_lines">Alle Linien</string>
+    <string name="r7search_only_stop">Nur %1$s</string>
+    <string name="r7search_nearby_all">Alle Haltestellen im Umkreis von %1$s</string>
+    <string name="r7search_radius_choice">Haltestellen: %1$s</string>
+    <!-- #229: der Schritt „Orte“ der Einrichtung. -->
+    <string name="r7search_setup_places_title">Orte</string>
+    <string name="r7search_setup_places_short">Leg Zuhause fest, und wenn du magst Arbeit und weitere Orte. Next Stop warnt dich bei Störungen an deinen Orten und auf deinen Wegen und bietet dir schnelle Routen dorthin.</string>
+    <string name="r7search_setup_places_more">Die Orte sind deine Lieblings- und gemerkten Orte der Startseite: Ein Tipp dort plant den Weg. Die Störungsmeldungen schauen auf sie, so weit wie der Umkreis, den du einstellst. Sie bleiben auf deinem Handy. Du kannst sie jederzeit auf der Startseite ändern oder diesen Schritt überspringen.</string>
+    <string name="r7search_setup_places_optional">optional</string>
+    <string name="r7search_setup_places_add">Weiteren Ort hinzufügen</string>
+    <string name="r7search_setup_places_remove">%1$s entfernen</string>
+    <string name="r7search_setup_places_search">Ort suchen</string>
+    <string name="r7search_setup_places_preview">Störung auf dem Weg nach Hause</string>
+</resources>

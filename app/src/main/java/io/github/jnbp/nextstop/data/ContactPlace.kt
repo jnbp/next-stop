@@ -17,14 +17,17 @@ import kotlinx.coroutines.withContext
  * providers with the street and the house number, the geocoder of the device, the best other
  * address of the providers in that street, and at last the town alone, whose name then
  * carries [approximateNote]. The place found is named after the contact's address (see
- * [contactPlaceName]), not after the hit. Null when none of these finds the place.
+ * [contactPlaceName]), not after the hit. An address kept only in its written form is split
+ * into its fields first (see contactWithFields, #58). A provider that fails counts as one that
+ * found nothing. Null when none of these finds the place.
  */
 suspend fun resolveContactPlace(
     context: Context,
     source: TransitSource,
-    contact: ContactAddress,
+    given: ContactAddress,
     approximateNote: String,
 ): Stop? {
+    val contact = contactWithFields(given)
     val postcode = contact.postcode
     val city = contact.city
     val query = contactQuery(contact)
@@ -52,7 +55,14 @@ suspend fun resolveContactPlace(
     // address is resolved as any other address, still never as a stop; failing that, the
     // device's geocoder takes the written address as it is.
     if (postcode == null && city == null) {
-        source.resolvePlace(query)
+        val resolved = try {
+            source.resolvePlace(query)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        resolved
             ?.takeIf { it.kind != PlaceKind.Stop }
             ?.position
             ?.let { return named(it) }

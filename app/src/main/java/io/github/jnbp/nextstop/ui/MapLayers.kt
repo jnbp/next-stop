@@ -134,13 +134,24 @@ private const val TIER_FADE = 0.8
 // Up to here the vehicles are drawn as dots (fading out while the badges fade in).
 private const val VEHICLE_DOT_MAX_ZOOM = NEIGHBOURHOOD_ZOOM + TIER_FADE / 2
 
-// Tram lines of the app's own network show from far out (NETWORK_MIN_ZOOM, as the S- and U-Bahn)
-// until TRAM_BAND_OUT and are gone at TRAM_BAND_GONE. Closer up (street level) they would crowd
-// the map; there a tram line shows only when its course is picked. TRAM_BAND_IN is where their
-// width starts to grow.
-private const val TRAM_BAND_IN = 11.5
-private const val TRAM_BAND_OUT = 15.0
-private const val TRAM_BAND_GONE = 15.5
+// Tram lines of the app's own network show from TRAM_LINES_MIN_ZOOM (a part of the city, not
+// the whole region: further out they only cloud the S- and U-Bahn, #73). Zooming in they go
+// the way the S- and U-Bahn overview does, only a little later (#268): they start to fade at
+// TRAM_BAND_OUT, a zoom level after the overview lines have left at CITY_ZOOM, and are gone at
+// TRAM_BAND_GONE, where a tram line shows when its course is picked. (Until 0.2 they stayed
+// up to street level, zoom 17, and crowded the map.) TRAM_BAND_IN is where their width starts
+// to grow. Zooming out they go just before the S- and U-Bahn give up their detail: those
+// stations' signs leave at CITY_ZOOM (#123). They fade over TRAM_FADE above that.
+private const val TRAM_LINES_MIN_ZOOM = 12.4f // CITY_ZOOM + 0.4
+private const val TRAM_FADE = 0.5f
+private const val TRAM_BAND_IN = 13.0
+private const val TRAM_BAND_OUT = 13.6
+private const val TRAM_BAND_GONE = 14.4
+
+// The tram and Stadtbahn tracks of the tiles (outside the app's own tram network) keep their
+// own band: the tiles carry trams only from TILE_TRAM_ZOOM on, so they stay to street level.
+private const val TILE_TRAM_BAND_OUT = 16.5
+private const val TILE_TRAM_BAND_GONE = 17.0
 
 // The tiles (OpenMapTiles) carry tram tracks only from this zoom on.
 private const val TILE_TRAM_ZOOM = 14.0
@@ -228,6 +239,10 @@ private const val VEHICLE_ARROW_LAYER = "ns-vehicle-arrows"
 private const val VEHICLE_NOSE_LAYER = "ns-vehicle-noses"
 private const val RAPID_SOURCE = "ns-rapid"
 private const val RAPID_CASING_LAYER = "ns-rapid-casing"
+
+// The properties of a line of the network with its casing on a light and on a dark map, where it needs one.
+private const val CASING_LIGHT_KEY = "casingLight"
+private const val CASING_DARK_KEY = "casingDark"
 private const val RAPID_LAYER = "ns-rapid-lines"
 private const val VEHICLE_MINOR_LAYER = "ns-vehicle-minor"
 private const val VEHICLE_MAJOR_LAYER = "ns-vehicle-major"
@@ -272,7 +287,7 @@ private val VEHICLE_LAYERS = arrayOf(VEHICLE_MAJOR_LAYER, VEHICLE_MINOR_LAYER, V
 
 /** Every layer of the app's own, so they can be shown and hidden together. */
 private val OWN_LAYERS = listOf(
-    NETWORK_CASING_LAYER, NETWORK_LAYER, NETWORK_TRAM_LAYER, TRAM_LAYER, RAPID_CASING_LAYER, RAPID_LAYER, VEHICLE_DOT_LAYER, VEHICLE_CLUSTER_DOT_LAYER, VEHICLE_ARROW_LAYER,
+    LONG_DISTANCE_LAYER, NETWORK_CASING_LAYER, NETWORK_LAYER, NETWORK_TRAM_LAYER, TRAM_LAYER, RAPID_CASING_LAYER, RAPID_LAYER, VEHICLE_DOT_LAYER, VEHICLE_CLUSTER_DOT_LAYER, VEHICLE_ARROW_LAYER,
     VEHICLE_MINOR_LAYER, VEHICLE_MAJOR_LAYER, VEHICLE_NOSE_LAYER, VEHICLE_PULSE_LAYER, STOP_LAYER, STOP_NAMED_SIGN_LAYER, STOP_NAME_LAYER,
     SELECTED_STOP_LAYER,
 )
@@ -318,7 +333,7 @@ fun installAppLayers(style: Style, density: Float, signColors: StopSignColors) {
         style.addSource(GeoJsonSource(SELECTED_STOP_SOURCE, FeatureCollection.fromFeatures(emptyList<Feature>())))
     }
     if (style.getSource(RAPID_SOURCE) == null) {
-        style.addSource(GeoJsonSource(RAPID_SOURCE, rapidNetworkData ?: FeatureCollection.fromFeatures(emptyList<Feature>())))
+        style.addSource(GeoJsonSource(RAPID_SOURCE, mapSafe(rapidNetworkData ?: FeatureCollection.fromFeatures(emptyList<Feature>()))))
     }
     if (style.getSource(VEHICLE_SOURCE) == null) {
         style.addSource(GeoJsonSource(VEHICLE_SOURCE, FeatureCollection.fromFeatures(emptyList<Feature>())))
@@ -326,6 +341,8 @@ fun installAppLayers(style: Style, density: Float, signColors: StopSignColors) {
     val font = boldFont(style)
     // The first label layer of the style: the network goes below it, so names stay readable.
     val firstLabels = style.layers.firstOrNull { it is SymbolLayer }?.id
+    // The long-distance railways far out, where the tiles have none (see LongDistanceLayer.kt).
+    installLongDistanceLayer(style, firstLabels)
 
     if (style.getSource(TILE_SOURCE) != null && style.getLayer(NETWORK_LAYER) == null) {
         // Only the railways: U-Bahn, S-Bahn (light rail in the tiles) and the main lines; trams and the rest stay out.
@@ -345,6 +362,9 @@ fun installAppLayers(style: Style, density: Float, signColors: StopSignColors) {
             Expression.stop(9, 1.2f),
             Expression.stop(CITY_ZOOM, 3f),
         )
+        // A casing only for the colours that melt into the map (see LineCasing.kt); the others
+        // are drawn bare (a casing of no colour).
+        val ground = currentMapGround()
         val casing = LineLayer(NETWORK_CASING_LAYER, TILE_SOURCE).apply {
             // Far out (a whole state, the country) the network is no help and only costs: none.
             minZoom = NETWORK_MIN_ZOOM
@@ -352,13 +372,21 @@ fun installAppLayers(style: Style, density: Float, signColors: StopSignColors) {
             setFilter(rapid)
             maxZoom = (CITY_ZOOM + 0.5).toFloat()
             setProperties(
-                PropertyFactory.lineColor(Color.White.toArgb()),
+                PropertyFactory.lineColor(
+                    Expression.switchCase(
+                        Expression.eq(Expression.get("subclass"), "subway"),
+                        Expression.color(LineCasings.of(SUBWAY_NETWORK.toArgb(), ground)),
+                        Expression.eq(Expression.get("subclass"), "light_rail"),
+                        Expression.color(LineCasings.of(SUBURBAN_NETWORK.toArgb(), ground)),
+                        Expression.color(LineCasings.of(RAIL_NETWORK.toArgb(), ground)),
+                    ),
+                ),
                 PropertyFactory.lineWidth(
                     Expression.interpolate(
                         Expression.linear(),
                         Expression.zoom(),
-                        Expression.stop(9, 2.6f),
-                        Expression.stop(CITY_ZOOM, 5f),
+                        Expression.stop(9, 2f),
+                        Expression.stop(CITY_ZOOM, 4f),
                     ),
                 ),
                 PropertyFactory.lineOpacity(fade),
@@ -394,13 +422,13 @@ fun installAppLayers(style: Style, density: Float, signColors: StopSignColors) {
         // Tram and Stadtbahn tracks from a closer zoom on, thin and quiet, fading in. In the
         // tiles they are of the class "transit" (not "rail"), by their subclass. Bus routes have
         // no geometry in the tiles (only roads), so buses show by their vehicles alone.
-        // They show in the band of the overview only (see TRAM_BAND_*): close up, at street level,
+        // They show in the band of the overview only (see TILE_TRAM_BAND_*): close up, at street level,
         // the tracks would crowd the map, and a tram line shows there only when it is picked.
         val trams = LineLayer(NETWORK_TRAM_LAYER, TILE_SOURCE).apply {
             sourceLayer = "transportation"
             setFilter(tileTramFilter())
             minZoom = TRAM_ZOOM.toFloat()
-            maxZoom = TRAM_BAND_GONE.toFloat()
+            maxZoom = TILE_TRAM_BAND_GONE.toFloat()
             setProperties(
                 PropertyFactory.lineColor(
                     Expression.switchCase(
@@ -428,8 +456,8 @@ fun installAppLayers(style: Style, density: Float, signColors: StopSignColors) {
                         Expression.stop(TRAM_ZOOM + TIER_FADE, tileTramOpacity(0f)),
                         Expression.stop(TILE_TRAM_ZOOM, tileTramOpacity(0f)),
                         Expression.stop(TILE_TRAM_ZOOM + TIER_FADE, TRAM_OPACITY),
-                        Expression.stop(TRAM_BAND_OUT, TRAM_OPACITY),
-                        Expression.stop(TRAM_BAND_GONE, 0f),
+                        Expression.stop(TILE_TRAM_BAND_OUT, TRAM_OPACITY),
+                        Expression.stop(TILE_TRAM_BAND_GONE, 0f),
                     ),
                 ),
                 PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
@@ -439,17 +467,17 @@ fun installAppLayers(style: Style, density: Float, signColors: StopSignColors) {
         addBelow(style, trams, firstLabels)
     }
     if (style.getSource(TRAM_SOURCE) == null) {
-        style.addSource(GeoJsonSource(TRAM_SOURCE, tramNetworkData ?: FeatureCollection.fromFeatures(emptyList<Feature>())))
+        style.addSource(GeoJsonSource(TRAM_SOURCE, mapSafe(tramNetworkData ?: FeatureCollection.fromFeatures(emptyList<Feature>()))))
     }
     if (style.getLayer(TRAM_LAYER) == null) {
         // The app's own tram network (see setTramNetwork): the trams of Berlin in the overview,
         // from the district view on, where the tiles have no tram tracks yet. It fades in and
         // out by the zoom as the S- and U-Bahn network does, and lies below it.
-        // Far out it stays, as the S- and U-Bahn network does, fading in as that does from
-        // NETWORK_MIN_ZOOM on; only close up, at street level, it gives way (TRAM_BAND_GONE),
-        // where a tram line shows when it is picked.
+        // Zoomed out to the region it gives way to the S- and U-Bahn, fading in from
+        // TRAM_LINES_MIN_ZOOM on (#73); zooming in it leaves a little after the S- and U-Bahn
+        // overview (TRAM_BAND_GONE, #268), where a tram line shows when it is picked.
         val trams = LineLayer(TRAM_LAYER, TRAM_SOURCE).apply {
-            minZoom = NETWORK_MIN_ZOOM
+            minZoom = TRAM_LINES_MIN_ZOOM
             maxZoom = TRAM_BAND_GONE.toFloat()
             setProperties(
                 PropertyFactory.lineColor(TRAM_NETWORK.toArgb()),
@@ -457,17 +485,17 @@ fun installAppLayers(style: Style, density: Float, signColors: StopSignColors) {
                     Expression.interpolate(
                         Expression.linear(),
                         Expression.zoom(),
-                        Expression.stop(9, 0.6f),
+                        Expression.stop(TRAM_LINES_MIN_ZOOM, 0.6f),
                         Expression.stop(TRAM_BAND_IN, 0.8f),
-                        Expression.stop(16, 2.4f),
+                        Expression.stop(TRAM_BAND_GONE, 1.4f),
                     ),
                 ),
                 PropertyFactory.lineOpacity(
                     Expression.interpolate(
                         Expression.linear(),
                         Expression.zoom(),
-                        Expression.stop(NETWORK_MIN_ZOOM, 0f),
-                        Expression.stop(NETWORK_MIN_ZOOM + 0.6f, TRAM_OPACITY),
+                        Expression.stop(TRAM_LINES_MIN_ZOOM, 0f),
+                        Expression.stop(TRAM_LINES_MIN_ZOOM + TRAM_FADE, TRAM_OPACITY),
                         Expression.stop(TRAM_BAND_OUT, TRAM_OPACITY),
                         Expression.stop(TRAM_BAND_GONE, 0f),
                     ),
@@ -496,18 +524,22 @@ fun installAppLayers(style: Style, density: Float, signColors: StopSignColors) {
             Expression.stop(9, Expression.product(Expression.get("slot"), Expression.literal(1.1f))),
             Expression.stop(CITY_ZOOM, Expression.product(Expression.get("slot"), Expression.literal(2.6f))),
         )
+        // Each line carries its casing for a light and for a dark map, where it needs one at all
+        // (see rapidNetworkFeatures): only those lines are cased, in that colour.
+        val casingKey = if (currentMapGround() == DARK_MAP_GROUND) CASING_DARK_KEY else CASING_LIGHT_KEY
         val casing = LineLayer(RAPID_CASING_LAYER, RAPID_SOURCE).apply {
             // Far out (a whole state, the country) the network is no help and only costs: none.
             minZoom = NETWORK_MIN_ZOOM
             maxZoom = (CITY_ZOOM + 0.5).toFloat()
+            setFilter(Expression.has(casingKey))
             setProperties(
-                PropertyFactory.lineColor(Color.White.toArgb()),
+                PropertyFactory.lineColor(Expression.toColor(Expression.get(casingKey))),
                 PropertyFactory.lineWidth(
                     Expression.interpolate(
                         Expression.linear(),
                         Expression.zoom(),
-                        Expression.stop(9, 2.6f),
-                        Expression.stop(CITY_ZOOM, 4.8f),
+                        Expression.stop(9, 2f),
+                        Expression.stop(CITY_ZOOM, 3.8f),
                     ),
                 ),
                 PropertyFactory.lineOffset(offset),
@@ -789,7 +821,7 @@ private fun tileTramOpacity(tram: Float): Expression = Expression.switchCase(
 fun setTramNetwork(style: Style, features: FeatureCollection?) {
     if (features == null || features.features().isNullOrEmpty()) return
     tramNetworkData = features
-    style.getSourceAs<GeoJsonSource>(TRAM_SOURCE)?.setGeoJson(features)
+    style.getSourceAs<GeoJsonSource>(TRAM_SOURCE)?.setGeoJsonSafely(features)
     (style.getLayer(NETWORK_TRAM_LAYER) as? LineLayer)?.setFilter(tileTramFilter())
 }
 
@@ -813,7 +845,7 @@ private var ownHasSuburban = false
 fun setRapidNetwork(style: Style, features: FeatureCollection?) {
     if (features == null || features.features().isNullOrEmpty()) return
     rapidNetworkData = features
-    style.getSourceAs<GeoJsonSource>(RAPID_SOURCE)?.setGeoJson(features)
+    style.getSourceAs<GeoJsonSource>(RAPID_SOURCE)?.setGeoJsonSafely(features)
     val names = features.features().orEmpty().mapNotNull { it.getStringProperty("line") }
     ownHasSubway = names.any { it.startsWith("U") }
     ownHasSuburban = names.any { it.startsWith("S") }
@@ -832,8 +864,12 @@ fun rapidNetworkFeatures(lines: List<NetworkLine>, colorOf: (String) -> Color): 
         val feature = Feature.fromGeometry(
             LineString.fromLngLats(line.points.map { (latitude, longitude) -> Point.fromLngLat(longitude, latitude) }),
         )
+        val color = colorOf(line.line)
         feature.addStringProperty("line", line.line)
-        feature.addStringProperty("color", hexColor(colorOf(line.line)))
+        feature.addStringProperty("color", hexColor(color))
+        // Its casing on a light and on a dark map, only where it melts into that map (see LineCasing.kt).
+        LineCasings.of(color.toArgb(), LIGHT_MAP_GROUND).takeIf { it != 0 }?.let { feature.addStringProperty(CASING_LIGHT_KEY, hexColor(Color(it))) }
+        LineCasings.of(color.toArgb(), DARK_MAP_GROUND).takeIf { it != 0 }?.let { feature.addStringProperty(CASING_DARK_KEY, hexColor(Color(it))) }
         feature.addNumberProperty("slot", slots[line.line] ?: 0f)
         feature
     }
@@ -1097,7 +1133,7 @@ private fun boldFont(style: Style): Array<String> {
 }
 
 // The badge image before it is stretched around the text, in dp: a rounded box, nearly a
-// pill so the round nose joins it softly, with a thin white rim as an outline.
+// pill so the round nose joins it softly, with a thin rim as an outline where its colour needs one.
 private const val BADGE_BODY_WIDTH_DP = 20f
 private const val BADGE_BODY_HEIGHT_DP = 14f
 private const val BADGE_RADIUS_DP = 6.5f
@@ -1116,13 +1152,18 @@ private fun addBadgeImage(style: Style, id: String, argb: Int, live: Boolean, de
     val margin = if (live) kotlin.math.ceil(liveDotOverhangDp() * density + 1f).toInt() else 0
     val bitmap = Bitmap.createBitmap(bodyWidth + margin, bodyHeight + margin, Bitmap.Config.ARGB_8888)
     val canvas = AndroidCanvas(bitmap)
-    val paint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+    // The rim only where the badge's colour melts into the map (see LineCasing.kt), in the
+    // darkened or lightened colour of the line; else the badge is drawn bare.
+    val casing = LineCasings.of(argb or 0xFF000000.toInt(), currentMapGround())
+    val paint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply { color = if (casing != 0) casing else argb or 0xFF000000.toInt() }
     val body = RectF(0f, margin.toFloat(), bodyWidth.toFloat(), (margin + bodyHeight).toFloat())
     val radius = BADGE_RADIUS_DP * density
     canvas.drawRoundRect(body, radius, radius, paint)
-    val rim = (BADGE_RIM_DP * density).coerceAtLeast(1f)
-    paint.color = argb or 0xFF000000.toInt()
-    canvas.drawRoundRect(RectF(body.left + rim, body.top + rim, body.right - rim, body.bottom - rim), radius - rim, radius - rim, paint)
+    if (casing != 0) {
+        val rim = (BADGE_RIM_DP * density).coerceAtLeast(1f)
+        paint.color = argb or 0xFF000000.toInt()
+        canvas.drawRoundRect(RectF(body.left + rim, body.top + rim, body.right - rim, body.bottom - rim), radius - rim, radius - rim, paint)
+    }
     if (live) {
         val inset = LIVE_DOT_INSET_DP * density
         val x = body.right - inset
@@ -1242,6 +1283,11 @@ private class VehicleMotion(var path: List<Pair<Double, Double>>, var since: Lon
     val dotAt = DoubleArray(2)
     val offset = FloatArray(2)
     private var easedAt = -1L
+
+    // The features last given to the map (badge, and dot in a row) and what they were made from:
+    // given again where nothing of them changed (see FeatureInputs).
+    val badgeFeature = FeatureInputs()
+    val dotFeature = FeatureInputs()
 
     /**
      * Eases towards [slot] beside [anchor] for the time up to [millis]; with [jump] (hidden
@@ -1365,13 +1411,15 @@ fun VehicleLayer(
         }
     }
     val gate = remember { VehicleGate() }
+    // The beat of the live pulse: wanted while a live train is on the screen, and when it last beat.
+    val pulse = remember { PulseBeat() }
     val updatesOn = PerfLab.vehicleUpdates
     LaunchedEffect(map, styleTick, shown, moving, updatesOn) {
         val readyMap = map ?: return@LaunchedEffect
         // Switched off in the performance lab: the layer is emptied and rests.
         if (!updatesOn) {
             readyMap.style?.takeIf { it.isFullyLoaded }?.getSourceAs<GeoJsonSource>(VEHICLE_SOURCE)
-                ?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+                ?.setGeoJsonSafely(FeatureCollection.fromFeatures(emptyList<Feature>()))
             return@LaunchedEffect
         }
         // The app is not on screen: nothing to draw, and nothing is worked out for it.
@@ -1380,7 +1428,7 @@ fun VehicleLayer(
         // no glide loop runs; it starts again when they are shown.
         if (!shown) {
             val style = readyMap.style?.takeIf { it.isFullyLoaded } ?: return@LaunchedEffect
-            style.getSourceAs<GeoJsonSource>(VEHICLE_SOURCE)?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+            style.getSourceAs<GeoJsonSource>(VEHICLE_SOURCE)?.setGeoJsonSafely(FeatureCollection.fromFeatures(emptyList<Feature>()))
             if (setPillVehicleBoxes(emptyList())) {
                 val camera = readyMap.cameraPosition
                 declutterSelectedPositions(style, camera.zoom, camera.bearing)
@@ -1402,9 +1450,11 @@ fun VehicleLayer(
                 // Zoomed out beyond the dots (a whole state, the country) nothing is drawn: the layers rest.
                 val camera = readyMap.cameraPosition
                 val visible = shown && camera.zoom >= VEHICLE_DOT_MIN_ZOOM
-                if (camera.zoom < NEIGHBOURHOOD_ZOOM - TIER_FADE) frameMillis = VEHICLE_DOT_FRAME_MILLIS
+                // The battery saver lets the vehicles glide in coarser steps everywhere.
+                if (camera.zoom < NEIGHBOURHOOD_ZOOM - TIER_FADE || BatterySaver.active) frameMillis = VEHICLE_DOT_FRAME_MILLIS
                 if (visible) {
                     AllocProbe.begin(AllocProbe.VEHICLE_FRAME)
+                    val pushedBefore = gate.pushedAt
                     gliding = try {
                         pushVehicles(
                             style, source, current, motions, badges, groups, density, camera.bearing, camera.zoom,
@@ -1417,11 +1467,15 @@ fun VehicleLayer(
                     } finally {
                         AllocProbe.end(AllocProbe.VEHICLE_FRAME, current.size)
                     }
+                    // The map draws a frame for the vehicles anyway: the beat of the pulse goes with it.
+                    if (pulse.wanted && gate.pushedAt != pushedBefore) {
+                        style.getLayer(VEHICLE_PULSE_LAYER)?.let { beatPulse(it, pulse) }
+                    }
                     force = false
                     emptied = false
                 } else if (!emptied) {
                     force = true
-                    source.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+                    source.setGeoJsonSafely(FeatureCollection.fromFeatures(emptyList<Feature>()))
                     // No columns of vehicles any more: the pills take their own place again.
                     if (setPillVehicleBoxes(emptyList())) {
                         val camera = readyMap.cameraPosition
@@ -1435,11 +1489,12 @@ fun VehicleLayer(
     }
     // The beat of the live dots of trains: only while such trains are drawn close enough for badges.
     // Each frame waits for the app to draw, so the beat rests while the app is not shown.
-    val pulseOn = PerfLab.livePulse
+    val pulseOn = PerfLab.livePulse && !BatterySaver.active
     LaunchedEffect(map, styleTick, shown, moving, pulseOn) {
         val readyMap = map ?: return@LaunchedEffect
         // The app is not on screen or no vehicles are shown: no beat, and no look at the map for it.
         if (!moving || !pulseOn || !shown) {
+            pulse.wanted = false
             try {
                 readyMap.style?.takeIf { it.isFullyLoaded }?.getLayer(VEHICLE_PULSE_LAYER)?.setProperties(PropertyFactory.iconOpacity(0f))
             } catch (e: Exception) {
@@ -1448,39 +1503,83 @@ fun VehicleLayer(
             return@LaunchedEffect
         }
         var beating = false
-        while (true) {
-            val layer = readyMap.style?.takeIf { it.isFullyLoaded }?.getLayer(VEHICLE_PULSE_LAYER)
-            val wanted = layer != null && shown && current.any { it.realtime && isMajorProduct(it.product) } &&
-                readyMap.cameraPosition.zoom >= NEIGHBOURHOOD_ZOOM - TIER_FADE / 2
-            if (wanted && layer != null) {
-                withFrameMillis { }
-                val phase = livePulsePhase(SystemClock.uptimeMillis())
-                AllocProbe.begin(AllocProbe.LIVE_PULSE)
-                try {
-                    layer.setProperties(
-                        PropertyFactory.iconHaloWidth(livePulseReach(phase)),
-                        PropertyFactory.iconOpacity(appearFadeIn(NEIGHBOURHOOD_ZOOM - TIER_FADE / 2, full = livePulseOpacity(phase))),
-                    )
-                } catch (e: Exception) {
-                    // The style went away while waiting for the frame: the next round finds the new one.
-                } finally {
-                    AllocProbe.end(AllocProbe.LIVE_PULSE)
-                }
-                beating = true
-                delay(LIVE_PULSE_FRAME_MILLIS)
-            } else {
-                if (beating) {
-                    try {
-                        layer?.setProperties(PropertyFactory.iconOpacity(0f))
-                    } catch (e: Exception) {
-                        // A layer of a style that is gone needs no rest.
+        try {
+            while (true) {
+                // The loop ends with its map (#284): a released map is not looked at.
+                if (!MapAlive.alive(readyMap)) break
+                val layer = readyMap.style?.takeIf { it.isFullyLoaded }?.getLayer(VEHICLE_PULSE_LAYER)
+                // Only while a live train is on the screen (#142): each beat has the map draw a whole frame.
+                val wanted = layer != null && shown && readyMap.cameraPosition.zoom >= NEIGHBOURHOOD_ZOOM - TIER_FADE / 2 &&
+                    liveTrainInView(readyMap, current, motions)
+                pulse.wanted = wanted
+                if (wanted && layer != null) {
+                    // A frame drawn for the gliding vehicles took the beat along: wait for the next one.
+                    val wait = pulseWait(SystemClock.uptimeMillis(), pulse.lastAt, LIVE_PULSE_FRAME_MILLIS)
+                    if (wait > 0L) {
+                        delay(wait)
+                        continue
                     }
-                    beating = false
+                    withFrameMillis { }
+                    if (!MapAlive.alive(readyMap)) break
+                    beatPulse(layer, pulse)
+                    beating = true
+                    delay(LIVE_PULSE_FRAME_MILLIS)
+                } else {
+                    if (beating) {
+                        try {
+                            layer?.setProperties(PropertyFactory.iconOpacity(0f))
+                        } catch (e: Exception) {
+                            // A layer of a style that is gone needs no rest.
+                        }
+                        beating = false
+                    }
+                    delay(VEHICLE_LAYER_REST_MILLIS)
                 }
-                delay(VEHICLE_LAYER_REST_MILLIS)
             }
+        } finally {
+            pulse.wanted = false
         }
     }
+}
+
+/** The beat of the live pulse, shared by its own loop and the glide of the vehicles. Main thread only. */
+private class PulseBeat {
+    /** True while a live train is on the screen and the pulse beats. */
+    var wanted = false
+
+    /** When it last beat (uptime ms). */
+    var lastAt = 0L
+}
+
+/** One beat of the live pulse on [layer], at the app's animation clock (slower with a larger animator duration scale). */
+private fun beatPulse(layer: Layer, beat: PulseBeat) {
+    val phase = livePulsePhase(SystemAnimation.clockMillis())
+    AllocProbe.begin(AllocProbe.LIVE_PULSE)
+    try {
+        layer.setProperties(
+            PropertyFactory.iconHaloWidth(livePulseReach(phase)),
+            PropertyFactory.iconOpacity(appearFadeIn(NEIGHBOURHOOD_ZOOM - TIER_FADE / 2, full = livePulseOpacity(phase))),
+        )
+        JankMeter.markMap(MAP_CAUSE_PULSE)
+    } catch (e: Exception) {
+        // The style went away while waiting for the frame: the next round finds the new one.
+    } finally {
+        AllocProbe.end(AllocProbe.LIVE_PULSE)
+    }
+    beat.lastAt = SystemClock.uptimeMillis()
+}
+
+/** True when one of the live trains of [vehicles] is drawn within the screen of [map] (or just beyond its edge). */
+private fun liveTrainInView(map: MapLibreMap, vehicles: List<Vehicle>, motions: HashMap<String, VehicleMotion>): Boolean {
+    if (vehicles.none { it.realtime && isMajorProduct(it.product) }) return false
+    // Before the map has a size nothing is known: then it beats as before.
+    val box = visibleBox(map) ?: return true
+    for (vehicle in vehicles) {
+        if (!vehicle.realtime || !isMajorProduct(vehicle.product)) continue
+        val at = motions[vehicle.tripId]?.pushed ?: continue
+        if (inViewBox(at[0], at[1], box[0], box[1], box[2], box[3])) return true
+    }
+    return false
 }
 
 /**
@@ -1504,6 +1603,14 @@ private class VehicleGroups {
     /** The cluster each vehicle on its way was in during the last frame (see findClusters), so pairs hold together. */
     val clusterOf = HashMap<String, String>()
 
+    // The rows beside the stations below CITY_ZOOM as last laid out (see FAR_ROWS_MILLIS): for
+    // which vehicles, when, the stops and the layouts of their rows.
+    var farVehicles: List<Vehicle>? = null
+    var farRowsAt = 0L
+    var farVersion = -1
+    var farAnchors: HashMap<String, GroupAnchor> = HashMap()
+    var farLayouts: Map<String, GroupLayout>? = null
+
     /** The stop each trip of [vehicles] may stand at during this refresh. */
     fun candidates(vehicles: List<Vehicle>): Map<String, GroupAnchor> {
         if (vehicles !== this.vehicles || version != VehicleAnchors.version) {
@@ -1516,6 +1623,9 @@ private class VehicleGroups {
         return candidates
     }
 }
+
+// Below CITY_ZOOM the rows of dots beside the stations are laid out anew at most this often (see pushVehicles).
+private const val FAR_ROWS_MILLIS = 400L
 
 // How softly a vehicle moves into its row beside a stop and out of it: the time constant, in ms.
 private const val GROUP_EASE_MILLIS = 250.0
@@ -1545,7 +1655,10 @@ private const val VEHICLE_APPEAR_MILLIS = 320f
 private fun appearShare(born: Long, from: Long, millis: Long): Float {
     if (from == APPEAR_AT_ONCE) return 1f
     if (from == APPEAR_HELD) return 0f
-    val t = ((millis - maxOf(born, from)) / VEHICLE_APPEAR_MILLIS).coerceIn(0f, 1f)
+    // At the system's animator duration scale; there at once without animations.
+    val scale = SystemAnimation.now
+    if (scale <= 0f) return 1f
+    val t = ((millis - maxOf(born, from)) / (VEHICLE_APPEAR_MILLIS * scale)).coerceIn(0f, 1f)
     return 1f - (1f - t) * (1f - t)
 }
 
@@ -1575,10 +1688,16 @@ private fun pushVehicles(
     var gliding = false
     val seen = HashSet<String>()
     val candidates = groups.candidates(vehicles)
+    // Below CITY_ZOOM the rows of dots beside the stations (across the whole city) are laid out
+    // anew only every FAR_ROWS_MILLIS or with new vehicles; in between each vehicle keeps its
+    // row: dots this far out move too little for a row to change at the pace of the pushes.
+    val farRows = zoom < CITY_ZOOM
+    val keepRows = farRows && groups.farLayouts != null && vehicles === groups.farVehicles &&
+        groups.farVersion == VehicleAnchors.version && millis - groups.farRowsAt < FAR_ROWS_MILLIS
     // First where each vehicle is, and which of them stand at a stop now.
     val placed = ArrayList<Pair<Vehicle, VehicleMotion>>(vehicles.size)
     val members = HashMap<String, MutableList<GroupMember>>()
-    val anchors = HashMap<String, GroupAnchor>()
+    val anchors = if (keepRows) groups.farAnchors else HashMap()
     for (vehicle in vehicles) {
         if (vehicle.path.isEmpty() || !seen.add(vehicle.tripId)) continue
         val motion = motions.getOrPut(vehicle.tripId) { VehicleMotion(vehicle.path, millis) }
@@ -1604,8 +1723,13 @@ private fun pushVehicles(
         }
         // Rows beside a stop wherever the stop signs are drawn: as badges close up, as dots in
         // the same rows further out, so a vehicle at a station stays right of its sign.
-        val anchor = if (zoom < CITY_ZOOM) null else candidates[vehicle.tripId]?.takeIf { isAt(it, motion.spot[0], motion.spot[1]) }
-        if (anchor != null) {
+        // Further out still, as far as dots are drawn, in rows that shrink toward the station (see dotRowScale).
+        val anchor = when {
+            zoom < VEHICLE_DOT_MIN_ZOOM -> null
+            keepRows -> motion.anchorId?.let { anchors[it] }
+            else -> candidates[vehicle.tripId]?.takeIf { isAt(it, motion.spot[0], motion.spot[1]) }
+        }
+        if (anchor != null && !keepRows) {
             anchors[anchor.id] = anchor
             // Laid out by the text the badge is drawn with, so a long one stays in its row.
             members.getOrPut(anchor.id) { ArrayList(4) }.add(GroupMember(vehicle.tripId, look.rank, look.label, vehicle.direction))
@@ -1642,12 +1766,21 @@ private fun pushVehicles(
             members[cluster.id] = group
         }
     }
-    val layouts = members.mapValues { (id, group) ->
+    val layouts = groups.farLayouts.takeIf { keepRows } ?: members.mapValues { (id, group) ->
         val anchor = anchors.getValue(id)
         // Below the green name from STOP_NAME_ZOOM on, where it stands instead of the "H".
         val below = if (zoom >= STOP_NAME_ZOOM) anchor.nameHalfHeightDp else 0f
         // Below the sign of disruptions on the sign's corner, where it has one.
         layoutGroup(anchor.halfWidthDp, group, below, topDp = NoticeSignSpots.columnTops[id])
+    }
+    if (farRows && !keepRows) {
+        groups.farVehicles = vehicles
+        groups.farRowsAt = millis
+        groups.farVersion = VehicleAnchors.version
+        groups.farAnchors = anchors
+        groups.farLayouts = layouts
+    } else if (!farRows) {
+        groups.farLayouts = null
     }
     // The columns take their room: the pills of the marked stop move aside or show as their pin
     // (see groupColumnBox). Only where the badges are drawn.
@@ -1664,7 +1797,7 @@ private fun pushVehicles(
     val dotTier = zoom < VEHICLE_DOT_MAX_ZOOM
     var changed = vehicles !== gate.vehicles || direction != gate.direction || layouts != gate.layouts ||
         bearingApart(mapBearing, gate.bearing) >= VEHICLE_MIN_TURN_DEGREES || dotTier != gate.dotTier
-    var moved = dotDriftDp(gate.dotReachDp, gate.zoom, zoom)
+    var moved = dotRowDriftDp(gate.dotReachDp, gate.zoom, zoom, CITY_ZOOM)
     for ((vehicle, motion) in placed) {
         val anchor = motion.anchorId?.let { anchors[it] }
         val layout = motion.anchorId?.let { layouts[it] }
@@ -1754,7 +1887,12 @@ private fun pushVehicles(
 
     AllocProbe.begin(AllocProbe.VEHICLE_PUSH)
     val features = ArrayList<Feature>(placed.size + layouts.size)
+    // What each feature is made from, compared with what its last one was made from (see FeatureInputs).
+    val featureValues = DoubleArray(FeatureInputs.SLOTS)
+    val featureRefs = arrayOfNulls<Any>(FeatureInputs.OBJECT_SLOTS)
     var dotReach = 0f
+    // Far out the rows of dots shrink toward their station (see dotRowScale).
+    val rowScale = dotRowScale(zoom, CITY_ZOOM)
     for ((vehicle, motion) in placed) {
         motion.pushed[0] = motion.at[0]
         motion.pushed[1] = motion.at[1]
@@ -1764,18 +1902,50 @@ private fun pushVehicles(
         // the sign where its badge stands (or its chip "+N", for one hidden behind it).
         val inRow = dotTier && (motion.offset[0] != 0f || motion.offset[1] != 0f)
         if (inRow) {
-            offsetByDp(motion.at[0], motion.at[1], motion.offset[0], motion.offset[1], zoom, mapBearing, motion.dotAt)
-            val dot = JsonObject()
-            dot.add("trip", look.tripValue)
-            dot.add("color", look.colorValue)
-            dot.add("major", look.majorValue)
-            dot.add("rank", look.rankValue)
-            dot.add("dot", LIVE_VALUE)
-            if (motion.share < 1f) dot.addProperty("op", motion.share)
-            features.add(Feature.fromGeometry(Point.fromLngLat(motion.dotAt[1], motion.dotAt[0]), dot))
+            offsetByDp(motion.at[0], motion.at[1], motion.offset[0] * rowScale, motion.offset[1] * rowScale, zoom, mapBearing, motion.dotAt)
+            featureValues.fill(Double.NaN)
+            featureValues[0] = motion.dotAt[0]
+            featureValues[1] = motion.dotAt[1]
+            featureValues[2] = if (motion.share < 1f) motion.share.toDouble() else 1.0
+            featureRefs.fill(null)
+            featureRefs[0] = look
+            val known = motion.dotFeature.takeIf { it.same(featureValues, featureRefs) }?.feature as? Feature
+            if (known != null) {
+                features.add(known)
+            } else {
+                val dot = JsonObject()
+                dot.add("trip", look.tripValue)
+                dot.add("color", look.colorValue)
+                dot.add("major", look.majorValue)
+                dot.add("rank", look.rankValue)
+                dot.add("dot", LIVE_VALUE)
+                if (motion.share < 1f) dot.addProperty("op", motion.share)
+                val made = Feature.fromGeometry(Point.fromLngLat(motion.dotAt[1], motion.dotAt[0]), dot)
+                motion.dotFeature.keep(made, featureValues, featureRefs)
+                features.add(made)
+            }
             dotReach = maxOf(dotReach, abs(motion.offset[0]) + abs(motion.offset[1]))
         }
         if (motion.hidden) continue
+        val badgeValue = look.badge(style) { badges.ensure(style, look.argb, look.hex, vehicle.realtime, density) }
+        val noseShown = direction != null && !motion.nose.isNaN()
+        featureValues[0] = motion.at[0]
+        featureValues[1] = motion.at[1]
+        featureValues[2] = if (noseShown) motion.nose else Double.NaN
+        featureValues[3] = if (noseShown) mapBearing else Double.NaN
+        featureValues[4] = if (motion.share < 1f) motion.share.toDouble() else 1.0
+        featureValues[5] = motion.offset[0].toDouble()
+        featureValues[6] = motion.offset[1].toDouble()
+        featureValues[7] = (if (vehicle.realtime) 1.0 else 0.0) + (if (inRow) 2.0 else 0.0)
+        featureRefs[0] = look
+        featureRefs[1] = badgeValue
+        featureRefs[2] = direction
+        featureRefs[3] = null
+        val knownBadge = motion.badgeFeature.takeIf { it.same(featureValues, featureRefs) }?.feature as? Feature
+        if (knownBadge != null) {
+            features.add(knownBadge)
+            continue
+        }
         // The values made once per vehicle are shared by its features (they are only read,
         // also by the map's converter, which reads them after this returns).
         val properties = JsonObject()
@@ -1791,11 +1961,12 @@ private fun pushVehicles(
         // Its dot is the feature of its own above: this one is left to the badges.
         if (inRow) properties.add("anch", LIVE_VALUE)
         if (motion.share < 1f) properties.addProperty("op", motion.share)
-        properties.add("badge", look.badge(style) { badges.ensure(style, look.argb, look.hex, vehicle.realtime, density) })
+        properties.add("badge", badgeValue)
         properties.add("toff", look.textOffset(motion.offset[0], motion.offset[1], BADGE_TEXT_SP))
         properties.add("poff", look.pulseOffset(motion.offset[0], motion.offset[1]))
         val feature = Feature.fromGeometry(Point.fromLngLat(motion.at[1], motion.at[0]), properties)
         if (direction != null && !motion.nose.isNaN()) direction.drawing.annotate(feature, look.label, motion.nose, mapBearing)
+        motion.badgeFeature.keep(feature, featureValues, featureRefs)
         features.add(feature)
     }
     // The chips "+N" of stops with more vehicles than rows, in grey; drawn always where a
@@ -1828,7 +1999,8 @@ private fun pushVehicles(
         if (introShare < 1f) feature.addNumberProperty("op", introShare)
         features.add(feature)
     }
-    source.setGeoJson(FeatureCollection.fromFeatures(features))
+    source.setGeoJsonSafely(FeatureCollection.fromFeatures(features))
+    JankMeter.markMap(MAP_CAUSE_VEHICLES)
     AllocProbe.end(AllocProbe.VEHICLE_PUSH, features.size)
     gate.vehicles = vehicles
     gate.direction = direction
@@ -2052,7 +2224,7 @@ private fun putStopSigns(source: GeoJsonSource, stops: List<Stop>, named: Boolea
         }
         features.add(feature)
     }
-    source.setGeoJson(FeatureCollection.fromFeatures(features))
+    source.setGeoJsonSafely(FeatureCollection.fromFeatures(features))
     NoticeSignSpots.signs = spots
     // The station signs win over the marked stop's pills, which keep clear of them.
     setPillSignBoxes(
@@ -2152,7 +2324,7 @@ fun setSelectedStop(style: Style, stop: Stop?) {
     val latitude = stop?.latitude
     val longitude = stop?.longitude
     if (stop == null || latitude == null || longitude == null) {
-        source.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+        source.setGeoJsonSafely(FeatureCollection.fromFeatures(emptyList<Feature>()))
         setPillMarkedSign(emptyList())
         NoticeSignSpots.marked = null
         if (VehicleAnchors.selected != null) {
@@ -2175,7 +2347,7 @@ fun setSelectedStop(style: Style, stop: Stop?) {
         VehicleAnchors.version++
     }
     feature.addStringProperty("name", stop.name.shortStopName())
-    source.setGeoJson(FeatureCollection.fromFeatures(listOf(feature)))
+    source.setGeoJsonSafely(FeatureCollection.fromFeatures(listOf(feature)))
     // Its sign with the ring, for a sign of disruptions on its corner (see MapNoticeLayer).
     NoticeSignSpots.marked = NoticeSignSpot(
         id = stop.id,

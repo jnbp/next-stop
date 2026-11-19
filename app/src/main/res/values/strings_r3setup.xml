@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Setup: the short welcome with its two paths. -->
+    <string name="setup_welcome_line">Live connections across Germany, including the ones you would otherwise miss.</string>
+    <string name="setup_quick_start">Quick start</string>
+    <string name="setup_quick_view_text">You can change this and everything else later in the settings.</string>
+    <string name="setup_quick_basics_title">Two permissions, then off you go</string>
+    <string name="setup_quick_basics_text">Your position to start where you are, notifications for the live trip on your way. Both are optional.</string>
+    <!-- Setup: the watch page without a watch. -->
+    <string name="setup_watch_none_short">No watch connected right now. That is fine.</string>
+    <string name="setup_watch_none_title">Do you have a Wear OS watch?</string>
+    <string name="setup_watch_none_text">Next Stop is available for the watch too. You can install it there any time later.</string>
+    <string name="setup_watch_store_link">Open in the Play Store</string>
+</resources>

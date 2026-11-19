@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A complication whose departures have all left and that got no new data yet (long slot, #235). -->
+    <string name="r7wear_tap_for_current">Antippen für aktuelle Zeiten</string>
+</resources>

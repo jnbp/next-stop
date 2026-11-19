@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Round 4 of the companion views (ui/companion): the whole journey as one timeline, compact blue box, one menu. -->
+<resources>
+    <string name="r4c_change_connection">Anschluss wechseln</string>
+    <string name="r4c_ride_done">Gefahren</string>
+    <plurals name="r4c_ride_stops">
+        <item quantity="one">%d Halt</item>
+        <item quantity="other">%d Halte</item>
+    </plurals>
+    <string name="r4c_next_change">↘ %1$s · %2$s</string>
+    <string name="r4c_source_hint">Zeiten: %1$s</string>
+</resources>

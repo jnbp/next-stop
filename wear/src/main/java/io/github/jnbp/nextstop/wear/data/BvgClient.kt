@@ -68,8 +68,8 @@ class BvgClient(baseUrl: String = DEFAULT_URL) {
         // With remarks: they tell an additional run ("Zusatzfahrt"), as a replacement S1 is sent.
         val text = fetch("/stops/${segment(stopId)}/departures?results=$results&duration=60&remarks=true&language=$language")
         return parse("departures") {
-            val root = JSONObject(text)
-            val list = root.optJSONArray("departures") ?: JSONArray()
+            // An answer without its list is a failure, never an empty board (#235).
+            val list = departuresOfAnswer(JSONObject(text))
             departureBoard((0 until list.length()).map { parseDeparture(list.getJSONObject(it)) })
         }
     }
@@ -82,11 +82,12 @@ class BvgClient(baseUrl: String = DEFAULT_URL) {
         to: Place,
         results: Int = 3,
         comfort: TransferComfort = TransferComfort.Normal,
+        options: PhoneSearchOptions = PhoneSearchOptions(),
     ): List<Journey> {
         val from = "from.latitude=$latitude&from.longitude=$longitude&from.address=" + URLEncoder.encode(fromName, "UTF-8")
         val text = fetch(
             "/journeys?$from&${placeQuery("to", to)}&results=$results&stopovers=true&remarks=false&polylines=false" +
-                "&transferTime=${comfort.minutes}&language=$language",
+                "&transferTime=${comfort.minutes}&language=$language" + options.hafasQuery(),
         )
         return parse("journeys") {
             val root = JSONObject(text)
@@ -98,16 +99,18 @@ class BvgClient(baseUrl: String = DEFAULT_URL) {
     /**
      * Journeys from [from] to [to], leaving now: a stop by its id, a position (as the user's own,
      * "address:lat,lon") or a place of another provider by its position and name (see [placeQuery]).
+     * With the walking pace, step-free ways and products of the phone's searches ([options]).
      */
     suspend fun journeys(
         from: Place,
         to: Place,
         results: Int = 3,
         comfort: TransferComfort = TransferComfort.Normal,
+        options: PhoneSearchOptions = PhoneSearchOptions(),
     ): List<Journey> {
         val text = fetch(
             "/journeys?${placeQuery("from", from)}&${placeQuery("to", to)}&results=$results&stopovers=true&remarks=false" +
-                "&polylines=false&transferTime=${comfort.minutes}&language=$language",
+                "&polylines=false&transferTime=${comfort.minutes}&language=$language" + options.hafasQuery(),
         )
         return parse("journeys") {
             val root = JSONObject(text)
@@ -201,7 +204,18 @@ class BvgClient(baseUrl: String = DEFAULT_URL) {
             cancelled = item.optBoolean("cancelled", false),
             plannedTime = item.millis("plannedWhen"),
             additional = isAdditional(item.optJSONArray("remarks")),
+            warnings = warningsOf(item.optJSONArray("remarks")),
         )
+    }
+
+    /** The short texts of the remarks of type "warning" (disruptions, construction work), each once. */
+    private fun warningsOf(remarks: JSONArray?): List<String> {
+        if (remarks == null) return emptyList()
+        return (0 until remarks.length()).mapNotNull { index ->
+            val remark = remarks.optJSONObject(index) ?: return@mapNotNull null
+            if (remark.str("type") != "warning") return@mapNotNull null
+            (remark.str("summary") ?: remark.str("text"))?.trim()?.takeIf { it.isNotEmpty() }
+        }.distinct()
     }
 
     /** True when the remarks of a run announce it as an additional run ("Zusatzfahrt"). */
@@ -239,6 +253,7 @@ class BvgClient(baseUrl: String = DEFAULT_URL) {
             arrival = arrival,
             departureDelayMinutes = if (item.isNull("departureDelay")) 0 else item.optInt("departureDelay") / 60,
             arrivalDelayMinutes = if (item.isNull("arrivalDelay")) 0 else item.optInt("arrivalDelay") / 60,
+            realtime = !item.isNull("departureDelay") || !item.isNull("arrivalDelay"),
             platform = item.str("departurePlatform"),
             direction = item.str("direction")?.let { localStopTerms(it) },
             cancelled = item.optBoolean("cancelled", false),
@@ -265,7 +280,7 @@ class BvgClient(baseUrl: String = DEFAULT_URL) {
     private fun lineName(line: JSONObject?): String? {
         val json = line ?: return null
         val name = json.str("name")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        return rapidLineName(name.replace(BUS_WORD, "").ifEmpty { name }, json.str("product") ?: "")
+        return withoutTrainNumberZeros(rapidLineName(name.replace(BUS_WORD, "").ifEmpty { name }, json.str("product") ?: ""))
     }
 
     private fun placeName(place: JSONObject?): String = place?.str("name") ?: place?.str("address") ?: ""

@@ -68,4 +68,28 @@ class JourneySelectionTest {
         // Journeys of other times stay.
         assertEquals(all, journeySelection(all, TransferComfort.VeryRisky).shown)
     }
+
+    @Test
+    fun aKnappTwinWithTheSameArrivalIsLeftOut() {
+        // #130: the same lines and arrival as the relaxed journey, leaving later with no time to spare.
+        val late = Journey(listOf(ride(a, hub, 7, 17), ride(hub, b, 20, 30)), foundLevel = TransferComfort.Risky)
+        val selection = journeySelection(listOf(relaxed, late), TransferComfort.VeryRisky)
+        assertEquals(listOf(relaxed), selection.shown)
+        assertEquals(emptyList<Journey>(), selection.filtered)
+    }
+
+    @Test
+    fun aCancelledWayToTheSameTrainIsNoColumnBesideTheRunningOne() {
+        // #233: the same long-distance run boarded at two stations; at the second it skips its stop.
+        val example = Stop("x:hbf", "Example Hbf", 50.0, 10.0, null)
+        val south = Stop("x:sued", "Example Süd", 50.0, 10.0, null)
+        val town = Stop("x:ziel", "Zielstadt Bahnhof", 49.0, 9.0, null)
+        fun train(from: Stop, leaves: Long, cancelled: Boolean) = Leg(
+            "ICE 277", "express", false, from.name, town.name, at(leaves), at(leaves), at(480), at(480),
+            null, null, null, cancelled, fromPlace = from, toPlace = town, tripId = "ice",
+        )
+        val running = Journey(listOf(ride(a, example, 0, 15, trip = "bus1"), train(example, 20, false)))
+        val skipped = Journey(listOf(ride(a, south, 6, 22, trip = "bus2"), train(south, 28, true)))
+        assertEquals(listOf(running), journeySelection(listOf(running, skipped), TransferComfort.Risky).shown)
+    }
 }

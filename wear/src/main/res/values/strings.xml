@@ -11,11 +11,12 @@
     <string name="retry">Retry</string>
     <string name="no_favorites">No favourites yet. Add some in the app on the phone.</string>
     <string name="now">now</string>
-    <string name="in_min">%d min</string>
-    <string name="in_hours">%1$d h %2$d min</string>
-    <string name="in_whole_hours">%1$d h</string>
+    <string name="in_min">%d′</string>
+    <string name="in_hours">%1$d:%2$02d h</string>
+    <string name="in_whole_hours">%1$d:00 h</string>
     <string name="min_short">%d\'</string>
     <string name="platform">Pl. %s</string>
+    <string name="platform_bay">Bay %s</string>
     <string name="cancelled">cancelled</string>
     <string name="delay_plus">%+d</string>
     <string name="from_phone_position">Position of the phone</string>
@@ -30,7 +31,7 @@
     <!-- A destination after an arrow where room is short; read out as "towards". -->
     <string name="towards_arrow">→ %s</string>
     <string name="stops_left">%d stops</string>
-    <string name="next_stop_get_off">Get off at the next stop!</string>
+    <string name="next_stop_get_off">Get off at the next stop</string>
     <!-- A long last hop: the time left until getting off, then the clock time. -->
     <string name="get_off_in_at">Get off in %1$s, at %2$s</string>
     <string name="change_in_at">Change in %1$s, at %2$s</string>
@@ -49,7 +50,7 @@
     <string name="tile_description">The next step of your trip, or departures of your favourite stop.</string>
     <string name="tile_empty">Add a favourite stop on the phone.</string>
     <string name="open">Open</string>
-    <string name="complication_label">Next departure</string>
+    <string name="complication_label">Automatic: departures or trip</string>
     <string name="alert_channel">Get off alert</string>
     <string name="type_or_speak">Type or speak</string>
     <string name="where_to">Where to?</string>
@@ -60,7 +61,7 @@
     <string name="phone_not_connected">Phone not connected – open Next Stop on the phone.</string>
     <string name="phone_no_app">Next Stop not found on the phone. Install or open it there.</string>
     <string name="phone_waiting">Phone connected, no places yet. Open Next Stop on the phone.</string>
-    <string name="phone_off_info">Phone not connected – favourites and companion aren\'t synced. Departures still work.</string>
+    <string name="phone_off_info">Phone not connected – favourites and live trip aren\'t synced. Departures still work.</string>
     <string name="phone_off_icon">Phone not connected</string>
     <string name="phone_off_close">Close</string>
     <string name="reconnect">Connect again</string>
@@ -75,11 +76,11 @@
     <string name="show_more">Show more (%d)</string>
     <string name="show_less">Show less</string>
     <string name="age_now">just now</string>
-    <string name="age_minutes">%d min ago</string>
+    <string name="age_minutes">%d′ ago</string>
     <string name="age_at">at %s</string>
     <string name="last_loaded">Last loaded %s</string>
     <string name="alert_channel_change">Change alert</string>
-    <string name="next_stop_change">Change at the next stop!</string>
+    <string name="next_stop_change">Change at the next stop</string>
     <string name="missed_it">Missed it</string>
     <string name="missed_it_failed">Destination not found – search it under Route.</string>
     <string name="trip_channel">Current trip</string>
@@ -102,17 +103,17 @@
     <string name="change_label">Change</string>
     <string name="then_label">Then</string>
     <string name="departs_at">dep. %1$s · %2$s</string>
-    <string name="walk_minutes">%d min walk</string>
+    <string name="walk_minutes">%d′\u00A0walk</string>
     <string name="map_show">Map</string>
     <string name="map_hide">Hide map</string>
-    <string name="walk_distance">%1$d m · %2$d min on foot</string>
-    <string name="cycle_distance">%1$d m · %2$d min by bike</string>
+    <string name="walk_distance">%1$d\u00A0m · %2$d′\u00A0on\u00A0foot</string>
+    <string name="cycle_distance">%1$d\u00A0m · %2$d′\u00A0by\u00A0bike</string>
     <string name="alight_reminders">Reminder before getting off</string>
     <string name="on">On</string>
     <string name="off">Off</string>
     <!-- The trip companion: countdown, on board, change card, overview. -->
     <string name="overview">Overview</string>
-    <string name="depart_in">Departs in %d min</string>
+    <string name="depart_in">Departs in %d′</string>
     <string name="depart_in_seconds">Departs in %d s</string>
     <string name="depart_now">Departing now</string>
     <string name="depart_at">Departs %s</string>
@@ -123,14 +124,14 @@
     <string name="board_middle_estimated">Board around the middle</string>
     <string name="board_front_estimated">Board towards the front</string>
     <string name="get_off_in_stops">Get off in %d stops</string>
-    <string name="remaining_min">%d min left</string>
+    <string name="remaining_min">%d′ left</string>
     <string name="arrive_left">arr. %1$s · %2$s</string>
     <string name="arrive_clock">arr. %s</string>
     <string name="next_stop_name">Next: %s</string>
-    <string name="walk_on_foot">%d min on foot</string>
-    <string name="cycle_minutes">%d min by bike</string>
+    <string name="walk_on_foot">%d′\u00A0on\u00A0foot</string>
+    <string name="cycle_minutes">%d′\u00A0by\u00A0bike</string>
     <string name="no_walk">no walk</string>
-    <string name="rating_spare">%1$s · %2$s min to spare</string>
+    <string name="rating_spare">%1$s · %2$s′ to spare</string>
     <string name="to_destination">To the destination</string>
     <string name="to_first_stop">To the stop</string>
     <!-- The start page and its settings. -->
@@ -139,7 +140,7 @@
     <string name="map">Map</string>
     <string name="map_hint">Tap a stop</string>
     <string name="map_attribution" translatable="false">© OSM</string>
-    <string name="rating_gap">%1$s · %2$d min to change</string>
+    <string name="rating_gap">%1$s · %2$d′ to change</string>
     <string name="rating_gap_span">%1$s · %2$s to change</string>
     <string name="map_finding_position">Finding your position…</string>
     <string name="map_loading_stops">Loading stops…</string>
@@ -147,8 +148,8 @@
     <string name="map_from_phone">Map from phone…</string>
     <string name="map_no_phone">No phone connected</string>
     <string name="map_retry">Map not loaded · Try again</string>
-    <string name="walk_meters">%d m on foot</string>
-    <string name="cycle_meters">%d m by bike</string>
+    <string name="walk_meters">%d\u00A0m\u00A0on\u00A0foot</string>
+    <string name="cycle_meters">%d\u00A0m\u00A0by\u00A0bike</string>
     <string name="same_platform">same platform</string>
     <!-- The style of the map pictures of the phone (watch setting). -->
     <string name="map_style">Map style</string>
@@ -194,4 +195,44 @@
     <!-- The kind of vehicle a line badge shows as a small icon where its name does not tell it, read out before the name. -->
     <string name="mode_bus">Bus</string>
     <string name="mode_train">Train</string>
+    <!-- Complications: the names in the picker of the watch face, and their texts. -->
+    <string name="complication_favorite_label">Favourite stop</string>
+    <string name="complication_companion_label">Live trip</string>
+    <string name="complication_home_label">Next connection home</string>
+    <string name="complication_disruptions_label">Disruptions</string>
+    <string name="complication_quick_label">Quick start: route search</string>
+    <string name="complication_quick_long">Search a connection</string>
+    <string name="complication_no_trip">No trip running</string>
+    <string name="complication_failed">Could not load</string>
+    <string name="complication_no_disruptions">No disruptions</string>
+    <!-- The lines of a connection home, the countdown to it (as the watch face writes it) and the arrival time. -->
+    <string name="complication_home_long">%1$s in %2$s · arr. %3$s</string>
+    <plurals name="complication_cancelled">
+        <item quantity="one">%d run cancelled</item>
+        <item quantity="other">%d runs cancelled</item>
+    </plurals>
+    <!-- A trip started on the phone opens the companion on the watch (a setting, off by default). -->
+    <string name="open_companion_setting">Open live trip when the phone starts a trip</string>
+    <string name="trip_start_channel">Trip started on the phone</string>
+    <string name="trip_started_title">Your trip has started</string>
+    <string name="trip_started_text">Tap to open the live trip</string>
+    <string name="wake_channel">Wake-up alarm</string>
+    <string name="wake_title">Wake up!</string>
+    <string name="wake_text">Get off at %1$s at %2$s</string>
+    <string name="wake_confirm">I\'m awake</string>
+    <string name="companion_status_never">No trip state from the phone received yet</string>
+    <string name="companion_status_running">Trip from the phone, last state %1$s</string>
+    <string name="companion_status_none">No trip on the phone (last state %1$s)</string>
+    <string name="companion_status_no_phone">No phone connected</string>
+    <string name="companion_status_no_phone_app">Next Stop missing on the phone (or signed differently)</string>
+    <!-- The last try to open the companion: time and reason. -->
+    <string name="companion_status_last">Last %1$s: %2$s</string>
+    <string name="companion_outcome_opened">opened</string>
+    <string name="companion_outcome_in_front">app was open already</string>
+    <string name="companion_outcome_setting_off">option "Open live trip" is off</string>
+    <string name="companion_outcome_notifications_off">Notifications not allowed</string>
+    <string name="companion_outcome_channel_muted">Channel "Trip started on the phone" muted</string>
+    <string name="companion_outcome_no_full_screen">Full screen not allowed (notice only)</string>
+    <string name="step_wait">Wait for %1$s at %2$s</string>
+    <string name="step_missed">Missed %1$s?</string>
 </resources>

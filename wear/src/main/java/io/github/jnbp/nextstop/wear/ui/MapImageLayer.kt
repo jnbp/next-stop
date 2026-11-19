@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -51,8 +52,10 @@ import io.github.jnbp.nextstop.wear.data.WatchStore
  * The map picture of the phone to draw ([image], null: the sketch alone) and how the last
  * request went ([status]: [MapImageStatus.Waiting] also while a failure is retried quietly, see
  * [MapImageRetry]); [retry] asks the phone again at once (the "Try again" of the status line).
+ * [sharp]: the picture is the full one of the view at its scale, not a stand-in stretched over
+ * it (a kept picture of another zoom, the quick one) while the sharp one is on its way (#149).
  */
-class MapImageState(val image: MapImage?, val status: MapImageStatus, val retry: () -> Unit = {})
+class MapImageState(val image: MapImage?, val status: MapImageStatus, val retry: () -> Unit = {}, val sharp: Boolean = image != null)
 
 /** Whether the map pictures are dark: the watch's map style setting, and always in [ambient] mode. */
 @Composable
@@ -146,7 +149,8 @@ fun rememberMapImage(slot: String, view: MapImageRequest?): MapImageState {
             }
         }
     }
-    return MapImageState(image, status, retry = { retries.trySend(Unit) })
+    val sharp = view != null && image?.covers(view) == true
+    return MapImageState(image, status, retry = { retries.trySend(Unit) }, sharp = sharp)
 }
 
 /**
@@ -210,24 +214,30 @@ fun TextMeasurer.measureAttribution(text: String, dark: Boolean): TextLayoutResu
     measure(text, TextStyle(color = if (dark) Color(0xFFBDBDBD) else Color(0xFF424242), fontSize = 8.sp))
 
 /**
- * Draws the attribution [text] on a faint ground: at the right edge in the middle (seen on a
- * round screen too) or, with [corner], in the lower right corner (a small map in a card).
+ * Draws the attribution [text] on a ground of its own (opaque enough that a label of the
+ * picture under it does not run through it, #149): at the right edge in the middle (seen on a
+ * round screen too) or, with [corner], in the upper left corner of a small map in a card (the
+ * north arrow has the upper right one; the foot often has the station sign of the target).
  */
 fun DrawScope.drawMapAttribution(text: TextLayoutResult, dark: Boolean, corner: Boolean = false) {
     val pad = 2.dp.toPx()
     val textSize = Size(text.size.width.toFloat(), text.size.height.toFloat())
     val topLeft = if (corner) {
-        Offset(size.width - textSize.width - 8.dp.toPx(), size.height - textSize.height - 4.dp.toPx())
+        Offset(8.dp.toPx(), 5.dp.toPx())
     } else {
         Offset(size.width - textSize.width - 6.dp.toPx(), size.height / 2 - textSize.height / 2)
     }
-    drawRect(
-        color = if (dark) Color.Black.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.6f),
+    drawRoundRect(
+        color = if (dark) Color.Black.copy(alpha = ATTRIBUTION_GROUND_ALPHA) else Color.White.copy(alpha = ATTRIBUTION_GROUND_ALPHA),
         topLeft = Offset(topLeft.x - pad, topLeft.y),
         size = Size(textSize.width + 2 * pad, textSize.height),
+        cornerRadius = CornerRadius(textSize.height / 2),
     )
     drawText(text, topLeft = topLeft)
 }
+
+// The ground of "© OSM": almost opaque, so it reads over any label of the picture.
+private const val ATTRIBUTION_GROUND_ALPHA = 0.85f
 
 // The view rests this long before a new picture is asked for: a zoom or a drag ends first.
 const val MAP_IMAGE_DEBOUNCE_MILLIS = 400L

@@ -9,7 +9,7 @@
   --glass: rgba(255, 255, 255, 0.72); --glass-line: rgba(255, 255, 255, 0.9);
   --shadow: 0 18px 48px rgba(27, 42, 90, 0.13), 0 2px 8px rgba(27, 42, 90, 0.06);
   --soft: #E6ECFE; --radius: 28px; --ease: cubic-bezier(.2, .8, .2, 1);
-  --s1: #DE4DA4; --s5: #EB7405; --s41: #A9493A; --u2: #DA421E; --u6: #8C6DAB; --u7: #528DBA; --u8: #224F86; --u1: #7DAD4C; --u9: #F3791D;
+  --s1: #DE4DA4; --s5: #EB7405; --s41: #A9493A; --u2: #ED3C12; --u6: #504F87; --u7: #0279BD; --u8: #013F75; --u1: #419328; --u9: #F96815;
   --relaxed: #1B6B3A; --tight: #A3141F; --sprint: #7D0F4F;
   color-scheme: light dark;
   font-family: "Google Sans Flex", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

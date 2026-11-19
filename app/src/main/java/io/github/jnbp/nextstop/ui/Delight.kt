@@ -1,7 +1,6 @@
 package io.github.jnbp.nextstop.ui
 
 import android.os.SystemClock
-import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -18,14 +17,9 @@ import io.github.jnbp.nextstop.R
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.stringResource
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.StartOffset
-import androidx.compose.animation.core.StartOffsetType
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -68,7 +62,6 @@ import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -101,18 +94,11 @@ import androidx.compose.ui.graphics.Path
 /** Whether the system lets apps animate, for an animator duration scale of [durationScale]. */
 fun animationsAllowed(durationScale: Float): Boolean = durationScale > 0f
 
-/** False when the system has animations switched off ("Remove animations"). */
+/** False when the system has animations switched off ("Remove animations"), and while the battery saver saves at "Extrem". */
 @Composable
 fun rememberAnimationsOn(): Boolean {
-    val context = LocalContext.current
-    return remember(context) {
-        val scale = try {
-            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
-        } catch (e: Exception) {
-            1f
-        }
-        animationsAllowed(scale)
-    }
+    // The scale as the system has it now: follows a change in the developer options while the app is shown.
+    return animationsAllowed(SystemAnimation.scale.value) && !BatterySaver.extreme
 }
 
 /** How small a pressed button, chip or round button gets before it springs back. */
@@ -243,10 +229,6 @@ fun RollingText(
     }
 }
 
-/** Where the train of [TrainLoader] is, as the left edge of a train [trainWidth] wide on a track [trackWidth] wide. */
-fun trainOffset(progress: Float, trackWidth: Float, trainWidth: Float): Float =
-    -trainWidth + progress.coerceIn(0f, 1f) * (trackWidth + trainWidth)
-
 /**
  * The pace of the little train through one run, as the share of the way it has gone at [time]
  * (both 0..1): quick while it is still hidden, slowing as it comes in so its front is in sight
@@ -268,22 +250,20 @@ const val TRAIN_MAX_TRACK_SHARE = 0.5f
 fun trainUnit(preferred: Float, trackWidth: Float): Float =
     minOf(preferred, trackWidth * TRAIN_MAX_TRACK_SHARE / TRAIN_LENGTH_UNITS)
 
-// One run of the little train across its track, in milliseconds: a calm pass, slower than a
-// quick dash (2.0 s at an even speed went by too fast to see the front of the train).
-private const val TRAIN_RUN_MILLIS = 3_400
+// Passing the platform: never standing, slowest in the middle (see trainPass).
+private val TRAIN_EASING = Easing { trainPass(it) }
 
-// Ease out coming in, steady in the middle, ease in going out (see trainGlide). An even speed,
-// and an ease in and out before it, both spent too little of the run with the whole train in sight.
-private val TRAIN_EASING = Easing { trainGlide(it) }
+// The first run starts at its beginning: the train comes in, it is not standing there already.
+private const val TRAIN_FIRST_SHARE = 0f
 
 // Dp per unit of the drawing (a car is 30 x 18 units) on the phone.
 private const val TRAIN_SCALE = 0.75f
 
 /**
  * While content is on its way: a train of three plain rounded cars in the colour of the app
- * gliding over a dashed track from the left to the right, slowing down while it is in sight
- * ([TRAIN_EASING], [TRAIN_RUN_MILLIS]), again and again; it fades in at the left edge and out
- * at the right one. No wheels, no couplings, nothing bobs. Standing in the middle when the
+ * coming in over a dashed track from the left, slowing down through the middle as past a
+ * platform without ever stopping and speeding up again as it leaves to the right
+ * ([TRAIN_EASING], [TRAIN_RUN_MILLIS]), again and again; it fades in at the left edge and out at the right one. No wheels, no couplings, nothing bobs. Standing in the middle when the
  * system has animations switched off. [description] is read out to accessibility services
  * ("Loading…" when null; empty for none, where a text beside the train says it already).
  */
@@ -294,20 +274,22 @@ fun TrainLoader(
     width: Dp = 112.dp,
     description: String? = null,
 ) {
-    val on = rememberAnimationsOn()
-    val transition = rememberInfiniteTransition(label = "train")
-    val run by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(TRAIN_RUN_MILLIS, easing = TRAIN_EASING),
-            RepeatMode.Restart,
-            // The first run starts as if it had been going for a while: the train is already in
-            // sight, so even a quick search shows it rather than an empty track.
-            initialStartOffset = StartOffset((TRAIN_RUN_MILLIS * 0.4f).toInt(), StartOffsetType.FastForward),
-        ),
-        label = "trainRun",
-    )
+    // An idle animation: while the battery saver is active (or animations are off) the train
+    // stands in the middle and nothing runs per frame. The run is driven by an effect keyed on
+    // [on], so a change of the saver stops it at once, and turned back on it goes on from there.
+    val on = rememberIdleAnimationsOn()
+    // How far the train is through its run, linear; TRAIN_EASING is applied while drawing. The
+    // first run starts with the train coming in: its front is in sight within a few frames, as
+    // it enters at speed, so even a quick search shows it arriving rather than an empty track.
+    val run = remember { Animatable(TRAIN_FIRST_SHARE) }
+    LaunchedEffect(on) {
+        if (!on) return@LaunchedEffect
+        while (true) {
+            val left = ((1f - run.value) * TRAIN_RUN_MILLIS).toInt().coerceAtLeast(1)
+            run.animateTo(1f, tween(left, easing = LinearEasing))
+            run.snapTo(0f)
+        }
+    }
     val label = description ?: stringResource(R.string.loading)
     Canvas(
         modifier = modifier
@@ -319,7 +301,7 @@ fun TrainLoader(
     ) {
         val unit = trainUnit(TRAIN_SCALE.dp.toPx(), size.width)
         val trainWidth = TRAIN_LENGTH_UNITS * unit
-        val left = if (on) trainOffset(run, size.width, trainWidth) else (size.width - trainWidth) / 2
+        val left = if (on) trainOffset(TRAIN_EASING.transform(run.value), size.width, trainWidth) else (size.width - trainWidth) / 2
         drawMinimalTrain(left, unit, color, TRACK_GREY)
     }
 }

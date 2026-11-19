@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #220 compact ride card: the sun chip, while new, and its spoken description -->
+    <string name="r7card_sun_chip">Sun %1$s</string>
+    <string name="r7card_sun_chip_a11y">Sun on the %1$s in the direction of travel, shade on the %2$s</string>
+    <string name="r7card_bike_info_open">Explain bicycles</string>
+    <string name="r7card_bike_info">The operator says bicycles may be taken on this ride. Space is limited and may be restricted at busy times.</string>
+</resources>

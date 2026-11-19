@@ -1,0 +1,51 @@
+/* Draft of the redesigned project site (#15): less text, the key features as cards.
+   Builds on ../site/site.css (colours, fonts, glass, buttons); only the new parts are here.
+   Not deployed: .github/workflows/pages.yml leaves web/draft out. */
+
+.draft-flag { display: block; text-align: center; font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  background: var(--lime); color: var(--on-lime); padding: 6px 12px; }
+
+/* hero: one sentence, the buttons, the trip card beside it */
+.hero.slim { padding: 64px 0 40px; }
+.hero.slim .lead { max-width: 30ch; margin-bottom: 30px; }
+.btn.store { background: var(--card); color: var(--muted); border: 1px dashed var(--line); cursor: default; }
+.btn.store:hover { transform: none; }
+.btn.store svg { width: 18px; height: 18px; }
+
+/* the key features */
+.keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+@media (max-width: 980px) { .keys { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .keys { grid-template-columns: 1fr; } }
+.key { border-radius: 28px; padding: 18px 18px 22px; display: flex; flex-direction: column; gap: 6px; transition: transform .25s var(--ease); }
+.key:hover { transform: translateY(-4px); }
+.key .art { border-radius: 20px; background: var(--soft); aspect-ratio: 16 / 10; display: grid; place-items: center; margin-bottom: 12px; overflow: hidden; }
+.key .art svg { width: 100%; height: 100%; }
+.key h3 { font-size: 22px; line-height: 1.15; letter-spacing: -0.02em; margin: 0; }
+.key p { margin: 0; color: var(--muted); font-size: 16px; }
+
+/* colours inside the drawings (the CSP allows no inline styles) */
+.ink { fill: var(--ink); } .ink-s { stroke: var(--ink); }
+.card-f { fill: var(--card); } .line-s { stroke: var(--line); } .line-f { fill: var(--line); }
+.blue-f { fill: var(--blue); } .blue-s { stroke: var(--blue); }
+.lime-f { fill: var(--lime); } .lime-s { stroke: var(--lime); }
+.muted-f { fill: var(--muted); }
+.lvl-relaxed { fill: var(--relaxed); } .lvl-tight { fill: var(--tight); } .lvl-sprint { fill: var(--sprint); }
+.f-s5 { fill: var(--s5); } .f-u8 { fill: var(--u8); } .f-s1 { fill: var(--s1); } .f-u2 { fill: var(--u2); } .f-u7 { fill: var(--u7); }
+.s-s5 { stroke: var(--s5); } .s-u8 { stroke: var(--u8); } .s-s1 { stroke: var(--s1); } .s-u2 { stroke: var(--u2); } .s-u7 { stroke: var(--u7); } .s-u1 { stroke: var(--u1); }
+.pulse { animation: pulse 2.4s var(--ease) infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes pulse { 0% { opacity: .55; transform: scale(.6); } 100% { opacity: 0; transform: scale(2.2); } }
+.glide { animation: glide 5s var(--ease) infinite alternate; }
+@keyframes glide { from { transform: translateX(0); } to { transform: translateX(150px); } }
+
+/* "also on board" chips */
+.also { display: flex; flex-wrap: wrap; gap: 10px; margin: 28px 0 0; padding: 0; list-style: none; justify-content: center; }
+.also li { font-weight: 700; font-size: 15px; padding: 8px 16px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
+
+/* the promise: open source, free, no tracking */
+.promise { border-radius: 36px; padding: clamp(28px, 5vw, 48px); background: linear-gradient(135deg, #1B4FD8, #10308f); color: #fff; box-shadow: var(--shadow);
+  display: grid; grid-template-columns: repeat(3, 1fr) auto; gap: 20px; align-items: center; }
+.promise div { display: flex; align-items: center; gap: 14px; font-size: clamp(19px, 2.2vw, 24px); font-weight: 800; letter-spacing: -0.02em; }
+.promise svg { width: 40px; height: 40px; flex: none; }
+@media (max-width: 900px) { .promise { grid-template-columns: 1fr; } }
+section.tight { padding: 40px 0; }
+.center { text-align: center; margin-inline: auto; }

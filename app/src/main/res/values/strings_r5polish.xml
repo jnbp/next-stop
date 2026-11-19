@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Times are shown with a prime ("5′"); screen readers read them out with these words. -->
+    <plurals name="r5_minutes_spoken">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="r5_hours_spoken">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+    <!-- The explanation of the sunny side, opened once with its first hint (#90). -->
+    <string name="r5_sun_intro_text">The sun shines in on this side – sit on the other one if you want shade.</string>
+    <string name="r5_sun_intro_picture">A train with the sun on one side; a seat on the shady side</string>
+    <string name="r5_developer_sun_intro">Show the sunny side introduction</string>
+    <string name="r5_developer_sun_intro_text">Opens the explanation of the sunny side now, and again with the next hint of a ride.</string>
+</resources>

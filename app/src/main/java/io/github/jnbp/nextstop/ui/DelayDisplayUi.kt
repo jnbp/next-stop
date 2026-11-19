@@ -29,6 +29,7 @@ import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.LineColors
 import io.github.jnbp.nextstop.data.DelayDisplay
 import io.github.jnbp.nextstop.ui.theme.AppColors
+import java.time.OffsetDateTime
 
 /*
  * The choice how delays are shown (see DelayDisplay), for the settings and the setup: one row
@@ -42,6 +43,7 @@ fun delayDisplayLabel(display: DelayDisplay): String = stringResource(
         DelayDisplay.RealtimeAndDelay -> R.string.delay_display_realtime
         DelayDisplay.PlannedAndDelay -> R.string.delay_display_planned
         DelayDisplay.RealtimeOnly -> R.string.delay_display_only
+        DelayDisplay.StruckPlanned -> R.string.delay_display_struck
     },
 )
 
@@ -70,6 +72,7 @@ fun DelaySampleRow(display: DelayDisplay, modifier: Modifier = Modifier, ground:
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        if (display == DelayDisplay.StruckPlanned) StruckTime(SAMPLE_PLANNED_TIME, fontSize = 12.sp)
         Text(
             text = if (display == DelayDisplay.PlannedAndDelay) SAMPLE_PLANNED else SAMPLE_EXPECTED,
             color = if (display == DelayDisplay.PlannedAndDelay) AppColors.Ink else AppColors.DelayRed,
@@ -77,7 +80,7 @@ fun DelaySampleRow(display: DelayDisplay, modifier: Modifier = Modifier, ground:
             fontSize = 15.sp,
             maxLines = 1,
         )
-        if (display != DelayDisplay.RealtimeOnly) {
+        if (display.showsDelay) {
             Text(
                 text = stringResource(R.string.delay_short, SAMPLE_DELAY),
                 color = AppColors.OnDelayRed,
@@ -97,6 +100,7 @@ fun DelaySampleRow(display: DelayDisplay, modifier: Modifier = Modifier, ground:
 private const val SAMPLE_PLANNED = "12:07"
 private const val SAMPLE_EXPECTED = "12:09"
 private const val SAMPLE_DELAY = 2
+private val SAMPLE_PLANNED_TIME: OffsetDateTime = OffsetDateTime.parse("2024-01-01T12:07:00+01:00")
 
 /**
  * The three options of the delay display as rows to pick from, each with its name, one line
@@ -140,6 +144,7 @@ fun DelayDisplayPicker(selected: DelayDisplay, onSelect: (DelayDisplay) -> Unit,
                                     DelayDisplay.RealtimeAndDelay -> R.string.delay_display_realtime_text
                                     DelayDisplay.PlannedAndDelay -> R.string.delay_display_planned_text
                                     DelayDisplay.RealtimeOnly -> R.string.delay_display_only_text
+                                    DelayDisplay.StruckPlanned -> R.string.delay_display_struck_text
                                 },
                             ),
                             color = AppColors.Muted,

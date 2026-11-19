@@ -104,16 +104,10 @@ internal fun collapseRuns(items: List<String>): List<Pair<String, Int>> {
     return runs
 }
 
-// A leading word for a door in an OSM name ("Eingang Europaplatz", "Ausgang B", "Exit 3").
-private val DOOR_WORD = Regex(
-    "^(ein-?\\s*(/|und|&)\\s*ausgang|eingang|ausgang|zugang|aufgang|entrance|exit|way out)\\b[\\s:,.\\-–]*",
-    RegexOption.IGNORE_CASE,
-)
-
 /** The name of a door without a leading "Eingang", "Ausgang", "Exit" and the like: the summary says which it is. */
 internal fun doorName(label: String): String {
     // A name that is only the word ("Ausgang") leaves nothing: the plain word is said then.
-    return label.trim().replace(DOOR_WORD, "").trim()
+    return io.github.jnbp.nextstop.data.doorLabelWithoutWord(label)
 }
 
 private fun near(a: Pair<Double, Double>, b: Pair<Double, Double>): Boolean {

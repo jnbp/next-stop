@@ -14,6 +14,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import io.github.jnbp.nextstop.wear.complication.ComplicationKind
+import io.github.jnbp.nextstop.wear.complication.Complications
 import org.json.JSONObject
 
 /** Whether the watch reaches a phone with Next Stop on it. */
@@ -89,6 +91,15 @@ object WatchStore {
     /** Whether the watch app animates (see rememberWatchAnimationsOn); on by default. */
     val animations = MutableStateFlow(true)
 
+    /** Whether the watch opens the companion by itself when the phone starts a trip (see CompanionAutoOpen); off by default. */
+    val openCompanion = MutableStateFlow(false)
+
+    /** Whether the complications show their own icons (the trip's state, home, a warning), not the app's (see complicationIcon); off by default. */
+    val stateIcons = MutableStateFlow(false)
+
+    /** Whether the overview of the live trip shows the time travel pill when scrolled (see timeTravelShown); off by default. */
+    val crownTimeTravel = MutableStateFlow(false)
+
     /** The settings edited on the watch and on the phone, with the time of their last change (see WatchSettingsSync.kt). */
     private var settings: Map<String, SyncedSetting> = emptyMap()
 
@@ -115,6 +126,11 @@ object WatchStore {
         settings = parseSettings(prefs.getString(KEY_SETTINGS, null))
         liveDepartures.value = settingFlag(settings, WatchSettingKeys.LIVE_DEPARTURES, default = true)
         animations.value = settingFlag(settings, WatchSettingKeys.ANIMATIONS, default = true)
+        openCompanion.value = settingFlag(settings, WatchSettingKeys.OPEN_COMPANION, default = false)
+        stateIcons.value = settingFlag(settings, WatchSettingKeys.STATE_ICONS, default = false)
+        crownTimeTravel.value = settingFlag(settings, WatchSettingKeys.CROWN_TIME_TRAVEL, default = false)
+        lastPhoneTrip.value = PhoneTripSeen(prefs.getLong(KEY_PHONE_TRIP_AT, 0L), prefs.getBoolean(KEY_PHONE_TRIP_RUNNING, false))
+        CompanionAutoOpen.load(context)
         seedSettings(context)
     }
 
@@ -155,6 +171,34 @@ object WatchStore {
     fun chooseAnimations(context: Context, value: Boolean) {
         animations.value = value
         changeSetting(context, WatchSettingKeys.ANIMATIONS, value.toString())
+    }
+
+    /** Switches whether the companion opens by itself when the phone starts a trip; the phone gets the change too. */
+    fun chooseOpenCompanion(context: Context, value: Boolean) {
+        openCompanion.value = value
+        changeSetting(context, WatchSettingKeys.OPEN_COMPANION, value.toString())
+    }
+
+    /** Switches the own icons of the complications (#253, #282); the phone gets the change too. */
+    fun chooseStateIcons(context: Context, value: Boolean) {
+        val changed = stateIcons.value != value
+        stateIcons.value = value
+        changeSetting(context, WatchSettingKeys.STATE_ICONS, value.toString())
+        if (changed) onTripIconsChanged(context)
+    }
+
+    /** Switches the time travel pill of the trip overview (#254); the phone gets the change too. */
+    fun chooseCrownTimeTravel(context: Context, value: Boolean) {
+        crownTimeTravel.value = value
+        changeSetting(context, WatchSettingKeys.CROWN_TIME_TRAVEL, value.toString())
+    }
+
+    /** The complications of the trip and the ongoing activity draw their icons anew: one request each, no polling. */
+    private fun onTripIconsChanged(context: Context) {
+        val app = context.applicationContext
+        // Every complication shows the app's icon or its own (#282), not only those of the trip.
+        Complications.requestUpdate(app, *ComplicationKind.values())
+        TripOngoing.update(app, trip.value)
     }
 
     /**
@@ -198,6 +242,13 @@ object WatchStore {
         val edit = prefs.edit().putString(KEY_SETTINGS, settingsJson(merged))
         liveDepartures.value = settingFlag(merged, WatchSettingKeys.LIVE_DEPARTURES, default = true)
         animations.value = settingFlag(merged, WatchSettingKeys.ANIMATIONS, default = true)
+        openCompanion.value = settingFlag(merged, WatchSettingKeys.OPEN_COMPANION, default = false)
+        crownTimeTravel.value = settingFlag(merged, WatchSettingKeys.CROWN_TIME_TRAVEL, default = false)
+        val icons = settingFlag(merged, WatchSettingKeys.STATE_ICONS, default = false)
+        if (icons != stateIcons.value) {
+            stateIcons.value = icons
+            onTripIconsChanged(context)
+        }
         merged[WatchSettingKeys.MAP_STYLE]?.let { style ->
             val value = MapStyleSetting.parse(style.value)
             edit.putString(KEY_MAP_STYLE, value.name)
@@ -215,10 +266,11 @@ object WatchStore {
     /** The size in pixels and the edge to spare of the change map last shown ([large]: the full screen one), for prefetching its pictures. */
     fun changeMapSize(context: Context, large: Boolean): IntArray? =
         prefs(context).getString(if (large) KEY_CHANGE_MAP_FULL else KEY_CHANGE_MAP, null)
-            ?.split(',')?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 3 && it[0] > 0 && it[1] > 0 }?.toIntArray()
+            ?.split(',')?.mapNotNull { it.toIntOrNull() }?.takeIf { (it.size == 3 || it.size == 4) && it[0] > 0 && it[1] > 0 }?.toIntArray()
 
-    fun saveChangeMapSize(context: Context, large: Boolean, width: Int, height: Int, pad: Int) {
-        val text = "$width,$height,$pad"
+    /** Width, height, pad and (from #149) the bottom band in pixels of the change map last shown; an older entry has no band. */
+    fun saveChangeMapSize(context: Context, large: Boolean, width: Int, height: Int, pad: Int, bottomBand: Int = 0) {
+        val text = "$width,$height,$pad,$bottomBand"
         val key = if (large) KEY_CHANGE_MAP_FULL else KEY_CHANGE_MAP
         val prefs = prefs(context)
         if (prefs.getString(key, null) != text) prefs.edit().putString(key, text).apply()
@@ -292,6 +344,7 @@ object WatchStore {
     fun takePhoneTrip(context: Context, snapshot: TripSnapshot): Boolean {
         val now = System.currentTimeMillis()
         val running = snapshot.active && !snapshot.stale(now)
+        noteReceived(context, snapshot, running, now)
         if (running && endedOnWatch(context, snapshot)) {
             val app = context.applicationContext
             scope.launch { sendToPhone(app, Protocol.MSG_STOP_TRIP, ByteArray(0)) }
@@ -301,13 +354,29 @@ object WatchStore {
             saveTrip(context, snapshot)
             return true
         }
-        // The phone has no (live) trip: a trip of the phone shown here ends, one of the watch stays.
+        // The phone has no (live) trip: a trip of the phone shown here ends, one of the watch stays,
+        // and so does one of another phone (see endsShownTrip).
         val shown = trip.value
-        if (shown.active && shown.fromPhone) {
+        if (endsShownTrip(shown, snapshot, now)) {
             saveTrip(context, TripSnapshot.NONE)
             return true
         }
         return false
+    }
+
+    /**
+     * When a state of the phone's trip last came in (epoch ms, 0: never) and whether it was a
+     * running trip: shown in the settings of the watch, to tell "the phone sends nothing" from
+     * "the watch drops it". Only the time and a flag, nothing of the trip itself.
+     */
+    val lastPhoneTrip = MutableStateFlow(PhoneTripSeen(0L, false))
+
+    data class PhoneTripSeen(val at: Long, val running: Boolean)
+
+    private fun noteReceived(context: Context, snapshot: TripSnapshot, running: Boolean, now: Long) {
+        lastPhoneTrip.value = PhoneTripSeen(now, running)
+        prefs(context).edit().putLong(KEY_PHONE_TRIP_AT, now).putBoolean(KEY_PHONE_TRIP_RUNNING, running).apply()
+        android.util.Log.d(LOG_TAG, "phone trip state: active=${snapshot.active} running=$running kind=${snapshot.kind}")
     }
 
     /** Remembers the trip the user ended on the watch, so a late state of the phone does not bring it back. */
@@ -369,18 +438,22 @@ object WatchStore {
     suspend fun refresh(context: Context) {
         try {
             val items = Wearable.getDataClient(context).dataItems.await()
+            // Every phone that ever wrote the trip keeps its own item: the one to take is chosen
+            // from all of them (see choosePhoneTrip), not the last one read.
+            val trips = mutableListOf<TripSnapshot>()
             try {
                 for (item in items) {
                     val json = DataMapItem.fromDataItem(item).dataMap.getString(Protocol.KEY_JSON) ?: continue
                     when (item.uri.path) {
                         Protocol.PATH_PLACES -> savePlaces(context, json)
-                        Protocol.PATH_TRIP -> takePhoneTrip(context, TripSnapshot.parse(json))
+                        Protocol.PATH_TRIP -> trips += TripSnapshot.parse(json).copy(node = item.uri.host)
                         Protocol.PATH_WATCH_SETTINGS -> takePhoneSettings(context, json)
                     }
                 }
             } finally {
                 items.release()
             }
+            choosePhoneTrip(trips, System.currentTimeMillis())?.let { takePhoneTrip(context, it) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -451,6 +524,8 @@ object WatchStore {
 
     private const val KEY_PLACES = "places"
     private const val KEY_TRIP = "trip"
+    private const val KEY_PHONE_TRIP_AT = "phone-trip-at"
+    private const val KEY_PHONE_TRIP_RUNNING = "phone-trip-running"
     private const val KEY_ENDED_KEY = "ended-trip"
     private const val KEY_ENDED_AT = "ended-at"
     private const val KEY_ALERTED = "alerted"

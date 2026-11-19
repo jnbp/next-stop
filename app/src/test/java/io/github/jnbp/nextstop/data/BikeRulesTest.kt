@@ -31,15 +31,16 @@ class BikeRulesTest {
         assertEquals(BikeCarriage.NotAllowed, BikeRules.carriage("bus", "M41", berlin, wednesday("12:00")))
         assertEquals(BikeCarriage.NotAllowed, BikeRules.carriage("bus", "N10", berlin, wednesday("02:00")))
         assertEquals(BikeCarriage.NotAllowed, BikeRules.carriage("coach", "FlixBus 040", berlin, wednesday("12:00")))
-        assertEquals(BikeCarriage.NotAllowed, BikeRules.carriage("", null, berlin, wednesday("12:00")))
+        // What the app has no product for: no rule known (#263).
+        assertEquals(BikeCarriage.Unknown, BikeRules.carriage("", null, berlin, wednesday("12:00")))
     }
 
     @Test
     fun bvgNightLinesForTheUBahnDo() {
         assertEquals(BikeCarriage.Allowed, BikeRules.carriage("bus", "N7", berlin, wednesday("01:30")))
         assertEquals(BikeCarriage.Allowed, BikeRules.carriage("bus", "N1", berlin, wednesday("03:00")))
-        // Not an N line of another city.
-        assertEquals(BikeCarriage.NotAllowed, BikeRules.carriage("bus", "N7", leipzig, wednesday("01:30")))
+        // Not an N line of another city: there no rule is known (#263).
+        assertEquals(BikeCarriage.Unknown, BikeRules.carriage("bus", "N7", leipzig, wednesday("01:30")))
     }
 
     @Test
@@ -83,5 +84,57 @@ class BikeRulesTest {
         assertEquals(all - "bus" - "coach", BikeRules.comboProducts(all, buses = false))
         assertEquals(all - "coach", BikeRules.comboProducts(all, buses = true))
         assertEquals(setOf("suburban", "subway", "tram", "regional"), BikeRules.comboProducts(setOf("bus", "coach"), buses = false))
+    }
+
+    private fun ride(product: String, line: String, at: OffsetDateTime, where: Pair<Double, Double> = berlin, remark: String? = null) = Leg(
+        line, product, false, "A", "B", at, at, at.plusMinutes(10), at.plusMinutes(10), null, null, null, false,
+        fromPlace = Stop("1", "A", where.first, where.second, null),
+        bikeNote = remark,
+    )
+
+    @Test
+    fun bikeAlongKeepsRidesWhoseProviderSaysNothingOrNo() {
+        // #263: "Fahrrad dabei" is no provider filter; a remark "no bicycles" on the Berlin S-Bahn changes nothing.
+        val bike = SearchOptions(bike = true)
+        val at = wednesday("08:00")
+        assertTrue(ticketFits(Journey(listOf(ride("suburban", "S1", at, remark = "Fahrradmitnahme nicht möglich"))), bike))
+        assertTrue(ticketFits(Journey(listOf(ride("subway", "U2", at), ride("tram", "M10", at))), bike))
+        assertTrue(ticketFits(Journey(listOf(ride("regional", "RE 1", at, where = leipzig))), bike))
+        // A bus outside Berlin: no rule known, it stays.
+        assertTrue(ticketFits(Journey(listOf(ride("bus", "60", at, where = leipzig))), bike))
+        // The page keeps them too.
+        val page = JourneyPage(listOf(Journey(listOf(ride("suburban", "S1", at)))), null, null).fitting(bike)
+        assertEquals(1, page.journeys.size)
+    }
+
+    @Test
+    fun bikeAlongDropsOnlyRidesKnownNotToTakeABicycle() {
+        val bike = SearchOptions(bike = true)
+        // BVG day bus, hvv U-Bahn in the morning rush hour, a coach.
+        assertFalse(ticketFits(Journey(listOf(ride("suburban", "S1", wednesday("12:00")), ride("bus", "M41", wednesday("12:00")))), bike))
+        assertFalse(ticketFits(Journey(listOf(ride("subway", "U3", wednesday("07:30"), where = hamburg))), bike))
+        assertFalse(ticketFits(Journey(listOf(ride("coach", "FlixBus 040", wednesday("12:00")))), bike))
+        // A BVG night line for the U-Bahn and an ICE (with a reservation) do.
+        assertTrue(ticketFits(Journey(listOf(ride("bus", "N7", wednesday("01:30")))), bike))
+        assertTrue(ticketFits(Journey(listOf(ride("express", "ICE 1005", wednesday("12:00")))), bike))
+    }
+
+    @Test
+    fun berlinRulesAreExplicit() {
+        listOf("suburban", "subway", "tram", "ferry").forEach { product ->
+            assertEquals(product, BikeCarriage.Allowed, BikeRules.carriage(product, null, berlin, wednesday("07:45")))
+        }
+        assertEquals(BikeCarriage.NotAllowed, BikeRules.carriage("bus", "M29", berlin, wednesday("17:00")))
+        assertEquals(BikeCarriage.Allowed, BikeRules.carriage("bus", "N9", berlin, wednesday("02:00")))
+    }
+
+    @Test
+    fun theBikeComboStillNeedsEveryRideKnownToTakeTheBicycle() {
+        val combo = SearchOptions(bikeCombo = true)
+        val at = wednesday("12:00")
+        assertFalse(ticketFits(Journey(listOf(ride("bus", "60", at, where = leipzig))), combo))
+        assertTrue(ticketFits(Journey(listOf(ride("regional", "RE 1", at, where = leipzig))), combo))
+        assertFalse(BikeRules.journeyCarriesBike(Journey(listOf(ride("", "X", at)))))
+        assertTrue(BikeRules.journeyMayCarryBike(Journey(listOf(ride("", "X", at)))))
     }
 }

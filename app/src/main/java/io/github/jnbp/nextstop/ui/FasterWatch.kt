@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import io.github.jnbp.nextstop.MainActivity
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.ownServerUrl
@@ -30,16 +31,16 @@ import io.github.jnbp.nextstop.data.Journey
 import io.github.jnbp.nextstop.data.KnownWays
 import io.github.jnbp.nextstop.data.Leg
 import io.github.jnbp.nextstop.data.RoutingSource
+import io.github.jnbp.nextstop.data.ShortcutAction
+import io.github.jnbp.nextstop.data.ShortcutActionKind
 import io.github.jnbp.nextstop.data.ShortcutRules
 import io.github.jnbp.nextstop.data.TransitousSource
-import io.github.jnbp.nextstop.data.changeRide
-import io.github.jnbp.nextstop.data.journeyKey
 import io.github.jnbp.nextstop.data.knownWays
 import io.github.jnbp.nextstop.data.plainStopName
 import io.github.jnbp.nextstop.data.plausible
 import io.github.jnbp.nextstop.data.replanPoint
 import io.github.jnbp.nextstop.data.shortcutComfort
-import io.github.jnbp.nextstop.data.shortcutOffer
+import io.github.jnbp.nextstop.data.shortcutPick
 import io.github.jnbp.nextstop.data.spliceAt
 import io.github.jnbp.nextstop.data.viaAhead
 import io.github.jnbp.nextstop.ui.theme.storedPalette
@@ -65,21 +66,27 @@ data class FasterOffer(
     val simulated: Boolean = false,
     /** When the ride to change to ([line]) leaves [place]; null where it is not known. */
     val time: OffsetDateTime? = null,
+    /** What the traveller does differently (see shortcutAction); null for a simulation or the demo. */
+    val action: ShortcutAction? = null,
 ) {
     val gainMinutes: Long get() = gainSeconds / 60
 }
 
-private val FASTER_CHANNEL = AppChannel.Shortcut.id
+private val FASTER_CHANNEL = AppChannel.of(NotifyFeature.Shortcut).id
 private const val FASTER_NOTIFICATION = 2
 internal const val ACTION_FASTER_TAKE = "io.github.jnbp.nextstop.FASTER_TAKE"
 internal const val ACTION_FASTER_IGNORE = "io.github.jnbp.nextstop.FASTER_IGNORE"
 internal const val EXTRA_FASTER_KEY = "key"
 
+/** The key of the offer whose preview the notification's "Vorschau" asks for (#120). */
+internal const val EXTRA_FASTER_PREVIEW = "io.github.jnbp.nextstop.FASTER_PREVIEW"
+
 // The watch looks at the trip this often; a search is only sent when one is due.
 private const val TICK_MILLIS = 10_000L
 
-// A search at least this often, and at every stop passed, but never two closer than the pause.
-private const val ROUND_MILLIS = 75_000L
+// A search at least every round (see fasterRoundMillis: 75 s with a change near and the app in
+// front, else 2.5 min), at every stop passed while the short pace holds, never two closer than
+// the pause; none with the battery saver.
 private const val PAUSE_MILLIS = 30_000L
 
 // After a failed search the next one waits this long, twice as long after every further failure.
@@ -99,7 +106,8 @@ private const val FASTER_RESULTS = 5
  * The search on the way for a followed trip, with two switches of [TripState]:
  * - "Abkürzungs-Alarm" ([TripState.shortcutAlert], from the setting [AppPrefs.shortcutAlert]):
  *   the way to the destination is searched again in the background at the user's own change
- *   level, and a way that arrives at least a minute sooner is offered.
+ *   level, and a real alternative that arrives at least the user's threshold sooner ("ab 3 min",
+ *   [AppPrefs.shortcutMinutes]) is offered, said as what to do (see shortcutPick, offerText).
  * - "Jede Minute zählt" ([TripState.everyMinute], this trip only): switches the alert on for
  *   the trip and searches with every change however tight (Sprint).
  * Searches start from the next point the traveller can still change at; an offer shows on the
@@ -181,7 +189,7 @@ object FasterWatch {
         refreshTripNotification(context)
     }
 
-    /** Puts the offered way aside: it comes back only once it wins another minute. */
+    /** Puts the offered way aside: it comes back only once it wins clearly more (see IGNORED_BETTER_SECONDS). */
     fun ignore(context: Context, key: String?) {
         val offer = TripState.faster.value
         cancelNotification(context)
@@ -223,7 +231,10 @@ object FasterWatch {
                 drop(context)
             } else {
                 val clock = SystemClock.elapsedRealtime()
-                val due = (point.stage != lastStage || clock - lastSearch >= ROUND_MILLIS) &&
+                val near = changeNear(journey, System.currentTimeMillis()) && AppVisibility.visible.value
+                val round = fasterRoundMillis(near, near)
+                val due = !BatterySaver.active &&
+                    ((near && point.stage != lastStage) || clock - lastSearch >= round) &&
                     clock - lastSearch >= PAUSE_MILLIS && clock >= nextAllowed
                 if (due && prefs.simulateFaster) {
                     // Developer option: a made-up way instead of a search, through the same offer.
@@ -272,30 +283,53 @@ object FasterWatch {
                                 userLevel = prefs.searchOptionsInUse.comfort,
                                 sameComfort = prefs.shortcutSameComfort,
                                 quietStart = prefs.shortcutQuietStart,
+                                thresholdMinutes = prefs.shortcutMinutes,
                             )
-                            val best = shortcutOffer(
-                                current, point, page.journeys, ignored, knownNow, rules, startedAt, OffsetDateTime.now(),
-                            )
-                            if (best == null) {
+                            // Only a real alternative, on the own vehicle's current realtime (see shortcutPick).
+                            // The own vehicle's times as the ride state has them (position + live, see rideJourney).
+                            // Worked out off the main thread; only the offer comes back.
+                            val pickedAt = OffsetDateTime.now()
+                            val aside = ignored.toMap()
+                            val chosenAt = startedAt
+                            val found = withContext(Dispatchers.Default) {
+                                shortcutPick(
+                                    rideJourney(current, pickedAt), point, page.journeys, aside, knownNow, rules, chosenAt, pickedAt,
+                                )?.let { pick -> pick to spliceAt(current, point, pick.option) }
+                            }
+                            val best = found?.first
+                            if (TripState.journey.value?.id != current.id) {
+                                // Another journey was chosen meanwhile: the next round searches for it.
+                            } else if (found == null || best == null) {
                                 drop(context)
                             } else {
-                                val (option, gain) = best
-                                val ride = changeRide(point.kept, point.cut, option)
+                                val action = best.action
                                 val offer = FasterOffer(
-                                    key = journeyKey(option),
-                                    journey = spliceAt(current, point, option),
+                                    // The action names the offer: put aside, it stays aside whatever search finds it again.
+                                    key = action.key,
+                                    journey = found.second,
                                     basedOn = current.id,
-                                    gainSeconds = gain,
-                                    place = (ride?.from ?: point.place.name).plainStopName(),
-                                    line = ride?.line,
+                                    gainSeconds = best.gainSeconds,
+                                    place = action.at.plainStopName(),
+                                    line = action.line,
                                     onBoard = point.onBoard,
-                                    arrival = option.arrival,
+                                    arrival = best.arrival,
                                     before = current.plausible().arrival,
-                                    time = ride?.departure ?: option.departure,
+                                    time = action.time,
+                                    action = action,
                                 )
                                 TripState.faster.value = offer
-                                notifyOffer(context, offer, alert = offer.key != alerted)
-                                alerted = offer.key
+                                // No push right after the traveller chose this connection, until
+                                // its times or those of the offered way changed (#75, as the companion).
+                                val quietOver = io.github.jnbp.nextstop.ui.companion.ShortcutGuard.allows(
+                                    current.id,
+                                    io.github.jnbp.nextstop.ui.companion.shortcutOwn(current),
+                                    io.github.jnbp.nextstop.ui.companion.shortcutOfferArrival(offer),
+                                    System.currentTimeMillis(),
+                                )
+                                if (quietOver) {
+                                    notifyOffer(context, offer, alert = offer.key != alerted)
+                                    alerted = offer.key
+                                }
                             }
                         }
                     } catch (e: CancellationException) {
@@ -395,15 +429,16 @@ object FasterWatch {
     }
 
     /**
-     * The offer in words, with where and when: "Change at … at 10:42 to the S41" or "Take the
-     * S41 from … at 10:42"; without a known time as before.
+     * The offer in words: always the line and what to do, never just "another way" (see
+     * [ShortcutAction]): "Get off at Köln West, take the S 12 at 21:26", "At Troisdorf take the
+     * RE 8 at 09:05 instead of the SEV", "Stay on the RB 48 to Köln Messe/Deutz". A simulation
+     * or the demo, which has no action, says where to change or what to take.
      */
     fun offerText(context: Context, offer: FasterOffer): String {
-        val line = offer.line?.let { shortLine(it) ?: it }
+        offer.action?.let { return actionText(context, it) }
+        val line = lineLabel(context, offer.line)
         val time = offer.time?.clock()
         return when {
-            line == null && time != null -> context.getString(R.string.faster_other_way_at, offer.place, time)
-            line == null -> context.getString(R.string.faster_other_way, offer.place)
             offer.onBoard && time != null -> context.getString(R.string.faster_change_at, offer.place, line, time)
             offer.onBoard -> context.getString(R.string.faster_change, offer.place, line)
             time != null -> context.getString(R.string.faster_take_at, offer.place, line, time)
@@ -411,11 +446,38 @@ object FasterWatch {
         }
     }
 
+    /** [action] in words, see [offerText]. */
+    fun actionText(context: Context, action: ShortcutAction): String {
+        val at = action.at.plainStopName()
+        val line = lineLabel(context, action.line)
+        val time = action.time?.clock().orEmpty()
+        val instead = action.instead?.let { shortLine(it) ?: it }?.takeIf { it != line }
+        return when (action.kind) {
+            ShortcutActionKind.GetOffAndTake -> context.getString(R.string.faster_get_off_take, at, line, time)
+            ShortcutActionKind.ChangeInstead -> if (instead != null) {
+                context.getString(R.string.faster_change_instead, at, line, time, instead)
+            } else {
+                context.getString(R.string.faster_change_take, at, line, time)
+            }
+            ShortcutActionKind.TakeInstead -> if (instead != null) {
+                context.getString(R.string.faster_take_instead, at, line, time, instead)
+            } else {
+                context.getString(R.string.faster_take_at, at, line, time)
+            }
+            ShortcutActionKind.StaySeated -> context.getString(R.string.faster_stay_seated, line, (action.until ?: action.at).plainStopName())
+            ShortcutActionKind.GetOffAndWalk -> context.getString(R.string.faster_get_off_walk, at)
+        }
+    }
+
+    /** A line as shown ("S 12"), or "connection" where the provider names none. */
+    private fun lineLabel(context: Context, line: String?): String =
+        line?.let { shortLine(it) ?: it } ?: context.getString(R.string.faster_ride_fallback)
+
     @SuppressLint("MissingPermission")
     private fun notifyOffer(context: Context, offer: FasterOffer, alert: Boolean) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        // Its own channel: it alerts with sound and vibration and pops up, unlike the quiet one of the trip.
-        ensureChannel(context, AppChannel.Shortcut)
+        // The channel of suggestions: shown, but without sound, vibration or pop-up (see ChannelKind.Suggestions).
+        ensureChannel(context, AppChannel.of(NotifyFeature.Shortcut))
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val open = PendingIntent.getActivity(
@@ -439,14 +501,27 @@ object FasterWatch {
             .setSmallIcon(R.drawable.ic_stat_trip)
             .setColor(storedPalette(context).blue.toArgb())
             .setContentTitle(title)
-            .setContentText(text)
+            .setContentText("$text · $arrival")
             .setStyle(NotificationCompat.BigTextStyle().bigText("$text\n$arrival"))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setOnlyAlertOnce(!alert)
             .setAutoCancel(true)
             .setContentIntent(open)
+            // "Vorschau" (#120): opens the companion with the offered way's detail over it.
+            .addAction(
+                0,
+                context.getString(R.string.r6c_faster_preview),
+                PendingIntent.getActivity(
+                    context,
+                    13,
+                    Intent(context, MainActivity::class.java)
+                        .setAction(ACTION_OPEN_TRIP)
+                        .putExtra(EXTRA_FASTER_PREVIEW, offer.key)
+                        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                    flags,
+                ),
+            )
             .addAction(0, context.getString(R.string.faster_take_action), action(ACTION_FASTER_TAKE, 11))
             .addAction(0, context.getString(R.string.faster_ignore_action), action(ACTION_FASTER_IGNORE, 12))
             .build()

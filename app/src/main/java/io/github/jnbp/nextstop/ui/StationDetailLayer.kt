@@ -187,7 +187,8 @@ private fun detailFeatures(): FeatureCollection {
     if (!OsmStations.loaded) return FeatureCollection.fromFeatures(emptyList<Feature>())
     val features = mergedFeatures(OsmStations.stations.flatMap { stationFeatures(it) })
     detailGeneration = generation
-    return FeatureCollection.fromFeatures(features).also { detailData = it }
+    // Made safe for the map once, off the main thread, where the details are built (#284).
+    return mapSafe(FeatureCollection.fromFeatures(features), properties = false).also { detailData = it }
 }
 
 /**
@@ -461,7 +462,7 @@ fun setSelectedStopPositions(style: Style, stop: Stop?): Int {
     } else {
         OsmStations.station(stop.id, stop.name, latitude to longitude)
     }
-    style.getSourceAs<GeoJsonSource>(SELECTED_DETAIL_SOURCE)?.setGeoJson(
+    style.getSourceAs<GeoJsonSource>(SELECTED_DETAIL_SOURCE)?.setGeoJsonSafely(
         FeatureCollection.fromFeatures(station?.let { mergedFeatures(stationFeatures(it)) }.orEmpty()),
     )
     val pills = ArrayList<SelectedPill>()
@@ -512,7 +513,7 @@ fun setSelectedStopPositions(style: Style, stop: Stop?): Int {
     if (pills.isNotEmpty() && style.getImage(PIN_ONLY_IMAGE) == null) {
         style.addImage(PIN_ONLY_IMAGE, selectedPositionBitmap(null, emptyList(), detailDensity, null))
     }
-    source.setGeoJson(FeatureCollection.fromFeatures(pillFeatures(style, pills, List(pills.size) { PillSide.Above })))
+    source.setGeoJsonSafely(FeatureCollection.fromFeatures(pillFeatures(style, pills, List(pills.size) { PillSide.Above })))
     return pills.size
 }
 
@@ -708,7 +709,7 @@ private fun placeSelectedPositions(style: Style, pills: List<SelectedPill>, zoom
         switchAnimator = null
         running?.cancel()
         if (running != null) resetSwitch(style)
-        style.getSourceAs<GeoJsonSource>(SELECTED_POS_SOURCE)?.setGeoJson(FeatureCollection.fromFeatures(pillFeatures(style, pills, sides)))
+        style.getSourceAs<GeoJsonSource>(SELECTED_POS_SOURCE)?.setGeoJsonSafely(FeatureCollection.fromFeatures(pillFeatures(style, pills, sides)))
         return
     }
     animateSwitch(style, pills, before, sides, switched)
@@ -752,7 +753,7 @@ private fun animateSwitch(style: Style, pills: List<SelectedPill>, before: List<
         features.add(feature)
     }
     setSwitchShare(style, 0f)
-    source.setGeoJson(FeatureCollection.fromFeatures(features))
+    source.setGeoJsonSafely(FeatureCollection.fromFeatures(features))
     val final = pillFeatures(style, pills, after)
     switchAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
         duration = PILL_SWITCH_MILLIS
@@ -772,7 +773,7 @@ private fun animateSwitch(style: Style, pills: List<SelectedPill>, before: List<
                 // Cut short by a newer switch or new pills: those have set what is shown.
                 if (cancelled || !style.isFullyLoaded) return
                 resetSwitch(style)
-                style.getSourceAs<GeoJsonSource>(SELECTED_POS_SOURCE)?.setGeoJson(FeatureCollection.fromFeatures(final))
+                style.getSourceAs<GeoJsonSource>(SELECTED_POS_SOURCE)?.setGeoJsonSafely(FeatureCollection.fromFeatures(final))
             }
         })
         start()
@@ -1041,7 +1042,9 @@ fun stationDetailAt(context: Context, map: MapLibreMap, point: PointF, slop: Flo
                 listOfNotNull(label, context.getString(R.string.map_building_access)).toMutableList()
             } else {
                 mutableListOf(
-                    if (label != null) context.getString(R.string.map_entrance_named, label) else context.getString(R.string.walk_target_entrance_plain),
+                    // "Eingang Eingang Nord" never (#240): a name that says the word itself loses it.
+                    label?.let { io.github.jnbp.nextstop.data.doorLabelWithoutWord(it) }?.takeIf { it.isNotEmpty() }
+                        ?.let { context.getString(R.string.map_entrance_named, it) } ?: context.getString(R.string.walk_target_entrance_plain),
                 )
             }
             text("station")?.let { parts.add(it) }

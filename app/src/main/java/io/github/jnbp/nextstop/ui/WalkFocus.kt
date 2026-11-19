@@ -20,6 +20,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
@@ -74,7 +76,9 @@ fun WalkFocusOverlay(
                 .align(Alignment.BottomCenter)
                 .padding(start = 12.dp, end = 12.dp, bottom = bottomInset)
                 .widthIn(max = PANEL_MAX_WIDTH)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                // Its top edge: the floating "centre on me" button stands above it (#165).
+                .onGloballyPositioned { MapEdges.report(MapEdges.walkCard, 0, it.boundsInRoot().top) },
             shape = RoundedCornerShape(24.dp),
         ) {
             Row(
@@ -135,16 +139,8 @@ fun WalkFocusOverlay(
                     // Never cut here: as many lines as it takes.
                     WalkSummaryLine(summary, modifier = Modifier.padding(top = 2.dp), maxLines = Int.MAX_VALUE)
                 }
-                // Moved by hand, the map no longer follows: one tap brings walk and position back.
-                if (!following && hasPosition) {
-                    RoundButton(
-                        glyph = Glyph.Locate,
-                        description = stringResource(R.string.walk_focus_follow),
-                        onClick = onFollow,
-                        size = 44.dp,
-                        solid = true,
-                    )
-                }
+                // Moved by hand, the map no longer follows: the floating button at the bottom
+                // right brings walk and position back (#165, see FloatingLocateButton).
             }
         }
     }

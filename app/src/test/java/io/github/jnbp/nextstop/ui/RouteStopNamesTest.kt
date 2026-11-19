@@ -25,4 +25,14 @@ class RouteStopNamesTest {
         assertEquals(listOf(0, 2, 5, 8), named(50f))
         assertEquals(listOf(0, 1, 2, 3, 4, 5, 6, 7, 8), named(100f))
     }
+
+    @Test
+    fun intoAnArrayKeptForTheJourneyGivesTheSame() {
+        val x = FloatArray(key.size) { it * 50f }
+        val y = FloatArray(key.size)
+        // A stale array from an earlier camera: overwritten whole.
+        val named = BooleanArray(key.size) { true }
+        namedRouteStopsInto(x, y, key, 100f, named)
+        assertEquals(namedRouteStops(x, y, key, 100f).toList(), named.toList())
+    }
 }

@@ -55,7 +55,7 @@ import io.github.jnbp.nextstop.wear.settingFlag
  */
 
 // The rows of the group: the state of the watch, the hint, then the settings (for groupShape).
-private const val WATCH_GROUP_LAST = 6
+private const val WATCH_GROUP_LAST = 9
 
 // The watch map styles, in the order of the choice; the names are those the watch stores (MapStyleSetting).
 private val WATCH_MAP_STYLES = listOf("Auto", "Light", "Dark")
@@ -75,6 +75,9 @@ internal fun WatchSettingsGroup(status: WatchStatus?) {
     val animations = settingFlag(settings, WatchSettingKeys.ANIMATIONS, default = true)
     val style = settings[WatchSettingKeys.MAP_STYLE]?.value?.takeIf { it in WATCH_MAP_STYLES } ?: WATCH_MAP_STYLES[0]
     val target = settings[WatchSettingKeys.TILE_TARGET]?.value.orEmpty()
+    val openCompanion = settingFlag(settings, WatchSettingKeys.OPEN_COMPANION, default = false)
+    val stateIcons = settingFlag(settings, WatchSettingKeys.STATE_ICONS, default = false)
+    val timeTravel = settingFlag(settings, WatchSettingKeys.CROWN_TIME_TRAVEL, default = false)
     SettingsGroup(label = stringResource(R.string.watch_group)) {
         WatchStatusRow(status, shape = groupShape(0, WATCH_GROUP_LAST))
         // Changes made while the watch is away wait in the Data Layer and arrive once it connects.
@@ -108,6 +111,8 @@ internal fun WatchSettingsGroup(status: WatchStatus?) {
             title = stringResource(R.string.watch_map_style_title),
             text = stringResource(R.string.watch_map_style_text),
             preview = { WatchMapStylePreview(WATCH_MAP_STYLES.indexOf(style)) },
+            // A tap on one of the small watches picks its style.
+            previewPick = { index -> WatchSettings.set(context, WatchSettingKeys.MAP_STYLE, WATCH_MAP_STYLES[index]) },
         ) {
             SegmentedToggle(
                 labels = watchMapStyleLabels(),
@@ -137,6 +142,30 @@ internal fun WatchSettingsGroup(status: WatchStatus?) {
             title = stringResource(R.string.watch_comfort_title),
             text = stringResource(R.string.watch_comfort_text, stringResource(watchComfortName(prefs.searchOptionsInUse.comfort))),
         ) {}
+        // A trip started here opens the companion on the watch by itself (off by default).
+        SwitchRow(
+            shape = groupShape(7, WATCH_GROUP_LAST),
+            title = stringResource(R.string.watch_open_companion_title),
+            text = stringResource(R.string.watch_open_companion_text),
+            checked = openCompanion,
+            onChange = { WatchSettings.set(context, WatchSettingKeys.OPEN_COMPANION, it.toString()) },
+        )
+        // The watch's complications and the trip's chip show the app's icon, or with this the complications their own (#282).
+        SwitchRow(
+            shape = groupShape(8, WATCH_GROUP_LAST),
+            title = stringResource(R.string.r8wear_state_icons_title),
+            text = stringResource(R.string.r8wear_state_icons_text),
+            checked = stateIcons,
+            onChange = { WatchSettings.set(context, WatchSettingKeys.STATE_ICONS, it.toString()) },
+        )
+        // The crown on the watch's trip overview shows the time travel pill (off: it just scrolls).
+        SwitchRow(
+            shape = groupShape(9, WATCH_GROUP_LAST),
+            title = stringResource(R.string.r8wear_time_travel_title),
+            text = stringResource(R.string.r8wear_time_travel_text),
+            checked = timeTravel,
+            onChange = { WatchSettings.set(context, WatchSettingKeys.CROWN_TIME_TRAVEL, it.toString()) },
+        )
     }
 }
 
@@ -174,16 +203,13 @@ private fun WatchTileTargetRow(prefs: AppPrefs, target: String, onTarget: (Strin
         text = stringResource(R.string.watch_tile_text),
         preview = { WatchTilePreview(chosenName.ifEmpty { stringResource(R.string.home) }) },
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            val chips = listOf<Pair<String, () -> Unit>>(stringResource(R.string.watch_tile_home) to { onTarget("") }) +
-                places.map { (place, name) -> name.ifEmpty { place.name.shortStopName() } to { onTarget(watchPlaceJson(place)) } }
-            val ids = listOf("") + places.map { it.first.id }
-            chips.indices.chunked(2).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    row.forEach { index ->
-                        ToggleChip(text = chips[index].first, on = ids[index] == chosenId, onClick = chips[index].second)
-                    }
-                }
+        val chips = listOf<Pair<String, () -> Unit>>(stringResource(R.string.watch_tile_home) to { onTarget("") }) +
+            places.map { (place, name) -> name.ifEmpty { place.name.shortStopName() } to { onTarget(watchPlaceJson(place)) } }
+        val ids = listOf("") + places.map { it.first.id }
+        // The chips wrap onto further lines where they do not fit.
+        WrapRow {
+            chips.indices.forEach { index ->
+                ToggleChip(text = chips[index].first, on = ids[index] == chosenId, onClick = chips[index].second)
             }
         }
     }

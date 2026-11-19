@@ -16,9 +16,13 @@ const val WAY_STOP_NAME_SPACING_DP = 56f
  * way, in their order, each whose dot is at least [spacing] pixels from every key dot and from
  * every stop named before it.
  */
-fun namedRouteStops(x: FloatArray, y: FloatArray, key: BooleanArray, spacing: Float): BooleanArray {
+fun namedRouteStops(x: FloatArray, y: FloatArray, key: BooleanArray, spacing: Float): BooleanArray =
+    BooleanArray(key.size).also { namedRouteStopsInto(x, y, key, spacing, it) }
+
+/** [namedRouteStops] into [named] (as long as [key]), so a moving map makes no new array. */
+fun namedRouteStopsInto(x: FloatArray, y: FloatArray, key: BooleanArray, spacing: Float, named: BooleanArray) {
     val count = key.size
-    val named = BooleanArray(count) { key[it] }
+    for (index in 0 until count) named[index] = key[index]
     val limit = spacing * spacing
     for (index in 0 until count) {
         if (key[index]) continue
@@ -34,5 +38,4 @@ fun namedRouteStops(x: FloatArray, y: FloatArray, key: BooleanArray, spacing: Fl
         }
         named[index] = free
     }
-    return named
 }

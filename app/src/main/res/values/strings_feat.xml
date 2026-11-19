@@ -36,7 +36,6 @@
     <string name="disruption_link_bvg_map">Diversion map (BVG)</string>
     <string name="disruption_link_other">Link</string>
     <string name="disruptions_source">Notices of the BVG/VBB timetable information, as they come with the departures of the large stations and the ends of your saved routes. Your lines first.</string>
-    <string name="disruption_channel">Disruptions</string>
     <string name="disruption_notification_title">Disruption: %1$s → %2$s</string>
     <string name="disruption_cancelled">A journey on this route is cancelled</string>
     <string name="disruption_bell_on">Report disruptions on this route</string>
@@ -111,14 +110,14 @@
     </plurals>
     <string name="ways_sheet_route_radius">On its rides, and within %1$s of its start, destination and changes</string>
     <string name="dwatch_period_title">Check on the way</string>
-    <string name="dwatch_period_text">How often in between</string>
+    <string name="dwatch_period_text">Every few minutes in between</string>
     <string name="dwatch_period_off">Off</string>
-    <string name="dwatch_period_minutes">%1$d min</string>
+    <string name="dwatch_period_minutes">%1$d′</string>
     <string name="dwatch_times_title">Fixed times</string>
-    <string name="dwatch_when_both">Checked every %1$d minutes and at %2$s.</string>
-    <string name="dwatch_when_period">Checked every %1$d minutes.</string>
-    <string name="dwatch_when_times">Checked at %1$s.</string>
-    <string name="dwatch_when_none">No check is set yet: choose how often or at which times.</string>
+    <string name="dwatch_when_both">Checked when you open the app, every %1$d minutes and at %2$s.</string>
+    <string name="dwatch_when_period">Checked when you open the app and every %1$d minutes.</string>
+    <string name="dwatch_when_times">Checked when you open the app and at %1$s.</string>
+    <string name="dwatch_when_none">Checked when you open the app. Choose times for fixed checks.</string>
     <string name="bell_sheet_title">Report disruptions on this route</string>
     <string name="bell_sheet_text">You get a notification when a new disruption appears on this route. Each notice comes only once.</string>
     <string name="bell_sheet_settings">Set times</string>
@@ -127,7 +126,7 @@
     <!-- The map at the top of "My routes". -->
     <string name="ways_map_description">Map of your places; opens the map</string>
     <string name="ways_map_minutes">%1$d′</string>
-    <string name="ways_map_hours">%1$d h %2$d′</string>
+    <string name="ways_map_hours">%1$d:%2$02d h</string>
     <string name="ways_map_hint">Save places to see them here</string>
     <!-- Disruptions on the main maps. -->
     <string name="map_notices_title">Disruptions on the map</string>

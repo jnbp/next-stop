@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The rescue card of the trip companion (#98 on the watch). -->
+    <string name="r6_rescue_title">Connection no longer works</string>
+    <string name="r6_rescue_take">Take the %1$s at %2$s?</string>
+    <string name="r6_rescue_switch">Switch</string>
+    <string name="r6_rescue_later">Not now</string>
+    <!-- How fresh the live times of the trip are, on the ride page (#70 on the watch). -->
+    <string name="r6_live_just_now">Live · just now</string>
+    <string name="r6_live_seconds">Live · %1$d s ago</string>
+    <string name="r6_live_minutes">Live · %1$d min ago</string>
+    <string name="r6_live_stale">Updated %1$d min ago</string>
+</resources>

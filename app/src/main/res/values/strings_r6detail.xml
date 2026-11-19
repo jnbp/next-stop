@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #129: the style of the connection detail -->
+    <string name="r6d_detail_style_title">Connection details</string>
+    <string name="r6d_detail_style_text">How the rides, changes and walks of a connection are shown below its times.</string>
+    <string name="r6d_detail_style_timeline">New (default)</string>
+    <string name="r6d_detail_style_classic">Classic</string>
+    <string name="r6d_detail_style_timeline_text">Like the live trip: every ride as a card with its stops, the changes and walks between them. The line stays at the top while its stops scroll.</string>
+    <string name="r6d_detail_style_classic_text">As before: times on the left, one rail per ride; a tap on a line shows all its stops.</string>
+</resources>

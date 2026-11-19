@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.Canvas
@@ -13,31 +15,29 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
+import io.github.jnbp.nextstop.wear.data.watchMinutesLeft
+import io.github.jnbp.nextstop.wear.data.watchShowsClock
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -45,6 +45,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
+import androidx.wear.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -53,6 +56,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -61,6 +65,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -85,9 +90,11 @@ import androidx.wear.compose.foundation.pager.rememberPagerState
 import androidx.wear.compose.foundation.rememberAmbientModeManager
 import androidx.wear.compose.material3.HorizontalPageIndicator
 import androidx.wear.compose.material3.HorizontalPagerScaffold
+import androidx.wear.compose.material3.PagerScaffoldDefaults
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.material3.ScrollIndicator
 import androidx.wear.compose.material3.Text
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.cos
@@ -98,19 +105,29 @@ import kotlinx.coroutines.launch
 import io.github.jnbp.nextstop.wear.R
 import io.github.jnbp.nextstop.wear.data.BvgClient
 import io.github.jnbp.nextstop.wear.data.ChangeMap
+import io.github.jnbp.nextstop.wear.data.ChangeMapFit
 import io.github.jnbp.nextstop.wear.data.ChangeRating
 import io.github.jnbp.nextstop.wear.data.LOG_TAG
+import io.github.jnbp.nextstop.wear.data.LiveAge
 import io.github.jnbp.nextstop.wear.data.LocalFollow
 import io.github.jnbp.nextstop.wear.data.MapImageRequest
+import io.github.jnbp.nextstop.wear.data.MapImageStatus
 import io.github.jnbp.nextstop.wear.data.NextRide
 import io.github.jnbp.nextstop.wear.data.Place
 import io.github.jnbp.nextstop.wear.data.PlanRide
 import io.github.jnbp.nextstop.wear.data.Position
 import io.github.jnbp.nextstop.wear.data.RideStop
 import io.github.jnbp.nextstop.wear.data.StepKind
+import io.github.jnbp.nextstop.wear.data.TripBuzz
 import io.github.jnbp.nextstop.wear.data.TripSnapshot
+import io.github.jnbp.nextstop.wear.data.playBuzz
+import io.github.jnbp.nextstop.wear.data.urgentChange
+import io.github.jnbp.nextstop.wear.data.WatchWaitPhase
+import io.github.jnbp.nextstop.wear.data.waitPhaseOf
 import io.github.jnbp.nextstop.wear.data.WalkSketch
 import io.github.jnbp.nextstop.wear.data.WatchStore
+import io.github.jnbp.nextstop.wear.data.RescueOffer
+import io.github.jnbp.nextstop.wear.data.Protocol
 import io.github.jnbp.nextstop.wear.data.WebMercator
 import io.github.jnbp.nextstop.wear.data.changeMapFit
 import io.github.jnbp.nextstop.wear.data.currentPosition
@@ -121,6 +138,7 @@ import io.github.jnbp.nextstop.wear.data.hoursAndMinutes
 import io.github.jnbp.nextstop.wear.data.lineArgb
 import io.github.jnbp.nextstop.wear.data.rideProgress
 import io.github.jnbp.nextstop.wear.data.ridingStopsLeft
+import androidx.compose.ui.graphics.drawscope.withTransform
 
 private val tripClient = BvgClient()
 
@@ -249,6 +267,28 @@ private fun rememberNow(periodMillis: Long, active: Boolean): State<Long> {
 }
 
 /**
+ * How fresh the live times of the trip are ([liveAt], see [LiveAge]): "Live · vor 25 s", in
+ * steps of 5 s; the clock behind it runs only while the page is [active] (on screen, not ambient).
+ */
+@Composable
+private fun LiveLine(liveAt: Long, active: Boolean) {
+    val now = rememberNow(LiveAge.STEP_SECONDS * 1000, active)
+    val age = LiveAge.of(liveAt, now.value) ?: return
+    val text = when (age) {
+        LiveAge.JustNow -> stringResource(R.string.r6_live_just_now)
+        is LiveAge.Seconds -> stringResource(R.string.r6_live_seconds, age.seconds.toInt())
+        is LiveAge.Minutes -> stringResource(R.string.r6_live_minutes, age.minutes.toInt())
+        is LiveAge.Stale -> stringResource(R.string.r6_live_stale, age.minutes.toInt())
+    }
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = if (age is LiveAge.Stale) MaterialTheme.colorScheme.onSurfaceVariant else LIVE_GREEN,
+        maxLines = 1,
+    )
+}
+
+/**
  * The position of the user for the map of a change while [enabled]: a fresh fix of the
  * watch (or the phone's position) every [OWN_POSITION_MILLIS]; null when there is none or
  * it is too old to point the right way.
@@ -329,9 +369,13 @@ fun TripScreen(onEnded: () -> Unit, onReplan: (Place) -> Unit) {
     // change made; the arrival buzzes and pops a check with a ring of confetti along the edge.
     val moments = remember { TripMoments() }
     var celebrate by remember { mutableStateOf(false) }
+    // Bad news on the way (platform changed, missed, cancelled, change broken): its own urgent pattern.
+    val lastSeen = remember { arrayOfNulls<TripSnapshot>(1) }
     LaunchedEffect(trip) {
         val told = moments.update(trip.tripKey, trip.active, trip.kind, trip.arrival, trip.started, System.currentTimeMillis())
         told.forEach { moment -> buzz(context, moment) }
+        if (told.isEmpty() && urgentChange(lastSeen[0], trip)) playBuzz(context, TripBuzz.Urgent)
+        lastSeen[0] = trip
         if (WatchMoment.Arrived in told) celebrate = true
     }
     // The colour of the last line of the trip, kept for the confetti once the trip is over.
@@ -373,6 +417,8 @@ fun TripScreen(onEnded: () -> Unit, onReplan: (Place) -> Unit) {
     var holdUntil by remember { mutableLongStateOf(0L) }
     var shown by remember { mutableStateOf(desired) }
     var mapOpen by remember { mutableStateOf(false) }
+    // The rescue offer (its key) switched to or put aside on the watch: not shown again.
+    var rescueDone by remember { mutableStateOf<String?>(null) }
     fun hold() {
         holdUntil = System.currentTimeMillis() + HOLD_MILLIS
     }
@@ -412,11 +458,14 @@ fun TripScreen(onEnded: () -> Unit, onReplan: (Place) -> Unit) {
         HorizontalPagerScaffold(
             pagerState = pagerState,
             pageIndicator = if (ambient) null else ({ HorizontalPageIndicator(pagerState) }),
+            // On the overview the EdgeButton takes the foot: the dots show while paging only (M3 guidance).
+            pageIndicatorAnimationSpec = if (pages.getOrNull(pagerState.currentPage) == TripPage.Overview) PagerScaffoldDefaults.FadeOutAnimationSpec else null,
         ) {
-            // The crown scrolls the page of now (its column or list, see crownScroll), not the pager.
+            // The crown scrolls the page of now (the list of the overview; the other pages fit the screen, #180), not the pager.
             HorizontalPager(state = pagerState, rotaryScrollableBehavior = null) { index ->
                 val page = pages.getOrNull(index) ?: TripPage.Overview
-                val active = pagerState.currentPage == index
+                // The full map over the pages takes the crown; closing it hands it back (a new focus request).
+                val active = pagerState.currentPage == index && !mapOpen && (trip.rescue == null || trip.rescue?.key == rescueDone || ambient)
                 when (page) {
                     TripPage.Depart -> DepartPage(trip, active, ambient)
                     TripPage.Ride -> RidePage(trip, active, ambient)
@@ -454,41 +503,65 @@ fun TripScreen(onEnded: () -> Unit, onReplan: (Place) -> Unit) {
                 onClose = { mapOpen = false },
             )
         }
+        // The chosen change ahead broke by a delay: the phone's offer as a card over the pages,
+        // until switched or put aside (each offer once).
+        val rescue = trip.rescue?.takeIf { trip.fromPhone && !ambient && !mapOpen && it.key != rescueDone }
+        if (rescue != null) {
+            BackHandler { rescueDone = rescue.key }
+            RescueCard(
+                offer = rescue,
+                onSwitch = {
+                    rescueDone = rescue.key
+                    hold()
+                    scope.launch { WatchStore.sendToPhone(context, Protocol.MSG_RESCUE_SWITCH, RescueOffer.switchPayload(rescue)) }
+                },
+                onLater = { rescueDone = rescue.key },
+            )
+        }
         celebration()
     }
 }
 
-/**
- * The column of a trip page: below the time of the watch at the top (the content padding of
- * the scaffold, at least [TOP_CLEARANCE]) and above the page indicator, centred in between
- * when it fits, else scrolled (crown or swipe). The crown scrolls the column of the [active]
- * page only (the pager leaves the crown to its pages).
+/*
+ * TIME_TEXT_NOTE: The time at the top of the companion stays put. The scaffold of the app
+ * scrolls the time away with the scroll state of the screen registered last; inside the pager
+ * every page (and the pager itself) registers one, so which page's scrolling moved the time
+ * depended on the order pages were composed: sometimes the time went away with the crown,
+ * sometimes not (#53). The pages give the scaffold no scroll state, their content fades out
+ * under the time ([fadeUnderTimeText]) and they draw their own scroll indicator.
  */
-@Composable
-private fun PageColumn(
-    scroll: ScrollState,
-    active: Boolean,
-    contentPadding: PaddingValues,
-    horizontal: Dp,
-    spacing: Dp,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val top = maxOf(contentPadding.calculateTopPadding(), TOP_CLEARANCE)
-        val bottom = maxOf(contentPadding.calculateBottomPadding(), BOTTOM_CLEARANCE)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .crownScroll(scroll, active)
-                .verticalScroll(scroll)
-                .heightIn(min = maxHeight)
-                .padding(start = horizontal, end = horizontal, top = top, bottom = bottom),
-            verticalArrangement = Arrangement.spacedBy(spacing, Alignment.CenterVertically),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            content = content,
-        )
-    }
-}
+
+/**
+ * Where the lines of a trip page may stand (#180, see FitColumn): below the time of the watch at
+ * the top (the content padding of the scaffold, at least [TOP_CLEARANCE]) and above the page
+ * indicator (at least [BOTTOM_CLEARANCE]). The pages never scroll; the crown is free for the pager.
+ */
+private fun pageTop(contentPadding: PaddingValues): Dp = maxOf(contentPadding.calculateTopPadding(), TOP_CLEARANCE)
+
+private fun pageBottom(contentPadding: PaddingValues): Dp = maxOf(contentPadding.calculateBottomPadding(), BOTTOM_CLEARANCE)
+
+// How far the lines keep from the round edge: inside the ring of the depart and ride pages, and on the others.
+private val RING_PAGE_EDGE = 14.dp
+private val PAGE_EDGE = 8.dp
+
+// The priorities of the lines of the trip pages where the screen is too small for all (#180):
+// the big number, platform or countdown always stays (FIT_MUST); then the label, the line,
+// the station, the arrival, the next stop; the extras go first.
+private const val PRIORITY_LABEL = 90
+private const val PRIORITY_LINE = 85
+private const val PRIORITY_TARGET = 80
+private const val PRIORITY_STATION = 75
+private const val PRIORITY_ARRIVAL = 70
+private const val PRIORITY_RATING = 68
+private const val PRIORITY_HINT = 66
+private const val PRIORITY_WALK = 64
+private const val PRIORITY_NEXT_STOP = 60
+private const val PRIORITY_SKETCH = 58
+private const val PRIORITY_MAP = 55
+private const val PRIORITY_LIVE = 50
+private const val PRIORITY_STOP_LINE = 40
+private const val PRIORITY_ACTION = 30
+private const val PRIORITY_SUN = 10
 
 /**
  * The way on foot of a change: its minutes and metres as the phone sends them (the minutes of
@@ -529,34 +602,49 @@ private fun walkMeters(map: ChangeMap): Int {
 /** The small chip to the overview at the foot of a page. */
 @Composable
 private fun OverviewChip(onClick: () -> Unit) {
-    SmallAction(text = stringResource(R.string.overview), onClick = onClick)
+    // As wide as the round screen is where it stands (FitColumn, #180).
+    SmallAction(text = stringResource(R.string.overview), onClick = onClick, icon = R.drawable.ic_route)
 }
 
 /** "Departs in 4 min", "in 45 s" in the last minute (with [seconds]), "now", or the clock time when it is far. */
 @Composable
-private fun departText(time: Long, now: Long, seconds: Boolean): String {
+private fun departText(time: Long, now: Long, seconds: Boolean, clockShown: Boolean = watchShowsClock(time - now)): String {
     val left = time - now
     return when {
         left <= 0 -> stringResource(R.string.depart_now)
         left < 60_000 && seconds -> stringResource(R.string.depart_in_seconds, ((left + 999) / 1000).toInt())
-        left < 60_000 -> stringResource(R.string.depart_in, 1)
-        // From an hour on (also where the minutes round up to 60) the clock time.
-        left >= FAR_MILLIS - 30_000 -> stringResource(R.string.depart_at, clock(time))
-        else -> stringResource(R.string.depart_in, ((left + 30_000) / 60_000).toInt())
+        // The last minute without seconds (ambient) is "now", as the phone's 0 full minutes.
+        left < 60_000 -> stringResource(R.string.depart_now)
+        // From an hour on the clock time, with a minute of hysteresis (#148b, as on the phone).
+        clockShown -> stringResource(R.string.depart_at, clock(time))
+        else -> stringResource(R.string.depart_in, watchMinutesLeft(left).toInt())
     }
 }
 
 /** Only this text follows the ticking clock, not the page around it. */
 @Composable
-private fun CountdownText(time: Long, now: State<Long>, seconds: Boolean) {
+private fun CountdownText(time: Long, now: State<Long>, seconds: Boolean, waited: TripSnapshot? = null) {
+    // The clock time from an hour on; what it showed last decides at the boundary (#148b).
+    val clockShown = remember(time) { mutableStateOf(watchShowsClock(time - now.value)) }
+    val showClock = watchShowsClock(time - now.value, clockShown.value)
+    SideEffect { clockShown.value = showClock }
+    // A ride waited for at its stop (#184, as on the phone): "kommt jeden Moment", then "überfällig".
+    val (phase, late) = if (waited == null) WatchWaitPhase.Coming to 0L else waitPhaseOf(waited, now.value)
+    val line = waited?.line.orEmpty()
+    val text = when (phase) {
+        WatchWaitPhase.Coming -> departText(time, now.value, seconds, showClock)
+        WatchWaitPhase.AnyMoment -> stringResource(R.string.r6par_wait_any_moment, line)
+        WatchWaitPhase.Overdue -> stringResource(R.string.r6par_wait_overdue, line, late.toInt())
+    }
+    val counting = phase == WatchWaitPhase.Coming
     // Each new value rolls in from below; in ambient mode (no seconds) it is simply there.
-    WatchSwap(target = departText(time, now.value, seconds), ambient = !seconds, roll = true) { text ->
+    WatchSwap(target = text, ambient = !seconds, roll = true) { shown ->
         Text(
-            text = text,
-            style = MaterialTheme.typography.titleLarge,
+            text = shown,
+            style = if (counting) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
-            maxLines = 1,
+            maxLines = if (counting) 1 else 2,
         )
     }
 }
@@ -566,9 +654,9 @@ private fun CountdownText(time: Long, now: State<Long>, seconds: Boolean) {
 private fun untilText(time: Long, now: Long): String {
     val left = time - now
     return when {
-        left < 30_000 -> stringResource(R.string.now)
-        left >= FAR_MILLIS - 30_000 -> clock(time)
-        else -> stringResource(R.string.in_min, ((left + 30_000) / 60_000).toInt())
+        left < 60_000 -> stringResource(R.string.now)
+        watchShowsClock(left) -> clock(time)
+        else -> stringResource(R.string.in_min, watchMinutesLeft(left).toInt())
     }
 }
 
@@ -577,9 +665,9 @@ private fun untilText(time: Long, now: Long): String {
 private fun remainingText(time: Long, now: Long): String {
     val left = time - now
     return when {
-        left < 30_000 -> stringResource(R.string.now)
-        left >= FAR_MILLIS - 30_000 -> ""
-        else -> stringResource(R.string.remaining_min, ((left + 30_000) / 60_000).toInt())
+        left < 60_000 -> stringResource(R.string.now)
+        watchShowsClock(left) -> ""
+        else -> stringResource(R.string.remaining_min, watchMinutesLeft(left).toInt())
     }
 }
 
@@ -600,10 +688,9 @@ private fun DepartPage(trip: TripSnapshot, active: Boolean, ambient: Boolean) {
         if (ambient || !rememberWatchAnimationsOn()) snap() else tween(1_000, easing = LinearEasing),
         label = "departRing",
     )
-    val scroll = rememberScrollState()
-    // The ring runs along the edge: no scroll indicator over it. The page fits the screen; only
-    // with very large text does its column still scroll (crown or swipe).
-    ScreenScaffold(scrollState = scroll, scrollIndicator = null) { contentPadding ->
+    // The ring runs along the edge: no scroll indicator over it. The page fits the screen (#180).
+    // No scroll state for the scaffold: the time stays at the top (see TIME_TEXT_NOTE).
+    ScreenScaffold(scrollIndicator = null) { contentPadding ->
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (!ambient) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
@@ -627,53 +714,167 @@ private fun DepartPage(trip: TripSnapshot, active: Boolean, ambient: Boolean) {
                     }
                 }
             }
-            PageColumn(scroll, active, contentPadding, horizontal = 24.dp, spacing = 2.dp) {
-                Text(
-                    trip.place,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                )
-                LineBadge(trip.line, trip.product, color = trip.color)
+            // Never scrolls (#180): what does not fit the screen goes, the least important first.
+            val sunLeft = trip.sunLeft.takeIf { !ambient }
+            val sunPlacement = remember { SunPlacement() }
+            FitColumn(top = pageTop(contentPadding), bottom = pageBottom(contentPadding), horizontal = 24.dp, edge = RING_PAGE_EDGE, spacing = 2.dp) {
+                FitLine(PRIORITY_STATION) {
+                    Text(
+                        trip.place,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                FitLine(PRIORITY_LINE) { LineBadge(trip.line, trip.product, color = trip.color) }
                 // Before the walk to the first ride the countdown runs to leaving, and says so.
                 if (trip.leave) {
-                    Text(stringResource(R.string.step_leave, clock(trip.time)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                    FitLine(PRIORITY_LABEL) {
+                        Text(stringResource(R.string.step_leave, clock(trip.time)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
-                CountdownText(trip.time, now, seconds = !ambient)
+                FitLine { CountdownText(trip.time, now, seconds = !ambient, waited = trip.takeIf { it.waiting }) }
                 // An arrow before the destination saves room; read out as "towards …".
-                val platform = platformText(trip.platform, trip.line)
+                val platform = platformText(trip.platform, trip.line, trip.product)
                 val where = listOfNotNull(platform, trip.direction?.let { stringResource(R.string.towards_arrow, it) }).joinToString(" · ")
                 val spokenWhere = listOfNotNull(platform, trip.direction?.let { stringResource(R.string.towards, it) }).joinToString(" · ")
                 if (where.isNotEmpty() || trip.delayMinutes > 0) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (where.isNotEmpty()) {
-                            Text(where, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { contentDescription = spokenWhere })
-                        }
-                        if (trip.delayMinutes > 0) {
-                            Text(" +${trip.delayMinutes}", style = MaterialTheme.typography.bodySmall, color = AMBER)
+                    FitLine(PRIORITY_TARGET) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (where.isNotEmpty()) {
+                                Text(where, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { contentDescription = spokenWhere })
+                            }
+                            if (trip.delayMinutes > 0) {
+                                Text(" +${trip.delayMinutes}", style = MaterialTheme.typography.bodySmall, color = AMBER)
+                            }
                         }
                     }
                 }
                 val board = boardPartOf(trip)
                 if (board != null) {
-                    Spacer(Modifier.height(3.dp))
-                    TrainSketch(part = board.first, estimated = board.second, product = trip.product, lineColor = lineColor, ambient = ambient)
-                    Text(
-                        stringResource(boardLabel(board.first, board.second)),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (board.second) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.Center,
-                    )
-                } else {
-                    trip.hint?.let { Note(it) }
+                    FitLine(PRIORITY_SKETCH, Modifier.padding(top = 3.dp)) {
+                        TrainSketch(part = board.first, estimated = board.second, product = trip.product, lineColor = lineColor, ambient = ambient)
+                    }
+                    FitLine(PRIORITY_HINT) {
+                        HintWithSun(
+                            stringResource(boardLabel(board.first, board.second)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (board.second) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                            sunLeft = sunLeft,
+                            placement = sunPlacement,
+                        )
+                    }
+                } else if (trip.hint != null) {
+                    FitLine(PRIORITY_HINT) {
+                        HintWithSun(
+                            trip.hint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            sunLeft = sunLeft,
+                            placement = sunPlacement,
+                        )
+                    }
                 }
+                // The sun on a short line of its own where it does not fit after the hint (or there
+                // is none); the first line to go where the page is full.
+                FitLine(PRIORITY_SUN) { SunLine(sunLeft, sunPlacement, alone = board == null && trip.hint == null) }
             }
         }
     }
 }
+
+/** Whether the sun of the boarding page stands after the hint (true) or wants a line of its own. */
+private class SunPlacement {
+    var inline by mutableStateOf(true)
+}
+
+/**
+ * The boarding hint ("Mitte einsteigen") with the sunny side after it (#176), tiny and in the
+ * secondary colour: "Mitte einsteigen  [sun] li" on one line where both fit (measured), else
+ * the hint alone and [placement] tells [SunLine] to show the sun below, where the page has
+ * room (#180). [sunLeft] null (no clear side, no sun, ambient mode): the hint alone.
+ */
+@Composable
+private fun HintWithSun(text: String, style: TextStyle, color: Color, sunLeft: Boolean?, placement: SunPlacement) {
+    if (sunLeft == null) {
+        Text(text, style = style, color = color, textAlign = TextAlign.Center)
+        return
+    }
+    Layout(
+        content = {
+            Text(text, style = style, color = color, textAlign = TextAlign.Center)
+            SunSideMark(sunLeft, MaterialTheme.typography.labelSmall)
+        },
+    ) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val sun = measurables[1].measure(loose)
+        val gap = SUN_GAP.roundToPx()
+        val textWidth = measurables[0].maxIntrinsicWidth(loose.maxHeight).toFloat()
+        val inline = constraints.hasBoundedWidth && fitsOnOneLine(listOf(textWidth, sun.width.toFloat()), gap.toFloat(), constraints.maxWidth.toFloat())
+        if (placement.inline != inline) placement.inline = inline
+        if (inline) {
+            val hint = measurables[0].measure(loose.copy(maxWidth = (constraints.maxWidth - sun.width - gap).coerceAtLeast(0)))
+            val height = maxOf(hint.height, sun.height)
+            layout(hint.width + gap + sun.width, height) {
+                hint.place(0, (height - hint.height) / 2)
+                sun.place(hint.width + gap, (height - sun.height) / 2)
+            }
+        } else {
+            val hint = measurables[0].measure(loose)
+            layout(hint.width, hint.height) { hint.place(0, 0) }
+        }
+    }
+}
+
+/** The sun of the boarding page on a line of its own: where it did not fit after the hint, or [alone] without one. */
+@Composable
+private fun SunLine(sunLeft: Boolean?, placement: SunPlacement, alone: Boolean) {
+    if (sunLeft == null) return
+    Layout(content = { SunSideMark(sunLeft, MaterialTheme.typography.labelSmall) }) { measurables, constraints ->
+        if (!alone && placement.inline) {
+            layout(0, 0) {}
+        } else {
+            val mark = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
+            layout(mark.width, mark.height) { mark.place(0, 0) }
+        }
+    }
+}
+
+/** The sunny side as a small car with the sun beside it: the side the sun shines in, in the direction of travel; read out in full. */
+@Composable
+private fun SunSideMark(sunLeft: Boolean, style: TextStyle) {
+    val spoken = stringResource(if (sunLeft) R.string.r6w2_sun_left_spoken else R.string.r6w2_sun_right_spoken)
+    val tone = MaterialTheme.colorScheme.onSurfaceVariant
+    // It arrives with a short fade and a small grow (once, also when the side changes), since it
+    // often comes a few seconds after the page (the phone fetches the weather meanwhile). Only
+    // the drawing layer animates; the measured layout of the page stays as it is.
+    val animate = rememberWatchAnimationsOn()
+    val shown = remember(sunLeft) { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(sunLeft, animate) {
+        if (animate) shown.animateTo(1f, tween(SUN_APPEAR_MILLIS)) else shown.snapTo(1f)
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .graphicsLayer {
+                alpha = shown.value
+                val grow = 0.6f + 0.4f * shown.value
+                scaleX = grow
+                scaleY = grow
+            }
+            .clearAndSetSemantics { contentDescription = spoken },
+    ) {
+        // The car seen from above with the sun on its side, as on the phone (#269).
+        SunWagonMark(left = sunLeft, height = SUN_ICON, ink = tone)
+    }
+}
+
+// The sun of the boarding hint: its size, the room between it and its "li", and before it.
+private val SUN_ICON = 12.dp
+private val SUN_GAP = 8.dp
+private const val SUN_APPEAR_MILLIS = 450
 
 /**
  * The third of the train to board in, 0 rear, 1 middle, 2 front, and whether it is an
@@ -777,7 +978,7 @@ private fun TrainSketch(part: Int, estimated: Boolean, product: String, lineColo
  * at the foot of a square one, see [drawRideWay]) in the colour of the line, a dot for each
  * stop; in the middle the line and its direction, the stops left as a big number (or "next
  * stop: get off / change"), where to get off, the arrival with its delay and the next stop by
- * name; below, as before, the line of stops around the train ([StopLine]); the overview is the last page of the pager (a swipe away).
+ * name; below, where the ring does not dot the stops itself, the line of stops around the train ([StopLine]); the overview is the last page of the pager (a swipe away).
  * Only thin outlines in ambient mode. The buzz before getting off comes from alertGetOff
  * (WatchDataService for a trip of the phone, LocalFollow for one of the watch), not from this
  * page, so it never comes twice.
@@ -803,10 +1004,9 @@ private fun RidePage(trip: TripSnapshot, active: Boolean, ambient: Boolean) {
     val track = MaterialTheme.colorScheme.surfaceContainer
     val ground = MaterialTheme.colorScheme.background
     val tick = MaterialTheme.colorScheme.onSurfaceVariant
-    val scroll = rememberScrollState()
-    // The ring runs along the edge: no scroll indicator over it. The page fits the screen; only
-    // with very large text does its column still scroll (crown or swipe).
-    ScreenScaffold(scrollState = scroll, scrollIndicator = null) { contentPadding ->
+    // The ring runs along the edge: no scroll indicator over it. The page fits the screen (#180).
+    // No scroll state for the scaffold: the time stays at the top (see TIME_TEXT_NOTE).
+    ScreenScaffold(scrollIndicator = null) { contentPadding ->
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (progress != null) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
@@ -816,80 +1016,122 @@ private fun RidePage(trip: TripSnapshot, active: Boolean, ambient: Boolean) {
                     drawRideWay(shown, stops.size, lineColor, track, ground, tick, stroke, inset, round, ambient)
                 }
             }
-            PageColumn(scroll, active, contentPadding, horizontal = 26.dp, spacing = 2.dp) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp)) {
-                    LineBadge(trip.line, trip.product, color = trip.color)
-                    trip.direction?.let {
-                        Spacer(Modifier.width(4.dp))
-                        val spoken = stringResource(R.string.towards, it)
-                        Text(stringResource(R.string.towards_arrow, it), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = spoken })
+            // Never scrolls (#180): number > label > station > arrival > next stop; what does not
+            // fit goes, the least important first.
+            FitColumn(top = pageTop(contentPadding), bottom = pageBottom(contentPadding), horizontal = 26.dp, edge = RING_PAGE_EDGE, spacing = 2.dp) {
+                FitLine(PRIORITY_LINE) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LineBadge(trip.line, trip.product, color = trip.color)
+                        trip.direction?.let {
+                            Spacer(Modifier.width(4.dp))
+                            val spoken = stringResource(R.string.towards, it)
+                            Text(stringResource(R.string.towards_arrow, it), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { contentDescription = spoken })
+                        }
                     }
                 }
                 if (left > 1) {
-                    // Each stop passed rolls the number down (simply there in ambient mode).
-                    WatchSwap(target = left, ambient = ambient, roll = true) { count ->
-                        Text("$count", style = MaterialTheme.typography.numeralMedium, maxLines = 1)
+                    FitLine {
+                        // Each stop passed rolls the number down (simply there in ambient mode).
+                        WatchSwap(target = left, ambient = ambient, roll = true) { count ->
+                            Text("$count", style = MaterialTheme.typography.numeralMedium, maxLines = 1)
+                        }
                     }
-                    Text(
-                        stringResource(R.string.ride_stops_to_go),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    FitLine(PRIORITY_LABEL) {
+                        // One short line: the station below says where (#180).
+                        Text(
+                            stringResource(if (trip.change) R.string.r6w2_stops_to_change else R.string.r6w2_stops_to_end),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 } else if (left == 1 && !getOffSoon(trip.time, now.value)) {
-                    // A long last hop: the time left, "next stop" only in the last minutes.
-                    Text(
-                        stringResource(
-                            if (trip.change) R.string.change_in_at else R.string.get_off_in_at,
-                            minutesLabel(trip.time),
-                            clock(trip.time),
-                        ),
-                        style = MaterialTheme.typography.titleSmall,
-                        textAlign = TextAlign.Center,
-                    )
+                    FitLine {
+                        // A long last hop: the time left, "next stop" only in the last minutes.
+                        Text(
+                            stringResource(
+                                if (trip.change) R.string.change_in_at else R.string.get_off_in_at,
+                                minutesLabel(trip.time),
+                                clock(trip.time),
+                            ),
+                            style = MaterialTheme.typography.titleSmall,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 } else if (left == 1) {
+                    FitLine {
+                        Text(
+                            stringResource(if (trip.change) R.string.next_stop_change else R.string.next_stop_get_off),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (ambient) Color.White else MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+                FitLine(PRIORITY_TARGET) {
+                    // The station alone, on one line: the line above says change or get off (#180).
+                    val spoken = stringResource(if (trip.change) R.string.ride_change_at else R.string.ride_get_off_at, trip.place)
                     Text(
-                        stringResource(if (trip.change) R.string.next_stop_change else R.string.next_stop_get_off),
+                        trip.place,
                         style = MaterialTheme.typography.titleSmall,
-                        color = if (ambient) Color.White else MaterialTheme.colorScheme.primary,
                         textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.semantics { contentDescription = spoken },
                     )
                 }
-                Text(
-                    stringResource(if (trip.change) R.string.ride_change_at else R.string.ride_get_off_at, trip.place),
-                    style = MaterialTheme.typography.titleSmall,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // "Live · vor 25 s": how fresh the times are; ticks in 5 s steps, only while on screen and not ambient.
+                if (!ambient && trip.fromPhone && trip.realtime) FitLine(PRIORITY_LIVE) { LiveLine(trip.liveAt, active) }
                 val remaining = remainingText(trip.time, now.value)
-                // A new minute cross-fades in (not in ambient mode).
-                WatchSwap(
-                    target = (if (remaining.isEmpty()) stringResource(R.string.arrive_clock, clock(trip.time)) else stringResource(R.string.arrive_left, clock(trip.time), remaining)) +
-                        if (trip.delayMinutes > 0) " (+${trip.delayMinutes})" else "",
-                    ambient = ambient,
-                ) { arrive ->
-                    Text(
-                        arrive,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
+                FitLine(PRIORITY_ARRIVAL) {
+                    // A new minute cross-fades in (not in ambient mode).
+                    // The arrival as the phone's delay setting says (#227b): coloured by live data.
+                    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+                    WatchSwap(
+                        target = shownTimesText(
+                            if (remaining.isEmpty()) stringResource(R.string.arrive_clock, "\u0000") else stringResource(R.string.arrive_left, "\u0000", remaining),
+                            rememberDelayDisplay(),
+                            listOf(Triple(trip.time, trip.delayMinutes.toLong(), trip.realtime)),
+                            muted,
+                            muted,
+                            estimated = trip.estimated,
+                            about = stringResource(R.string.r9last_estimated_prefix),
+                        ),
+                        ambient = ambient,
+                    ) { arrive ->
+                        Text(
+                            arrive,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 // The next stop by name, while it is not the one to get off at.
                 stops.getOrNull(current + 1)?.takeIf { current + 1 < stops.lastIndex && it.name.isNotBlank() }?.let {
-                    Text(
-                        stringResource(R.string.next_stop_name, it.name),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    FitLine(PRIORITY_NEXT_STOP) {
+                        Text(
+                            stringResource(R.string.next_stop_name, it.name),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-                // The line of stops of before, kept: it also shows a ride the phone sends without
-                // times (dots by the stops left) and the stops around the train on a long ride.
+                // The line of stops of before, only where the ring does not dot the stops itself
+                // (no ring: a ride sent without times; ambient mode; a ride too long to dot).
+                val ringDotsStops = progress != null && !ambient && stops.size in 3..RING_MAX_STOP_TICKS
                 val dots = if (stops.size >= 2) stops else if (left > 0) List(left + 1) { RideStop("", 0) } else emptyList()
-                if (dots.size >= 2) {
-                    StopLine(dots, now, lineColor, ambient, modifier = Modifier.fillMaxWidth().height(22.dp))
+                if (dots.size >= 2 && !ringDotsStops) {
+                    FitLine(PRIORITY_STOP_LINE) {
+                        StopLine(dots, now, lineColor, ambient, modifier = Modifier.fillMaxWidth().height(22.dp))
+                    }
                 }
             }
         }
@@ -996,85 +1238,123 @@ private fun ChangePage(
     onMap: () -> Unit,
 ) {
     val now = rememberNow(if (ambient) 60_000 else 10_000, active)
-    val scroll = rememberScrollState()
     val ride = view.ride
     val lineColor = ride?.let { Color(lineArgb(it.line, it.product, it.color)) } ?: MaterialTheme.colorScheme.primary
-    ScreenScaffold(scrollState = scroll) { contentPadding ->
-        PageColumn(scroll, active, contentPadding, horizontal = 22.dp, spacing = 3.dp) {
-            Text(
-                stringResource(
-                    when {
-                        ride == null -> R.string.to_destination
-                        !view.ofThisStep -> R.string.then_label
-                        view.atChange -> R.string.change_label
-                        else -> R.string.to_first_stop
-                    },
-                ),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+    // No scroll state for the scaffold: the time stays at the top (see TIME_TEXT_NOTE); the page fits the screen (#180).
+    ScreenScaffold(scrollIndicator = null) { contentPadding ->
+        // Never scrolls (#180): the platform (or the place) first, the overview button the first
+        // to go where the page is full (the overview is also a swipe away).
+        FitColumn(top = pageTop(contentPadding), bottom = pageBottom(contentPadding), horizontal = 22.dp, edge = PAGE_EDGE, spacing = 3.dp) {
+            FitLine(PRIORITY_LABEL) {
+                Text(
+                    stringResource(
+                        when {
+                            ride == null -> R.string.to_destination
+                            !view.ofThisStep -> R.string.then_label
+                            view.atChange -> R.string.change_label
+                            else -> R.string.to_first_stop
+                        },
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                )
+            }
             if (ride != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LineBadge(ride.line, ride.product, color = ride.color)
-                    Spacer(Modifier.width(6.dp))
-                    // A new minute cross-fades in (not in ambient mode).
-                    WatchSwap(target = stringResource(R.string.departs_at, clock(ride.time), untilText(ride.time, now.value)), ambient = ambient) { departs ->
+                FitLine(PRIORITY_LINE) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LineBadge(ride.line, ride.product, color = ride.color)
+                        Spacer(Modifier.width(6.dp))
+                        // A new minute cross-fades in (not in ambient mode).
+                        WatchSwap(target = stringResource(R.string.departs_at, clock(ride.time), untilText(ride.time, now.value)), ambient = ambient) { departs ->
+                            Text(
+                                departs,
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+                val platform = platformText(ride.platform, ride.line, ride.product)
+                FitLine {
+                    Text(
+                        platform ?: ride.stop,
+                        style = if (platform != null) MaterialTheme.typography.displaySmall else MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = if (platform != null) 1 else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (platform != null && ride.stop.isNotBlank()) {
+                    FitLine(PRIORITY_TARGET) {
+                        Text(ride.stop, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            } else {
+                FitLine {
+                    Text(
+                        view.toName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                FitLine(PRIORITY_ARRIVAL) {
+                    Text(stringResource(R.string.arrival_at, clock(trip.arrival)), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                }
+            }
+            FitLine(PRIORITY_WALK) { WalkLine(view) }
+            view.rating?.let { rating ->
+                FitLine(PRIORITY_RATING) {
+                    Text(
+                        ratingText(rating, view.spare, view.gap),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (ambient) Color.White else ratingColor(rating),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            // On the way to the ride of this step: where to board it, in short (the boarding page
+            // shows the train); left out before the map where the page is full.
+            if (view.ofThisStep && trip.kind == StepKind.Board) {
+                val board = boardPartOf(trip)
+                val boardText = board?.let { stringResource(boardLabel(it.first, it.second)) } ?: trip.hint
+                if (boardText != null) {
+                    FitLine(PRIORITY_LIVE) {
                         Text(
-                            departs,
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
+                            boardText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
-                val platform = platformText(ride.platform, ride.line)
-                Text(
-                    platform ?: ride.stop,
-                    style = if (platform != null) MaterialTheme.typography.displaySmall else MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (platform != null && ride.stop.isNotBlank()) {
-                    Text(ride.stop, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            } else {
-                Text(
-                    view.toName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(stringResource(R.string.arrival_at, clock(trip.arrival)), style = MaterialTheme.typography.bodySmall)
-            }
-            WalkLine(view)
-            view.rating?.let { rating ->
-                Text(
-                    ratingText(rating, view.spare, view.gap),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (ambient) Color.White else ratingColor(rating),
-                    textAlign = TextAlign.Center,
-                )
             }
             view.map?.let { map ->
-                Spacer(Modifier.height(2.dp))
-                ChangeMapView(
-                    map = map,
-                    own = own,
-                    lineColor = lineColor,
-                    ambient = ambient,
-                    modifier = Modifier
-                        .fillMaxWidth(0.8f)
-                        .height(70.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                        .clickable(onClick = onMap),
-                )
+                FitLine(PRIORITY_MAP, Modifier.padding(top = 2.dp)) {
+                    ChangeMapView(
+                        map = map,
+                        own = own,
+                        lineColor = lineColor,
+                        ambient = ambient,
+                        toEnd = view.ride == null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(70.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                            .clickable(onClick = onMap),
+                    )
+                }
             }
-            Spacer(Modifier.height(2.dp))
-            OverviewChip(onOverview)
+            FitLine(PRIORITY_ACTION, Modifier.padding(top = 2.dp)) { OverviewChip(onOverview) }
         }
     }
 }
@@ -1085,7 +1365,7 @@ private fun ChangePage(
  * minutes beyond what the change needs ("+4 min to spare").
  */
 @Composable
-private fun ratingText(rating: ChangeRating, spare: Int?, gap: Int? = null): String {
+internal fun ratingText(rating: ChangeRating, spare: Int?, gap: Int? = null): String {
     val name = stringResource(
         when (rating) {
             ChangeRating.Comfortable -> R.string.comfort_relaxed
@@ -1095,7 +1375,7 @@ private fun ratingText(rating: ChangeRating, spare: Int?, gap: Int? = null): Str
         },
     )
     if (gap != null) {
-        // From an hour on in hours and minutes ("1 h 5 min"), as every duration of the app.
+        // From an hour on in hours and minutes ("1:05 h"), as every duration of the app.
         val (hours, rest) = hoursAndMinutes(gap.toLong())
         return when {
             hours == null -> stringResource(R.string.rating_gap, name, gap)
@@ -1108,7 +1388,7 @@ private fun ratingText(rating: ChangeRating, spare: Int?, gap: Int? = null): Str
     return stringResource(R.string.rating_spare, name, signed)
 }
 
-private fun ratingColor(rating: ChangeRating): Color = when (rating) {
+internal fun ratingColor(rating: ChangeRating): Color = when (rating) {
     ChangeRating.Comfortable -> Color(0xFF81C784)
     ChangeRating.Tight -> Color(0xFFE0E0E0)
     ChangeRating.Risky -> AMBER
@@ -1124,14 +1404,30 @@ private fun ratingColor(rating: ChangeRating): Color = when (rating) {
  * style of the setting, dark and dimmed in ambient mode); without the phone the sketch alone.
  */
 @Composable
-private fun ChangeMapView(map: ChangeMap, own: Position?, lineColor: Color, ambient: Boolean, modifier: Modifier, large: Boolean = false) {
+private fun ChangeMapView(
+    map: ChangeMap,
+    own: Position?,
+    lineColor: Color,
+    ambient: Boolean,
+    modifier: Modifier,
+    large: Boolean = false,
+    zoom: MapZoomState? = null,
+    toEnd: Boolean = false,
+) {
     val context = LocalContext.current
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
     val pad = with(density) { (if (large) 36.dp else 12.dp).toPx() }
-    val fit = changeMapFit(map, own?.let { it.latitude to it.longitude }, canvasSize.width, canvasSize.height, pad)
+    // The full screen map keeps its foot free for the caption (#149): the way is fitted above it.
+    val band = if (large) with(density) { CAPTION_BAND.toPx() } else 0f
+    val framing = changeMapFit(map, own?.let { it.latitude to it.longitude }, canvasSize.width, canvasSize.height, pad, band)
+    // The crown zoom of the opened map (#144): the framing scaled by the zoom on screen, moved by the pan.
+    val fit = framing?.let { zoomedFit(it, zoom?.shown?.toDouble() ?: 1.0, zoom?.panX ?: 0.0, zoom?.panY ?: 0.0) }
     val dark = rememberMapDark(ambient)
-    val view = fit?.let {
+    // The picture: that of the framing (stretched while zoomed up to twice), above twice a sharper
+    // one of the zoomed view at the notch's scale (rounded, see MapZoom.requestFactor).
+    val asked = framing?.let { zoomedFit(it, zoom?.requestFactor ?: 1.0, zoom?.panX ?: 0.0, zoom?.panY ?: 0.0) }
+    val view = asked?.let {
         MapImageRequest.ofView(
             it.x,
             it.y,
@@ -1143,9 +1439,9 @@ private fun ChangeMapView(map: ChangeMap, own: Position?, lineColor: Color, ambi
         )
     }
     // Its size, so the pictures of the next changes can be asked for before it shows them (TripMapPrefetch).
-    LaunchedEffect(canvasSize, large) {
+    LaunchedEffect(canvasSize, large, band) {
         if (canvasSize.width > 0 && canvasSize.height > 0) {
-            WatchStore.saveChangeMapSize(context, large, canvasSize.width, canvasSize.height, pad.roundToInt())
+            WatchStore.saveChangeMapSize(context, large, canvasSize.width, canvasSize.height, pad.roundToInt(), band.roundToInt())
         }
     }
     val mapImage = rememberMapImage(if (large) "change-full" else "change", view)
@@ -1158,6 +1454,11 @@ private fun ChangeMapView(map: ChangeMap, own: Position?, lineColor: Color, ambi
         else -> MaterialTheme.colorScheme.primary
     }
     val ink = if (lightMap) MAP_INK else MaterialTheme.colorScheme.onSurface
+    // The walk to the destination ends at a still round badge with a flag (#181), as on the phone.
+    val flagScale = if (large) FLAG_SCALE_LARGE else FLAG_SCALE_SMALL
+    val badgeGlyph = remember(density, flagScale) { watchFlagPath(density.density, flagScale) }
+    val flagColor = watchFlagColor(OWN_BLUE, WATCH_BADGE_INK)
+    val flagGlyphColor = watchGlyphColor(flagColor)
     val textMeasurer = rememberTextMeasurer()
     val attribution = stringResource(R.string.map_attribution)
     // The real way fades in over the straight line once it is there (not when it was there from the start).
@@ -1231,8 +1532,13 @@ private fun ChangeMapView(map: ChangeMap, own: Position?, lineColor: Color, ambi
             val dot = (if (large) 7.dp else 5.dp).toPx()
             if (lightMap && !ambient) drawCircle(Color.White, radius = dot + 1.dp.toPx(), center = a)
             drawCircle(ink, radius = dot, center = a, style = Stroke(width = 2.dp.toPx()))
-            drawCircle(if (ambient) Color.White else lineColor, radius = dot + 1.dp.toPx(), center = b)
-            drawCircle(Color.White, radius = dot + 1.dp.toPx(), center = b, style = Stroke(width = 1.5.dp.toPx()))
+            if (toEnd) {
+                // Dark ink on every map; on a dark one a thin light line outside it (#181c).
+                drawWatchDestinationFlag(b, badgeGlyph, flagColor, WATCH_BADGE_INK, flagGlyphColor, flagScale, ambient, halo = watchBadgeHalo(!lightMap))
+            } else {
+                drawCircle(if (ambient) Color.White else lineColor, radius = dot + 1.dp.toPx(), center = b)
+                drawCircle(Color.White, radius = dot + 1.dp.toPx(), center = b, style = Stroke(width = 1.5.dp.toPx()))
+            }
             at.user?.let {
                 val p = project(it)
                 drawCircle(Color.White, radius = dot + 1.dp.toPx(), center = p)
@@ -1240,13 +1546,16 @@ private fun ChangeMapView(map: ChangeMap, own: Position?, lineColor: Color, ambi
             }
             northMark(ink, large)
             if (onMap) {
+                // In the small map the upper left corner (the north arrow has the right one), on a ground of its own (#149).
                 drawMapAttribution(textMeasurer.measureAttribution(attribution, dark = dark), dark = dark, corner = !large)
             }
         }
-        // While the phone has sent no picture: how it is coming along, instead of a silent sketch.
-        if (image == null && !ambient) {
+        // While the phone has sent no picture, or only a blurry stand-in (a kept picture of
+        // another zoom, the quick one): how the sharp one is coming along (#149).
+        if ((image == null || !mapImage.sharp) && !ambient) {
             MapImageStatusLine(
-                mapImage.status,
+                // A stand-in that came with the status "ready" (the quick picture): still loading.
+                if (mapImage.status == MapImageStatus.Ready) MapImageStatus.Waiting else mapImage.status,
                 modifier = if (large) {
                     Modifier.align(Alignment.TopCenter).padding(top = TOP_CLEARANCE + 4.dp)
                 } else {
@@ -1256,6 +1565,12 @@ private fun ChangeMapView(map: ChangeMap, own: Position?, lineColor: Color, ambi
             )
         }
     }
+}
+
+/** [fit] zoomed by [factor] around its middle moved by ([panX], [panY]) pixels of the framing. */
+private fun zoomedFit(fit: ChangeMapFit, factor: Double, panX: Double, panY: Double): ChangeMapFit {
+    if (factor <= 1.0 && panX == 0.0 && panY == 0.0) return fit
+    return ChangeMapFit(fit.x + panX / fit.pixelsPerUnit, fit.y + panY / fit.pixelsPerUnit, fit.pixelsPerUnit * factor, fit.user)
 }
 
 /** North is up: a small arrow in the upper right corner. */
@@ -1284,17 +1599,27 @@ private fun FullMap(view: TransferView, own: Position?, lineColor: Color, ambien
     // else the straight line with the minutes of the step.
     val distance = map.meters ?: sqrt(east * east + north * north).roundToInt()
     val minutes = map.minutes ?: view.walkMinutes
+    // The crown zooms in (up to 4x) and back out to the framing, a drag pans while zoomed (#144);
+    // another change starts at the framing again.
+    val zoom = rememberMapZoomState(listOf(map.fromLatitude, map.fromLongitude, map.toLatitude, map.toLongitude))
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable(onClick = onClose),
+            .mapCrownZoom(zoom, active = !ambient, refocus = ambient, onTap = onClose),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        ChangeMapView(map, own, lineColor, ambient, modifier = Modifier.fillMaxSize(), large = true)
+        ChangeMapView(map, own, lineColor, ambient, modifier = Modifier.fillMaxSize(), large = true, zoom = zoom, toEnd = view.ride == null)
+        // The caption on a scrim of its own: the station signs drawn into the picture never run through it (#149).
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(CAPTION_BAND + 18.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = CAPTION_SCRIM_ALPHA), Color.Black.copy(alpha = CAPTION_SCRIM_ALPHA)))),
+        )
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 18.dp)) {
             Text(
-                view.ride?.let { platformText(it.platform, it.line) } ?: view.toName,
+                view.ride?.let { platformText(it.platform, it.line, it.product) } ?: view.toName,
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1336,69 +1661,163 @@ private fun OverviewPage(
         snapshotFlow { listState.isScrollInProgress }.collect { if (it) onInteract() }
     }
     val plan = trip.plan
+    val timeline = remember(plan, trip.planWalkEnd, trip.arrival, trip.destination) {
+        overviewTimeline(plan, trip.planWalkEnd, trip.arrival, trip.destination)
+    }
+    // The item in the middle of the list, read by the pill only (no per-frame work).
+    val centreState = remember(listState) { derivedStateOf { listState.centerItemIndex } }
+    val centre by centreState
+    // The option of the time travel; the page follows a change at once (#254).
+    val timeTravel by WatchStore.crownTimeTravel.collectAsState()
     val current = when {
         trip.planIndex >= 0 -> trip.planIndex
         trip.kind == StepKind.WalkToEnd || trip.kind == StepKind.Arrived -> plan.size
         else -> plan.indexOfFirst { it.arrival > now.value }.takeIf { it >= 0 } ?: plan.size
     }
-    ScreenScaffold(scrollState = listState) { contentPadding ->
-        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus(active)) {
-            item { ListHeader { Text(stringResource(R.string.overview)) } }
-            if (plan.isEmpty()) {
-                // An older phone app sends no plan: the step and the next ride.
-                item { Text(stepText(trip), style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center) }
-                item { Note(untilText(trip.time, now.value)) }
-                trip.next?.let { next ->
-                    item {
-                        Note(
-                            stringResource(R.string.then_label) + ": " + (next.line ?: "") + " · " + next.stop + " · " +
-                                stringResource(R.string.departs_at, clock(next.time), untilText(next.time, now.value)),
-                        )
-                    }
-                }
-                item { ProgressBar(trip.progress, modifier = Modifier.fillMaxWidth()) }
-            } else {
-                plan.forEachIndexed { index, ride ->
-                    if (ride.walkBefore > 0 || ride.rating != null) {
+    // No scroll state for the scaffold: the time stays at the top (see TIME_TEXT_NOTE).
+    // "End trip" as the EdgeButton at the foot (#145); the scroll info moves only that, not the time.
+    val edgeInfo = remember(listState) { edgeScrollInfo(listState) }
+    ScreenScaffold(
+        scrollInfoProvider = edgeInfo,
+        edgeButton = {
+            // Ends the trip here and on the phone, whichever of the two follows it.
+            EdgeAction(text = stringResource(R.string.end_trip), onClick = onEnd, icon = R.drawable.ic_close)
+        },
+        scrollIndicator = {
+            if (listState.canScrollForward || listState.canScrollBackward) ScrollIndicator(listState, Modifier.align(Alignment.CenterEnd))
+        },
+    ) { contentPadding ->
+        Box(Modifier.fillMaxSize()) {
+            ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus(active, refocus = ambient)) {
+                item { ListHeader { Text(stringResource(R.string.overview)) } }
+                if (plan.isEmpty()) {
+                    // An older phone app sends no plan: the step and the next ride.
+                    item { Text(stepText(trip), style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center) }
+                    item { Note(untilText(trip.time, now.value)) }
+                    trip.next?.let { next ->
                         item {
-                            Connector(
-                                minutes = ride.walkBefore,
-                                cycling = ride.bikeBefore,
-                                rating = ride.rating,
-                                spare = ride.spare,
-                                gap = ride.gap,
-                                current = index == current && trip.kind == StepKind.Board,
-                                ambient = ambient,
+                            Note(
+                                stringResource(R.string.then_label) + ": " + (next.line ?: "") + " · " + next.stop + " · " +
+                                    stringResource(R.string.departs_at, clock(next.time), untilText(next.time, now.value)),
                             )
                         }
                     }
-                    item { PlanRideRow(ride, current = index == current, past = index < current) }
+                    item { ProgressBar(trip.progress, modifier = Modifier.fillMaxWidth()) }
+                } else {
+                    // The rows in the order of the time line, so the pill of the time travel names the row in the middle.
+                    timeline.forEach { row ->
+                        when (row.kind) {
+                            TimelineKind.Connector -> {
+                                val index = row.ride
+                                val ride = plan[index]
+                                item {
+                                    Connector(
+                                        minutes = ride.walkBefore,
+                                        cycling = ride.bikeBefore,
+                                        rating = ride.rating,
+                                        spare = ride.spare,
+                                        gap = ride.gap,
+                                        current = index == current && trip.kind == StepKind.Board,
+                                        ambient = ambient,
+                                    )
+                                }
+                            }
+                            TimelineKind.Ride -> {
+                                val index = row.ride
+                                val ride = plan[index]
+                                item { PlanRideRow(ride, current = index == current, past = index < current) }
+                            }
+                            TimelineKind.EndWalk -> {
+                                item { Connector(trip.planWalkEnd, null, null, null, current = current >= plan.size, ambient = ambient, cycling = trip.planBikeEnd) }
+                            }
+                            // The line of the arrival follows below, with or without a plan.
+                            TimelineKind.Arrival -> Unit
+                        }
+                    }
                 }
-                if (trip.planWalkEnd > 0) {
-                    item { Connector(trip.planWalkEnd, null, null, null, current = current >= plan.size, ambient = ambient, cycling = trip.planBikeEnd) }
-                }
-            }
-            item {
-                Text(
-                    stringResource(R.string.arrival_at, clock(trip.arrival)) + " · " + trip.destination,
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    fontWeight = if (current >= plan.size && plan.isNotEmpty()) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            if (trip.kind != StepKind.Arrived) {
                 item {
-                    SmallAction(
-                        text = stringResource(if (replanning) R.string.loading else R.string.missed_it),
-                        onClick = onMissed,
-                        icon = R.drawable.ic_replan,
+                    Text(
+                        stringResource(R.string.arrival_at, clock(trip.arrival)) + " · " + trip.destination,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        // The short name the phone sends (#146); a long one ends in an ellipsis on the second line.
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = if (current >= plan.size && plan.isNotEmpty()) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                if (replanFailed) item { Note(stringResource(R.string.missed_it_failed)) }
+                if (trip.kind != StepKind.Arrived) {
+                    item {
+                        SmallAction(
+                            text = stringResource(if (replanning) R.string.loading else R.string.missed_it),
+                            onClick = onMissed,
+                            icon = R.drawable.ic_replan,
+                        )
+                    }
+                    if (replanFailed) item { Note(stringResource(R.string.missed_it_failed)) }
+                }
             }
-            // Ends the trip here and on the phone, whichever of the two follows it.
-            item { SmallAction(text = stringResource(R.string.end_trip), onClick = onEnd, icon = R.drawable.ic_close) }
+            // Time travel: the list is the time line; the crown keeps scrolling it, and the pill
+            // tells where the row in the middle is in time. Not before scrolling, nor without a
+            // plan, and only with the option (off by default, #254: the crown then just scrolls).
+            if (timeTravelShown(timeTravel, plan.isNotEmpty(), ambient)) {
+                TimeTravelPill(
+                    rowOf = { timelineAt(timeline, centre) },
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = TIME_TRAVEL_TOP),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The pill of the time travel on the overview: the time and place of the row [rowOf] gives
+ * (read here, so scrolling recomposes only the pill) and the buffer of the next change from
+ * there. Fades in once the list is scrolled off its header, out again at the top.
+ */
+@Composable
+private fun TimeTravelPill(rowOf: () -> TimelineRow?, modifier: Modifier = Modifier) {
+    val row = rowOf()
+    // The last row stays while the pill fades out.
+    val shownRow = remember { arrayOfNulls<TimelineRow>(1) }
+    if (row != null) shownRow[0] = row
+    val animate = rememberWatchAnimationsOn()
+    val visible by animateFloatAsState(
+        targetValue = if (row != null) 1f else 0f,
+        animationSpec = if (animate) tween(TIME_TRAVEL_FADE_MILLIS) else snap(),
+        label = "timeTravel",
+    )
+    val shown = shownRow[0] ?: return
+    if (visible == 0f) return
+    val buffer = shown.buffer?.let { minutes ->
+        if (minutes >= 0) stringResource(R.string.r6ideas_tt_buffer, minutes) else stringResource(R.string.r6ideas_tt_short, -minutes)
+    }
+    val second = listOfNotNull(shown.line, buffer).joinToString(" · ")
+    Column(
+        modifier = modifier
+            .alpha(visible)
+            .fillMaxWidth(TIME_TRAVEL_WIDTH)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            stringResource(R.string.r6ideas_tt_at, clock(shown.time), shown.place),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (second.isNotEmpty()) {
+            Text(
+                second,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -1445,7 +1864,7 @@ private fun Connector(
 
 /** One ride of the overview; the one of the step of now framed, those behind dim. */
 @Composable
-private fun PlanRideRow(ride: PlanRide, current: Boolean, past: Boolean) {
+internal fun PlanRideRow(ride: PlanRide, current: Boolean, past: Boolean) {
     val shape = RoundedCornerShape(14.dp)
     Column(
         modifier = Modifier
@@ -1473,7 +1892,7 @@ private fun PlanRideRow(ride: PlanRide, current: Boolean, past: Boolean) {
             overflow = TextOverflow.Ellipsis,
         )
         // An arrow before the destination saves room; read out as "towards …".
-        val platform = platformText(ride.departurePlatform, ride.line)
+        val platform = platformText(ride.departurePlatform, ride.line, ride.product)
         val where = listOfNotNull(platform, ride.direction?.let { stringResource(R.string.towards_arrow, it) }).joinToString(" · ")
         val spokenWhere = listOfNotNull(platform, ride.direction?.let { stringResource(R.string.towards, it) }).joinToString(" · ")
         if (where.isNotEmpty()) {
@@ -1492,7 +1911,6 @@ private const val HOLD_MILLIS = 60_000L
 private const val RING_WINDOW_MILLIS = 10 * 60_000L
 
 // From this far ahead, a clock time instead of minutes.
-private const val FAR_MILLIS = 60 * 60_000L
 
 // The dots on the line of stops on board, and the cars of the boarding sketch.
 private const val MAX_DOTS = 5
@@ -1521,6 +1939,11 @@ private val BOTTOM_CLEARANCE = 22.dp
 private val GREEN = Color(0xFF4CAF50)
 private val AMBER = Color(0xFFFFB300)
 
+// The time travel pill on the overview: below the time of the watch, this wide, fading this fast.
+private val TIME_TRAVEL_TOP = 30.dp
+private const val TIME_TRAVEL_WIDTH = 0.62f
+private const val TIME_TRAVEL_FADE_MILLIS = 180
+
 // The colours the arrival confetti always has besides the line: the lime and blue of Next Stop.
 private val CONFETTI_LIME = Color(0xFFC8F16B)
 private val CONFETTI_BLUE = Color(0xFF3D6AF2)
@@ -1531,3 +1954,46 @@ private val OWN_BLUE = Color(0xFF4FC3F7)
 private val WAY_ON_MAP = Color(0xFF1565C0)
 private val MAP_INK = Color(0xFF37474F)
 private const val AMBIENT_MAP_ALPHA = 0.35f
+
+// The share of the page column's width for an action at its foot, low on the round screen (#145).
+private const val FOOT_ACTION_WIDTH = 0.85f
+
+// The foot of the full screen change map kept for its caption (platform, distance), and its scrim (#149).
+private val CAPTION_BAND = 52.dp
+private const val CAPTION_SCRIM_ALPHA = 0.78f
+
+// The green of live times ("Live · vor 25 s").
+private val LIVE_GREEN = Color(0xFF81C784)
+
+/**
+ * The sunny side as a small picture (#269): a rail car seen from above, heading up, the sun
+ * beside it shining onto its [left] or right side, and a soft shadow on the other side.
+ */
+@Composable
+private fun SunWagonMark(left: Boolean, height: Dp, ink: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(width = height * 22f / 16f, height = height)) {
+        val u = this.size.height / 16f
+        val sun = Color(0xFFF2A900)
+        // Drawn for the left side; the right side is its mirror image.
+        withTransform({ if (!left) scale(-1f, 1f, pivot = center) }) {
+            drawCircle(sun, radius = 2.4f * u, center = Offset(4f * u, 8f * u))
+            drawLine(sun, Offset(8.5f * u, 3.5f * u), Offset(6f * u, 5f * u), strokeWidth = 1.2f * u, cap = StrokeCap.Round)
+            drawLine(sun, Offset(8.5f * u, 12.5f * u), Offset(6f * u, 11f * u), strokeWidth = 1.2f * u, cap = StrokeCap.Round)
+            drawRoundRect(
+                ink,
+                topLeft = Offset(9f * u, 1.5f * u),
+                size = Size(8f * u, 13f * u),
+                cornerRadius = CornerRadius(3f * u),
+                style = Stroke(width = 1.2f * u),
+            )
+            val shade = Path().apply {
+                moveTo(17.6f * u, 3.5f * u)
+                lineTo(20.6f * u, 4.5f * u)
+                lineTo(20.6f * u, 12.5f * u)
+                lineTo(17.6f * u, 13.5f * u)
+                close()
+            }
+            drawPath(shade, ink.copy(alpha = 0.18f))
+        }
+    }
+}

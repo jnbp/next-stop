@@ -1,9 +1,9 @@
 package io.github.jnbp.nextstop.wear
 
+import io.github.jnbp.nextstop.data.DiagLog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.util.Log
 import androidx.wear.remote.interactions.RemoteActivityHelper
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.Wearable
@@ -40,7 +40,7 @@ object WatchLink {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.d(TAG, "no connected nodes: $e")
+            DiagLog.d(TAG) { "no connected nodes: $e" }
             emptyList()
         }
         if (nodes.isEmpty()) return WatchStatus(WatchState.None)
@@ -52,7 +52,7 @@ object WatchLink {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.d(TAG, "capability check failed: $e")
+            DiagLog.d(TAG) { "capability check failed: $e" }
             emptySet()
         }
         capable.firstOrNull()?.let { return WatchStatus(WatchState.Connected, it.id, it.displayName) }
@@ -73,7 +73,7 @@ object WatchLink {
             RemoteActivityHelper(context).startRemoteActivity(intent, nodeId)
             true
         } catch (e: Exception) {
-            Log.d(TAG, "cannot open the store on the watch: $e")
+            DiagLog.d(TAG) { "cannot open the store on the watch: $e" }
             false
         }
     }

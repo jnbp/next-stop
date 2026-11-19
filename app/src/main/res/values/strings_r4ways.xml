@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The search field of "All disruptions". -->
+    <string name="r4_disruptions_search_hint">Line, station or text</string>
+    <string name="r4_disruptions_search_none">No disruption matches “%1$s”</string>
+    <!-- "Disruptions on your ways" folded to one line. -->
+    <plurals name="r4_ways_notices_count">
+        <item quantity="one">%1$d disruption</item>
+        <item quantity="other">%1$d disruptions</item>
+    </plurals>
+    <string name="r4_ways_notices_expand">Show disruptions</string>
+    <string name="r4_ways_notices_collapse">Hide disruptions</string>
+</resources>

@@ -84,6 +84,7 @@ private fun rideRank(departure: Departure): Int =
 
 /** True when two runs of one board are one ride (see [withoutDoubleRides]). */
 internal fun oneRide(a: Departure, b: Departure): Boolean {
+    if (sameTrainRun(a, b)) return true
     if (normalLine(a.line) != normalLine(b.line)) return false
     val one = stationNameKey(a.direction)
     if (one.isEmpty() || one != stationNameKey(b.direction)) return false
@@ -93,4 +94,29 @@ internal fun oneRide(a: Departure, b: Departure): Boolean {
     val x = a.platform?.trim().orEmpty()
     val y = b.platform?.trim().orEmpty()
     return x.isEmpty() || y.isEmpty() || x.equals(y, ignoreCase = true)
+}
+
+// Two departures of one train number this far apart as planned are one train sent by two feeds.
+private const val SAME_TRAIN_MINUTES = 2L
+
+// The train number at the end of a long-distance train's name: "ICE 9552", "TGV INOUI 9898", "EC 65".
+private val TRAIN_NUMBER = Regex("(?:^|[^0-9])([0-9]{2,6})$")
+
+/**
+ * True when [a] and [b] are one long-distance train that two feeds both send (Transitous,
+ * 18 Nov 2026: the ICE 9591 at Strasbourg from DELFI towards "Frankfurt (Main) Hauptbahnhof"
+ * and from the SNCF towards "Francfort sur le Main"; the TGV 9218 at Basel SBB from the SBB
+ * and the SNCF): both long-distance, the same train number, planned within
+ * [SAME_TRAIN_MINUTES], and directions that may name one place (see
+ * StationIdentity.directionsMayMatch). A cancelled run and an extra one are never one train.
+ */
+internal fun sameTrainRun(a: Departure, b: Departure): Boolean {
+    if (a.product != "express" || b.product != "express") return false
+    if (a.cancelled != b.cancelled && (a.additional || b.additional)) return false
+    val number = TRAIN_NUMBER.find(a.line.trim())?.groupValues?.get(1)?.trimStart('0') ?: return false
+    if (number.isEmpty() || number != TRAIN_NUMBER.find(b.line.trim())?.groupValues?.get(1)?.trimStart('0')) return false
+    val first = (a.plannedTime ?: a.time)?.toEpochSecond() ?: return false
+    val second = (b.plannedTime ?: b.time)?.toEpochSecond() ?: return false
+    if (kotlin.math.abs(first - second) > SAME_TRAIN_MINUTES * 60) return false
+    return StationIdentity.directionsMayMatch(a.direction, b.direction)
 }

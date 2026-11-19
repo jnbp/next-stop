@@ -3,6 +3,7 @@ package io.github.jnbp.nextstop.wear.data
 import android.content.Context
 import android.util.Log
 import kotlin.coroutines.cancellation.CancellationException
+import io.github.jnbp.nextstop.wear.complication.NearestStop
 
 /*
  * The live card of the start page: the stop nearest to the user and its next departures, from
@@ -64,6 +65,8 @@ object NearbyGlances {
             DepartureCache.put(context, stop.id, departures)
             val glance = NearbyGlance(stop, departures, System.currentTimeMillis(), fresh = true)
             last = glance
+            // The complications of nearby departures take this stop without a lookup of their own.
+            position?.let { NearestStop.remember(context, stop, it) }
             NearbyGlanceResult.Ready(glance)
         } catch (e: CancellationException) {
             throw e

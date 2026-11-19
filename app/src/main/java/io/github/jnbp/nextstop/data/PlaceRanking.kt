@@ -19,12 +19,31 @@ const val REGION_METERS = 50_000
  * "Gartenstr" finds "Gartenstraße".
  */
 fun searchTokens(text: String): List<String> {
+    synchronized(TOKEN_CACHE) { TOKEN_CACHE[text] }?.let { return it }
+    val tokens = tokensOf(text)
+    synchronized(TOKEN_CACHE) { TOKEN_CACHE[text] = tokens }
+    return tokens
+}
+
+private fun tokensOf(text: String): List<String> {
     val folded = text.lowercase()
         .replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
-    val plain = Normalizer.normalize(folded, Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
-    return plain.split(Regex("[^a-z0-9]+"))
+    // Plain ASCII has no accents to take off.
+    val plain = if (folded.all { it.code < 0x80 }) folded else Normalizer.normalize(folded, Normalizer.Form.NFD).replace(MARKS, "")
+    return plain.split(NON_TOKEN)
         .filter { it.isNotEmpty() }
-        .map { word -> word.replace(Regex("(strasse|str)$"), "str") }
+        .map { word -> if (word.endsWith("strasse")) word.dropLast("strasse".length) + "str" else word }
+}
+
+// Made once: the search compares every place in its list with what is typed at every key (#109).
+private val MARKS = Regex("\\p{M}+")
+private val NON_TOKEN = Regex("[^a-z0-9]+")
+
+// The words of the last texts compared (names of places, queries), so a key typed does not
+// take every name of the list apart again. Shared by all threads, hence guarded.
+private const val TOKEN_CACHE_SIZE = 1024
+private val TOKEN_CACHE = object : LinkedHashMap<String, List<String>>(TOKEN_CACHE_SIZE, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?): Boolean = size > TOKEN_CACHE_SIZE
 }
 
 /**

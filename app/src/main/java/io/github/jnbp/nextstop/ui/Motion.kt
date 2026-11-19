@@ -129,7 +129,8 @@ private const val INTRO_MAP_POLL_MILLIS = 30L
  */
 suspend fun awaitIntroStep(step: Int) {
     while (Startup.mapShownAt == 0L) delay(INTRO_MAP_POLL_MILLIS)
-    val left = Startup.mapShownAt + step * INTRO_STEP_MILLIS - SystemClock.uptimeMillis()
+    // The steps at the system's animator duration scale: all at once without animations.
+    val left = Startup.mapShownAt + SystemAnimation.millis(step * INTRO_STEP_MILLIS) - SystemClock.uptimeMillis()
     if (left > 0L) delay(left)
 }
 
@@ -141,6 +142,11 @@ fun Modifier.shimmer(
     ground: Color = AppColors.Chip,
     highlight: Color = AppColors.Card,
 ): Modifier = composed {
+    // The battery saver keeps the placeholder still: its plain ground only.
+    if (BatterySaver.active) return@composed drawWithContent {
+        drawRect(ground)
+        drawContent()
+    }
     val transition = rememberInfiniteTransition(label = "shimmer")
     val shift = transition.animateFloat(
         initialValue = -1f,
@@ -224,6 +230,38 @@ fun Modifier.glideToPlace(animate: Boolean): Modifier = composed {
             }
         }
         .graphicsLayer { translationY = shift.value }
+}
+
+/**
+ * Lets a tile of a row glide sideways to its new place when the row is put in another order
+ * ([slot], its place in that order, changed), as the shared row under a change when a chip
+ * turns its kind of tiles on or off (#257). Only a new place glides: a tile that moves because
+ * a neighbour folds in or out follows that fold as it is. Inside `key(...)` of its tile; with
+ * [animate] false (animations off) it simply is at its place.
+ */
+fun Modifier.glideToSlot(slot: Int, animate: Boolean): Modifier = composed {
+    val shift = remember { Animatable(0f) }
+    // Where the tile was laid out last in its row (NaN before the first layout), and its place then.
+    val placedAt = remember { floatArrayOf(Float.NaN) }
+    val placedSlot = remember { intArrayOf(slot) }
+    val scope = rememberCoroutineScope()
+    Modifier
+        .onPlaced { coordinates ->
+            val x = coordinates.positionInParent().x
+            val before = placedAt[0]
+            val moved = placedSlot[0] != slot
+            placedAt[0] = x
+            placedSlot[0] = slot
+            if (animate && moved && !before.isNaN() && before != x) {
+                val from = before + shift.value - x
+                // Undispatched, so the jump back is in place before the frame is drawn.
+                scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    shift.snapTo(from)
+                    shift.animateTo(0f, Motion.settle())
+                }
+            }
+        }
+        .graphicsLayer { translationX = shift.value }
 }
 
 /**

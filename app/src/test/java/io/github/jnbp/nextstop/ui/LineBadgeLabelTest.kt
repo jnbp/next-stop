@@ -69,4 +69,13 @@ class LineBadgeLabelTest {
             "U8" to "subway", "M10" to "tram", "100" to "bus", "M48" to "bus", "RJ 174" to "express",
         )) assertNull(line, modeHint(line, product))
     }
+
+    @Test
+    fun trainNumbersFitTheBadgeAsTheLineNumbersDid() {
+        // #85: trains by their train number now ("ICE 621" for "ICE 41"): still within a badge.
+        assertEquals("ICE 621", badgeLine("ICE 621"))
+        assertEquals("ICE 1092", badgeLine("ICE 1092"))
+        assertEquals("IC 2433", compactLine("IC 2433"))
+        assertTrue(badgeLine("ECE 151")!!.length <= BADGE_MAX_CHARS)
+    }
 }

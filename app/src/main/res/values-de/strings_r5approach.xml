@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Map settings: the grey dashed approach of the vehicles of later rides on a followed trip. -->
+    <string name="approach_setting_title">Spätere Fahrzeuge zeigen</string>
+    <string name="approach_setting_text">Zeigt auf der Karte, wo die Fahrzeuge, in die du später umsteigst, gerade unterwegs sind – mit ihrer Anfahrt gestrichelt.</string>
+</resources>

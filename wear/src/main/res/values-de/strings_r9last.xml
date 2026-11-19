@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #277: in front of a time the phone estimated from the position. -->
+    <string name="r9last_estimated_prefix">ca.</string>
+</resources>

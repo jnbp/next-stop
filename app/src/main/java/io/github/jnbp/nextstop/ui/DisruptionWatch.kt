@@ -3,7 +3,6 @@ package io.github.jnbp.nextstop.ui
 import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -23,7 +22,6 @@ import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
-import io.github.jnbp.nextstop.MainActivity
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.data.DEFAULT_PLACE_RADIUS
@@ -36,6 +34,7 @@ import io.github.jnbp.nextstop.data.RouteStatus
 import io.github.jnbp.nextstop.data.RoutingSource
 import io.github.jnbp.nextstop.data.SavedRoute
 import io.github.jnbp.nextstop.data.Stop
+import io.github.jnbp.nextstop.data.lineKey
 import io.github.jnbp.nextstop.data.mergeDisruptions
 import io.github.jnbp.nextstop.data.TransitousSource
 import io.github.jnbp.nextstop.data.newDisruptions
@@ -59,8 +58,18 @@ data class StoredRouteStatus(
     val spots: List<Stop> = emptyList(),
     /** The radius they were looked for in; 0 for a status stored before there was one. */
     val radiusMeters: Int = 0,
+    /** The next journeys found: when each leaves (epoch millis) and the lines it rides. */
+    val next: List<Pair<Long, List<String>>> = emptyList(),
 ) {
     val clear: Boolean get() = count == 0 && !cancelled
+
+    /**
+     * The next departure after [nowMillis]: of any journey, or with [lines] only of one that
+     * rides exactly those lines (a saved connection). Null when none is known.
+     */
+    fun nextDeparture(nowMillis: Long, lines: List<String>? = null): Long? = next.firstOrNull { (at, rides) ->
+        at >= nowMillis && (lines == null || rides.map { lineKey(it) } == lines.map { lineKey(it) })
+    }?.first
 }
 
 /**
@@ -158,12 +167,17 @@ object DisruptionWatch {
 
     /**
      * The times of the daily checks in minutes after midnight, sorted; empty when there is none.
-     * Before they were stored, the single time of the former morning check stands in.
+     * Before they were stored, the single time of the former morning check stands in, and
+     * without that one 7:00 ([DEFAULT_CHECK_MINUTES]) is preselected.
      */
     fun checkTimes(context: Context): List<Int> {
         val store = store(context)
         val text = store.getString(KEY_CHECK_TIMES, null)
-            ?: return listOfNotNull(store.getInt(KEY_MORNING, -1).takeIf { it >= 0 })
+            ?: return if (store.contains(KEY_MORNING)) {
+                listOfNotNull(store.getInt(KEY_MORNING, -1).takeIf { it >= 0 })
+            } else {
+                listOf(DEFAULT_CHECK_MINUTES)
+            }
         return parseCheckTimes(text)
     }
 
@@ -187,8 +201,15 @@ object DisruptionWatch {
         schedule(context)
     }
 
-    /** How often the watched routes and places are checked in between, in minutes; 0 is not at all (see [watchPeriod]). */
-    fun periodMinutes(context: Context): Int = watchPeriod(store(context).getInt(KEY_PERIOD, DEFAULT_PERIOD_MINUTES))
+    /**
+     * "Unterwegs prüfen": how often the watched routes and places are checked in between, in
+     * minutes; 0 is not at all (see [watchPeriod]). Opt-in: off until chosen; a choice stored
+     * by an earlier version stays. Paused while the battery saver is active (see [plan]).
+     */
+    fun periodMinutes(context: Context): Int {
+        val store = store(context)
+        return if (store.contains(KEY_PERIOD)) watchPeriod(store.getInt(KEY_PERIOD, 0)) else 0
+    }
 
     fun setPeriodMinutes(context: Context, minutes: Int) {
         store(context).edit().putInt(KEY_PERIOD, watchPeriod(minutes)).apply()
@@ -202,10 +223,16 @@ object DisruptionWatch {
         store(context).edit().putBoolean(KEY_BELL_EXPLAINED, true).apply()
     }
 
-    /** The saved routes that still exist and have the bell on. */
+    /**
+     * The saved routes that still exist and have the bell on, and the routes between the ends
+     * of saved connections with the bell on (a connection's bell watches the way between its ends).
+     */
     fun watchedRoutes(context: Context): List<SavedRoute> {
         val watched = watched(context)
-        return AppPrefs(context).loadRoutes().filter { it.id in watched }
+        val prefs = AppPrefs(context)
+        return (prefs.loadRoutes() + prefs.loadPatterns().map { SavedRoute(it.from, it.to) })
+            .distinctBy { it.id }
+            .filter { it.id in watched }
     }
 
     /**
@@ -224,14 +251,36 @@ object DisruptionWatch {
             .take(MAX_WATCHED_PLACES)
     }
 
+    /**
+     * The places the watch looks at now: all watchable ones while places are on (see
+     * [checkPlaces]); else those with a bell of their own (a favourite or saved place, or a
+     * favourite stop: the notices within its reach). One bell logic for all: a key of the
+     * watched set (see [placeWatchKey]) as the routes have their id.
+     */
+    fun watchedPlaces(context: Context): List<Pair<String, Stop>> {
+        val places = watchablePlaces(context)
+        val watched = watched(context)
+        val stops = AppPrefs(context).loadPlaces(AppPrefs.KEY_FAVORITES).map { it.name.shortStopName() to it }
+        val belled = (places + stops).filter { (_, place) -> placeWatchKey(place)?.let { it in watched } == true }
+        return ((if (checkPlaces(context)) places else emptyList()) + belled)
+            .distinctBy { placeDisruptionKey(it.second) }
+            .take(MAX_WATCHED_PLACES)
+    }
+
     /** What the watch runs now (see [watchSchedule]). */
-    fun plan(context: Context): WatchSchedule = watchSchedule(
-        watchedRoutes = watchedRoutes(context).size,
-        checkPlaces = checkPlaces(context),
-        places = watchablePlaces(context).size,
-        periodMinutes = periodMinutes(context),
-        times = checkTimes(context),
-    )
+    fun plan(context: Context): WatchSchedule {
+        val places = watchedPlaces(context).size
+        return watchSchedule(
+            watchedRoutes = watchedRoutes(context).size,
+            checkPlaces = places > 0,
+            places = places,
+            // The job every n minutes only where chosen ("Unterwegs prüfen", opt-in) and never
+            // while the battery saver is active.
+            periodMinutes = periodMinutes(context),
+            times = checkTimes(context),
+            saving = BatterySaver.active,
+        )
+    }
 
     /** The lines of the saved routes, as last found: they come first in the overview. */
     fun myLines(context: Context): Set<String> = store(context).getStringSet(KEY_MY_LINES, null).orEmpty()
@@ -282,6 +331,10 @@ object DisruptionWatch {
                 }.orEmpty(),
                 spots = storedStops(json.optJSONArray("spots")),
                 radiusMeters = json.optInt("radius"),
+                next = objects(json.optJSONArray("next")).map { item ->
+                    val rides = item.optJSONArray("lines")
+                    item.optLong("at") to if (rides == null) emptyList() else (0 until rides.length()).map { rides.optString(it) }
+                },
             )
         } catch (e: Exception) {
             null
@@ -334,6 +387,14 @@ object DisruptionWatch {
             .put("spots", stopsJson(status.spots))
             .put("radius", status.radiusMeters)
             .put(
+                "next",
+                org.json.JSONArray(
+                    status.next.take(MAX_STORED_NEXT).map { (at, rides) ->
+                        JSONObject().put("at", at.toInstant().toEpochMilli()).put("lines", org.json.JSONArray(rides))
+                    },
+                ),
+            )
+            .put(
                 "items",
                 org.json.JSONArray(
                     all.map { (item, around) ->
@@ -384,11 +445,37 @@ object DisruptionWatch {
             val network = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
             val periodic = PeriodicWorkRequestBuilder<DisruptionWorker>(period.toLong(), TimeUnit.MINUTES)
                 .setConstraints(network)
+                .setInputData(workDataOf(KEY_PERIODIC_RUN to true))
                 .build()
             work.enqueueUniquePeriodicWork(WORK_PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, periodic)
         }
         scheduleChecks(context)
     }
+
+    /**
+     * The app came to the front: the watched routes and places are checked once, at most every
+     * [FRONT_CHECK_MILLIS] (instead of the former job every n minutes, see the battery rule).
+     * One job, run at once with a network; nothing while nothing is watched.
+     */
+    fun checkInFront(context: Context) {
+        val app = context.applicationContext
+        val now = System.currentTimeMillis()
+        val store = store(app)
+        if (now - store.getLong(KEY_FRONT_CHECK, 0L) < FRONT_CHECK_MILLIS) return
+        val plan = plan(app)
+        if (!watchActive(app)) return
+        store.edit().putLong(KEY_FRONT_CHECK, now).apply()
+        val request = OneTimeWorkRequestBuilder<DisruptionWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(app).enqueueUniqueWork(WORK_FRONT, ExistingWorkPolicy.KEEP, request)
+        // The former job every n minutes, if one is still planned from an older version, goes.
+        if (plan.periodicMinutes == null) WorkManager.getInstance(app).cancelUniqueWork(WORK_PERIODIC)
+    }
+
+    /** True while a route has the bell on or places are watched. */
+    private fun watchActive(context: Context): Boolean =
+        watchedRoutes(context).isNotEmpty() || watchedPlaces(context).isNotEmpty()
 
     /**
      * The next run of every daily check: one job per time (all tagged [TAG_CHECK], so the ones
@@ -419,13 +506,14 @@ object DisruptionWatch {
      */
     suspend fun check(context: Context, scheduled: Boolean) {
         val routes = watchedRoutes(context)
-        val places = if (checkPlaces(context)) watchablePlaces(context) else emptyList()
+        val places = watchedPlaces(context)
         if (routes.isEmpty() && places.isEmpty()) return
         val prefs = AppPrefs(context)
         val source = RoutingSource(
             choice = { prefs.sourceChoice },
             userAgent = TransitousSource.userAgent(context),
             bvgUrl = { ownServerUrl(prefs.ownServer) },
+            kindLookups = false,
         )
         val seen = seen(context).toMutableMap()
         val now = System.currentTimeMillis()
@@ -498,12 +586,12 @@ object DisruptionWatch {
             route.to.name.shortStopName(),
         )
         val lines = noticeLines(fresh) + if (cancelled) listOf(context.getString(R.string.disruption_cancelled)) else emptyList()
-        post(context, route.id, title, lines)
+        post(context, route.id, title, lines, fresh)
     }
 
     /** New notices in the reach of the place [name]. */
     private fun notifyPlace(context: Context, key: String, name: String, fresh: List<Disruption>) {
-        post(context, PLACE_PREFIX + key, context.getString(R.string.disruption_notification_place_title, name), noticeLines(fresh))
+        post(context, PLACE_PREFIX + key, context.getString(R.string.disruption_notification_place_title, name), noticeLines(fresh), fresh)
     }
 
     private fun noticeLines(fresh: List<Disruption>): List<String> = fresh.map { item ->
@@ -512,15 +600,20 @@ object DisruptionWatch {
         if (on.isEmpty()) text else "$on: $text"
     }
 
-    /** One notification of the watch, one per route or place ([tag]). */
+    /**
+     * One notification of the watch, one per route or place ([tag]). A tap opens "My routes" on
+     * the notices [fresh] it reports (see DisruptionTap); each notification has its own request
+     * code (its id), so the notices of one do not overwrite those of another.
+     */
     @SuppressLint("MissingPermission")
-    private fun post(context: Context, tag: String, title: String, lines: List<String>) {
-        ensureChannel(context, AppChannel.Disruptions)
+    private fun post(context: Context, tag: String, title: String, lines: List<String>, fresh: List<Disruption>) {
+        ensureChannel(context, AppChannel.of(NotifyFeature.Disruptions))
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+        val id = NOTIFICATION_BASE + (tag.hashCode() and 0xfff)
         val open = PendingIntent.getActivity(
             context,
-            NOTIFICATION_BASE,
-            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            id,
+            DisruptionTap.intent(context, fresh),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL)
@@ -534,7 +627,7 @@ object DisruptionWatch {
             .setContentIntent(open)
             .build()
         try {
-            NotificationManagerCompat.from(context).notify(NOTIFICATION_BASE + (tag.hashCode() and 0xfff), notification)
+            NotificationManagerCompat.from(context).notify(id, notification)
         } catch (e: SecurityException) {
             // The permission was taken away in the meantime.
         }
@@ -562,12 +655,18 @@ object DisruptionWatch {
     private const val PLACE_PREFIX = "place:"
     private const val PLACE_BASELINE = "*"
     private const val MAX_WATCHED_PLACES = 12
+    private const val MAX_STORED_NEXT = 6
     private const val WORK_PERIODIC = "disruptions-periodic"
+    internal const val KEY_PERIODIC_RUN = "periodicRun"
+    private const val WORK_FRONT = "disruptions-front"
+    private const val KEY_FRONT_CHECK = "frontCheckAt"
+    // The app in front checks at most this often.
+    private const val FRONT_CHECK_MILLIS = 15 * 60_000L
     private const val WORK_MORNING = "disruptions-morning"
     private const val WORK_CHECK = "disruptions-check-"
     private const val TAG_CHECK = "disruptions-check"
     private const val DAY_MINUTES = 24 * 60
-    private val CHANNEL = AppChannel.Disruptions.id
+    private val CHANNEL = AppChannel.of(NotifyFeature.Disruptions).id
     private const val NOTIFICATION_BASE = 3000
     private const val SEEN_DAYS = 3
     private const val DAY_MILLIS = 24 * 60 * 60 * 1000L
@@ -591,7 +690,7 @@ data class WatchSchedule(val periodicMinutes: Int?, val times: List<Int>) {
 /** The intervals of the watch to choose from, in minutes; 0 is none. WorkManager runs a job at most every 15 minutes. */
 val WATCH_PERIODS: List<Int> = listOf(0, 15, 30, 60)
 
-/** The interval of the watch until another is chosen: every half hour, as before it could be chosen. */
+/** The interval a stored value that is none of [WATCH_PERIODS] stands for. "Unterwegs prüfen" itself is off until chosen. */
 const val DEFAULT_PERIOD_MINUTES = 30
 
 /** A stored interval as one of [WATCH_PERIODS]; anything else is the default. */
@@ -600,12 +699,12 @@ fun watchPeriod(minutes: Int): Int = if (minutes in WATCH_PERIODS) minutes else 
 /**
  * What the watch runs, from what is watched: nothing while no route has the bell on and no
  * place is watched (places on, but none set, is nothing either); else the job every
- * [periodMinutes] (none for 0) and the daily checks at [times].
+ * [periodMinutes] (none for 0, none while [saving] battery) and the daily checks at [times].
  */
-fun watchSchedule(watchedRoutes: Int, checkPlaces: Boolean, places: Int, periodMinutes: Int, times: List<Int>): WatchSchedule {
+fun watchSchedule(watchedRoutes: Int, checkPlaces: Boolean, places: Int, periodMinutes: Int, times: List<Int>, saving: Boolean = false): WatchSchedule {
     val active = watchedRoutes > 0 || (checkPlaces && places > 0)
     if (!active) return WatchSchedule.NONE
-    val period = watchPeriod(periodMinutes).takeIf { it > 0 }
+    val period = watchPeriod(periodMinutes).takeIf { it > 0 && !saving }
     return WatchSchedule(period, times.filter { it in 0 until 24 * 60 }.distinct().sorted())
 }
 
@@ -624,6 +723,12 @@ fun delayUntil(now: LocalDateTime, minutes: Int): Duration {
 class DisruptionWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val scheduled = inputData.getBoolean(DisruptionWatch.KEY_MORNING_RUN, false)
+        // "Unterwegs prüfen" pauses while the battery saver is active (its job may have been
+        // planned before the saver came on).
+        if (inputData.getBoolean(DisruptionWatch.KEY_PERIODIC_RUN, false)) {
+            BatterySaver.install(applicationContext)
+            if (BatterySaver.active) return Result.success()
+        }
         try {
             DisruptionWatch.check(applicationContext, scheduled)
         } catch (e: CancellationException) {
@@ -644,3 +749,8 @@ class DisruptionWorker(context: Context, params: WorkerParameters) : CoroutineWo
         return Result.success()
     }
 }
+
+/** The key of [place] in the watched set of [DisruptionWatch] (its bell); null without a position. */
+fun placeWatchKey(place: Stop): String? = placeDisruptionKey(place)?.let { PLACE_WATCH_PREFIX + it }
+
+private const val PLACE_WATCH_PREFIX = "place:"

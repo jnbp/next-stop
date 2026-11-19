@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Round 5 of the companion views (ui/companion): menu, wake-up alarm chip and sheet, walks, map framing. -->
+<resources>
+    <string name="r5c_menu_wake">Wake-up alarm …</string>
+    <string name="r5c_menu_view_map">View: with map</string>
+    <string name="r5c_menu_view_calm">View: without map</string>
+    <string name="r5c_fresh_now">Live · now</string>
+    <string name="r5c_wake_chip_on">Wake-up alarm at %1$s. Tap: choose the time, hold: switch off.</string>
+    <string name="r5c_wake_chip_off">Wake-up alarm off. Tap: choose the time, hold: switch on.</string>
+    <string name="r5c_wake_rings">Rings at %1$s</string>
+    <string name="r5c_wake_no_ring">No more ring on this trip</string>
+    <string name="r5c_wake_when">When should it ring?</string>
+    <plurals name="r5c_wake_stops">
+        <item quantity="one">%d stop</item>
+        <item quantity="other">%d stops</item>
+    </plurals>
+    <string name="r5c_wake_exact">Exact time …</string>
+    <string name="r5c_wake_exact_set">At %1$s · change</string>
+    <string name="r5c_wake_pick_title">Wake-up time</string>
+    <string name="r5c_where_ride">Where\'s my train?</string>
+    <string name="r5c_where_bahn">Where\'s my train?</string>
+    <string name="r5c_where_bus">Where\'s my bus?</string>
+    <string name="r5c_where_tram">Where\'s my tram?</string>
+    <string name="r5c_where_ferry">Where\'s my ferry?</string>
+    <string name="r5c_back_to_me">Back to me</string>
+    <string name="r5c_walk_show">Show way</string>
+    <string name="r5c_platform_walk">Way to %1$s</string>
+    <string name="r5c_platform_walk_plain">Way to the platform</string>
+    <string name="r5c_map_bigger">Enlarge map</string>
+    <string name="r5c_map_smaller">Make map smaller</string>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The floating button over a walk on the big map while the map does not follow the traveller (#276). -->
+    <string name="r9center_walk_reframe">Fußweg wieder einpassen</string>
+</resources>

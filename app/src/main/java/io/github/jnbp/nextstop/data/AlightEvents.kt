@@ -11,7 +11,7 @@ private const val ALIGHT_EARLY_SECONDS = 180L
 /**
  * Within this time before the arrival at the stop to get off, "next stop: get off" is said
  * (reminder, watch buzz); farther ahead, on a long hop of a night coach or an ICE, the time
- * left is told instead ("Get off in 2 h 58 min").
+ * left is told instead ("Get off in 2:58 h").
  */
 const val GET_OFF_SOON_SECONDS = 600L
 
@@ -42,9 +42,10 @@ data class AlightEvent(val key: String, val at: OffsetDateTime, val legIndex: In
  * reminder does not come too early; the keys stay those of the provider's times. The first one
  * comes at most [GET_OFF_SOON_SECONDS] before the arrival (a long last hop). Sorted by time.
  */
-fun alightEvents(journey: Journey): List<AlightEvent> {
+fun alightEvents(journey: Journey, timesShown: Boolean = false): List<AlightEvent> {
     val events = mutableListOf<AlightEvent>()
-    val legs = journey.plausible().legs
+    // [timesShown]: the times of [journey] are already the ones to go by (the ride state, see RideState).
+    val legs = (if (timesShown) journey else journey.plausible()).legs
     legs.forEachIndexed { index, leg ->
         if (leg.walking) return@forEachIndexed
         val next = legs.drop(index + 1).firstOrNull { !it.walking }
@@ -81,3 +82,43 @@ fun dueAlight(events: List<AlightEvent>, sent: Set<String>, now: OffsetDateTime,
 /** The next reminder of [events] after [now] that is not in [sent]; null when none is left. */
 fun nextAlight(events: List<AlightEvent>, sent: Set<String>, now: OffsetDateTime): AlightEvent? =
     events.filter { it.key !in sent && it.at.isAfter(now) }.minByOrNull { it.at }
+
+// On a ride closer than this to its end by position, "arriving – get off" is due.
+const val ALIGHT_APPROACH_METERS = 600.0
+
+// Farther than this from its end by position, a reminder the times call due waits.
+private const val ALIGHT_HOLD_METERS = 1500.0
+
+// A reminder held back by position is looked at again this much later.
+private const val ALIGHT_HOLD_SECONDS = 60L
+
+/**
+ * [events] timed by the position [fix] at [now] where it matches a ride: the position wins
+ * over the times. "Next stop: get off" comes as soon as the next stop ahead is the one to get
+ * off at, "Arriving" within [ALIGHT_APPROACH_METERS] of it; on a ride still far from its end
+ * (a train later than its data say), a reminder the times call due waits until the position
+ * gets there. Keys stay the same, so nothing is sent twice. Without a matching fix, [events].
+ */
+fun alightEventsByPosition(events: List<AlightEvent>, journey: Journey, fix: PositionFix?, now: OffsetDateTime): List<AlightEvent> {
+    // On board by the times only (#224): the times stand.
+    if (fix == null || fix.journeyId != journey.id || fix.legIndex < 0 || fix.byTimes) return events
+    val onBoard = fix.kind == FixKind.OnRide || fix.kind == FixKind.OnBoardEarly
+    if (!onBoard && fix.kind != FixKind.AtEnd) return events
+    val leg = journey.legs.getOrNull(fix.legIndex) ?: return events
+    val stopsKnown = fix.nextStop >= 0 && leg.stopovers.isNotEmpty()
+    val nextIsExit = stopsKnown && fix.nextStop == leg.stopovers.lastIndex
+    val near = fix.kind == FixKind.AtEnd || fix.metersToEnd <= ALIGHT_APPROACH_METERS
+    val far = onBoard && fix.metersToEnd > ALIGHT_HOLD_METERS
+    val later = now.plusSeconds(ALIGHT_HOLD_SECONDS)
+    return events.map { event ->
+        if (event.legIndex != fix.legIndex) return@map event
+        when {
+            // A second ahead of "Arriving", which wins where both are due at once.
+            event.early && (nextIsExit || near) && event.at.isAfter(now) -> event.copy(at = now.minusSeconds(1))
+            !event.early && near && event.at.isAfter(now) -> event.copy(at = now)
+            event.early && stopsKnown && !nextIsExit && !near && !event.at.isAfter(now) -> event.copy(at = later)
+            !event.early && far && !event.at.isAfter(now) -> event.copy(at = later)
+            else -> event
+        }
+    }.sortedBy { it.at }
+}

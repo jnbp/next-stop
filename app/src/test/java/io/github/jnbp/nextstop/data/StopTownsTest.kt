@@ -109,4 +109,110 @@ class StopTownsTest {
         assertNull(dominantTown(listOf("U Freie Universität (Thielplatz)", "Freie Universität (Thielplatz)", "Habelschwerdter Allee")))
         assertNull(dominantTown(listOf("Lahr (Nord)", "Markt (Nord)", "Schule (Nord)")))
     }
+
+    @Test
+    fun regionalTrainsUseTheRailwaysShortWords() {
+        // #168: an RE3 to "Lutherstadt Wittenberg, Hauptbahnhof" fits one line.
+        assertEquals("Lutherstadt Wittenberg Hbf", railShortName("Lutherstadt Wittenberg, Hauptbahnhof"))
+        assertEquals("Frankfurt (Oder)", railShortName("Frankfurt (Oder), Bahnhof"))
+        assertEquals("Cottbus Hbf", railShortName("Cottbus, Hauptbahnhof"))
+        assertEquals("Cottbus Hbf", railShortName("Cottbus Hauptbahnhof"))
+        // Only the word: it stays.
+        assertEquals("Hauptbahnhof", railShortName("Hauptbahnhof"))
+        val re3 = Leg(
+            "RE3", "regional", false, "Example Start", "Lutherstadt Wittenberg, Hauptbahnhof",
+            java.time.OffsetDateTime.parse("2026-11-18T15:00:00+01:00"), null,
+            java.time.OffsetDateTime.parse("2026-11-18T16:00:00+01:00"), null, null, null, "Lutherstadt Wittenberg, Hauptbahnhof", false,
+        )
+        assertEquals("Lutherstadt Wittenberg Hbf", railwayDirection(re3, "Lutherstadt Wittenberg, Hauptbahnhof"))
+        assertEquals("Lutherstadt Wittenberg Hbf", shownRideStop(re3, re3.to))
+        // An S-Bahn keeps the local network's style, sign in front.
+        val s1 = re3.copy(line = "S1", product = "suburban")
+        assertEquals("S Wannsee Bhf".plainStopName(), shownRideStop(s1, "S Wannsee Bhf"))
+    }
+
+    @Test
+    fun aBareStationWordKeepsItsTown() {
+        // #255: dropping the home town never leaves a bare "Hauptbahnhof".
+        assertEquals("Musterstadt Hbf", stopNameParts("Hauptbahnhof (Musterstadt)", "Musterstadt", language = "de").title)
+        assertEquals("Musterstadt Hbf", stopNameParts("Hbf (Musterstadt)", "Musterstadt", language = "de").title)
+        assertEquals("Musterstadt Hbf", stopNameParts("Hauptbahnhof, Musterstadt", "Musterstadt", language = "de").title)
+        assertEquals("Musterstadt", stopNameParts("Bahnhof (Musterstadt)", "Musterstadt", language = "de").title)
+        assertEquals("Musterstadt Busbahnhof", stopNameParts("Busbahnhof (Musterstadt)", "Musterstadt", language = "de").title)
+        assertEquals("Musterstadt ZOB", stopNameParts("ZOB, Musterstadt", "Musterstadt", language = "de").title)
+        // A stop with a name of its own still drops the home town, a sign in front is no bare word.
+        assertEquals("Rathaus", stopNameParts("Rathaus (Musterstadt)", "Musterstadt", language = "de").title)
+        assertEquals("S+U Hauptbahnhof", stopNameParts("S+U Hauptbahnhof (Musterstadt)", "Musterstadt", language = "de").title)
+        assertTrue(isBareStationWord("Hauptbahnhof"))
+        assertTrue(isBareStationWord(" Hbf "))
+        assertFalse(isBareStationWord("Musterstadt Hbf"))
+    }
+
+    @Test
+    fun aRideNeverEndsAtABareHauptbahnhofWhereTheNameSaysTheTown() {
+        val at = java.time.OffsetDateTime.parse("2026-11-19T09:00:00+01:00")
+        fun ride(product: String, to: String) = Leg(
+            "ICE 1", product, false, "Beispielstadt Hbf", to,
+            at, null, at.plusHours(1), null, null, null, "Musterstadt Hbf", false,
+        )
+        assertEquals("Musterstadt Hbf", shownRideStop(ride("express", "Hauptbahnhof (Musterstadt)"), "Hauptbahnhof (Musterstadt)"))
+        // A regional train keeps the name as sent, with its town.
+        assertEquals("Hauptbahnhof (Musterstadt)", shownRideStop(ride("regional", "Hauptbahnhof (Musterstadt)"), "Hauptbahnhof (Musterstadt)"))
+        assertEquals("Musterstadt Hbf", shownRideStop(ride("express", "Musterstadt Hauptbahnhof"), "Musterstadt Hauptbahnhof"))
+        // Nothing tells the town: the name stays as it came.
+        assertEquals("Hauptbahnhof", shownRideStop(ride("express", "Hauptbahnhof"), "Hauptbahnhof"))
+    }
+
+    @Test
+    fun aStreetInBracketsIsNoTownAndStays() {
+        // #278: Dresden, tram 3: "Bahnhof Neustadt" and "Bf Neustadt (Hansastr.)" are two stops.
+        val hansa = "Dresden Bf Neustadt (Hansastr.)"
+        assertNull(splitStopTown(hansa).town)
+        assertNull(townOf(hansa))
+        assertEquals(hansa, townedStopName(hansa, "Dresden"))
+        assertEquals(hansa, townedStopName(hansa, null))
+        assertEquals("Dresden Bf Neustadt (Hansastr)", stopNameParts("Dresden Bf Neustadt (Hansastr)", "Dresden", language = "de").title)
+        assertEquals(hansa, railwayStationName(hansa))
+        assertEquals(hansa, railShortName(hansa))
+        // Made-up streets and squares stay too, also where the town is said after a comma.
+        assertEquals("Rathaus (Lindenweg)", townedStopName("Musterstadt, Rathaus (Lindenweg)", "Musterstadt"))
+        assertEquals("Rathaus (Lindenweg) · Musterstadt", townedStopName("Musterstadt, Rathaus (Lindenweg)", "Beispielstadt"))
+        assertEquals("Schule (Am Marktplatz)", stopNameParts("Schule (Am Marktplatz)", "Musterstadt", language = "de").title)
+        assertEquals("Parkstr. (Hauptallee)", townedStopName("Parkstr. (Hauptallee)", "Musterstadt"))
+        // A town in brackets that repeats the town still goes, another one still stays apart.
+        assertEquals("Rathaus", townedStopName("Rathaus (Musterstadt)", "Musterstadt"))
+        assertEquals("Rathaus · Beispielstadt", townedStopName("Rathaus (Beispielstadt)", "Musterstadt"))
+        assertEquals("S Beispielhof", stopNameParts("S Beispielhof (Berlin)", "Berlin", language = "de").title)
+    }
+
+    @Test
+    fun twoStopsOfOneListNeverReadAlike() {
+        // Parts in square brackets left out: shown again where they tell the stops apart.
+        assertEquals(
+            listOf("Musterplatz · Bus", "Musterplatz · Tram", "Lindenweg"),
+            distinctStopNames(listOf("Musterplatz [Bus]", "Musterplatz [Tram]", "Lindenweg"), listOf("Musterplatz", "Musterplatz", "Lindenweg")),
+        )
+        // Shown alike but sent differently: the names as sent.
+        assertEquals(
+            listOf("Dresden Bahnhof Neustadt", "Dresden Bf Neustadt (Hansastr.)"),
+            distinctStopNames(listOf("Dresden Bahnhof Neustadt", "Dresden Bf Neustadt (Hansastr.)"), listOf("Dresden Bf Neustadt", "Dresden Bf Neustadt")),
+        )
+        // The same stop twice (a loop) and different names stay as they are.
+        assertEquals(listOf("A-Dorf", "B-Weg", "A-Dorf"), distinctStopNames(listOf("A-Dorf", "B-Weg", "A-Dorf"), listOf("A-Dorf", "B-Weg", "A-Dorf")))
+    }
+
+    @Test
+    fun theStopsOfARideNeverReadAlike() {
+        val at = java.time.OffsetDateTime.parse("2026-11-19T10:00:00+01:00")
+        fun stop(name: String) = Stopover(name, at, at)
+        val leg = Leg(
+            "3", "tram", false, "Dresden Bf Neustadt (Hansastr.)", "Dresden Musterplatz",
+            at, null, at.plusMinutes(10), null, null, null, "Dresden Musterplatz", false,
+            stopovers = listOf(stop("Dresden Bf Neustadt (Hansastr.)"), stop("Dresden Bahnhof Neustadt"), stop("Dresden Musterplatz")),
+        )
+        assertEquals(
+            listOf("Dresden Bf Neustadt (Hansastr.)", "Dresden Bahnhof Neustadt", "Dresden Musterplatz"),
+            shownRideStopNames(leg, leg.stopovers, leg.rideTown),
+        )
+    }
 }

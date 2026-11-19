@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r6c_dest_icon">Destination</string>
+    <string name="r6c_mark_earliest">earliest</string>
+    <string name="r6c_mark_sprint">Sprint</string>
+    <string name="r6c_pickers_title">Connection choice</string>
+    <string name="r6c_pickers_text">How the choice of connections shows at the changes, in the live trip and in the connection details.</string>
+    <string name="r6c_pickers_folded">Folded</string>
+    <string name="r6c_pickers_all">All open</string>
+    <string name="r6c_pickers_next">Next only</string>
+    <string name="r6c_pickers_folded_text">Every change offers the choice as a small link; it opens on a tap.</string>
+    <string name="r6c_pickers_all_text">The choice is open at every change. In the live trip its departures are loaded for one change at a time (the next one); a tap on another change loads them there.</string>
+    <string name="r6c_pickers_next_text">The choice at the next change that matters opens by itself (in the connection details: the first change); you can fold it. The others open on a tap.</string>
+    <string name="r6c_faster_preview">Preview</string>
+    <string name="r6c_preview_title">Preview of the faster way</string>
+    <string name="r6c_hero_at_arrival">arr.</string>
+    <string name="r6c_hero_at_departure">at</string>
+    <string name="r6c_hero_spoken_arrival">Arrival at %1$s</string>
+    <string name="r6c_hero_spoken_departure">Departure at %1$s</string>
+    <string name="r6c_next_change">from %1$s · %2$s to change</string>
+    <string name="r6c_plan_b">Plan B</string>
+    <string name="r6c_change_short">Change</string>
+    <string name="r6c_other_connection">Choose another connection</string>
+    <string name="r6c_missed_change">Missed my connection</string>
+    <string name="r6c_train_late">My train is late or cancelled</string>
+    <string name="r6c_wrong_train">I am on the wrong train</string>
+    <string name="r6c_menu_shortcuts">Report shortcuts</string>
+    <string name="r6c_end_ask">End?</string>
+    <string name="r6c_other_ways">Other ways from here</string>
+    <string name="r6c_other_ways_change">Other ways from the change</string>
+    <string name="r6c_other_ways_loading">Searching other ways …</string>
+    <string name="r6c_other_ways_none">No other ways found</string>
+    <string name="r6c_other_ways_failed">Search failed – tap to try again</string>
+    <string name="r6c_way_earlier">%1$d′ earlier</string>
+    <string name="r6c_way_later">%1$d′ later</string>
+    <string name="r6c_way_same">same arrival</string>
+    <plurals name="r6c_way_fewer">
+        <item quantity="one">%d change fewer</item>
+        <item quantity="other">%d changes fewer</item>
+    </plurals>
+    <plurals name="r6c_way_more">
+        <item quantity="one">%d change more</item>
+        <item quantity="other">%d changes more</item>
+    </plurals>
+</resources>

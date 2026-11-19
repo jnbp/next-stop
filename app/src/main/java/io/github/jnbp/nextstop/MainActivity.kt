@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.os.SystemClock
-import android.provider.Settings
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
@@ -24,11 +23,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import io.github.jnbp.nextstop.data.AppLanguage
+import io.github.jnbp.nextstop.ui.HapticSetting
+import io.github.jnbp.nextstop.ui.RailTunnelAsset
+import io.github.jnbp.nextstop.ui.ProvideGatedHaptics
 import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.ui.ACTION_OPEN_TRIP
 import io.github.jnbp.nextstop.ui.AppLinks
 import io.github.jnbp.nextstop.ui.AppRoot
+import io.github.jnbp.nextstop.ui.AppVisibility
+import io.github.jnbp.nextstop.ui.SystemAnimation
+import io.github.jnbp.nextstop.ui.DisruptionWatch
+import io.github.jnbp.nextstop.ui.DisruptionTap
+import io.github.jnbp.nextstop.ui.PlannedTripTap
 import io.github.jnbp.nextstop.ui.BackTouch
 import io.github.jnbp.nextstop.ui.BackWindows
 import io.github.jnbp.nextstop.ui.PerfLabOverlay
@@ -72,17 +82,16 @@ class MainActivity : ComponentActivity() {
     private var startedOnce = false
 
     // False when the system has animations switched off: the splash then ends plainly.
-    private val animationsOn: Boolean by lazy {
-        val scale = try {
-            Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
-        } catch (e: Exception) {
-            1f
-        }
-        animationsAllowed(scale)
-    }
+    // Read once for the splash (see SystemAnimation, read at the start of onCreate).
+    private val animationsOn: Boolean by lazy { animationsAllowed(SystemAnimation.now) }
+
+    // How long the splash holds for its logo animation, at the system's animator duration scale.
+    private val splashHoldMillis: Long by lazy { SystemAnimation.millis(SPLASH_ANIMATION_MILLIS) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The system's animator duration scale, before anything is drawn (followed from onStart).
+        SystemAnimation.read(this)
         AppLanguage.init(this)
         Appearance.load(this)
         val darkAtStart = when (Appearance.darkChoice) {
@@ -102,12 +111,16 @@ class MainActivity : ComponentActivity() {
         // The buffers of the transfer rating and the walking pace as set (also done by NextStopApp
         // for every entry point; again here in case the settings were restored meanwhile).
         prefs.applyRatingSettings()
+        // The rail tunnels of the sunny side's hint, read in the background before the first ride card asks.
+        RailTunnelAsset.warm(this)
         // Only a real start keeps the splash screen for its logo; a page that comes back or is
         // built again (restored after the end of the process) shows what it had at once.
         if (Resume.created(restored = savedInstanceState != null)) holdSplash() else dropSplash()
         // The open journey page kept on the device comes back with a restored page (see OpenJourneyKeeper).
         OpenJourneyKeeper.created(this, restored = savedInstanceState != null)
+        HapticSetting.load(this)
         setContent {
+            ProvideGatedHaptics {
             NextStopTheme {
                 val dark = appInDark()
                 val palette = AppColors.palette
@@ -136,6 +149,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            }
         }
     }
 
@@ -155,7 +169,7 @@ class MainActivity : ComponentActivity() {
                 override fun onPreDraw(): Boolean {
                     val held = SystemClock.uptimeMillis() - since
                     // The logo animation plays to its end first, when animations are on.
-                    val ready = !animationsOn || held >= SPLASH_ANIMATION_MILLIS
+                    val ready = !animationsOn || held >= splashHoldMillis
                     if (ready) {
                         content.viewTreeObserver.removeOnPreDrawListener(this)
                         if (animationsOn) {
@@ -170,7 +184,7 @@ class MainActivity : ComponentActivity() {
             },
         )
         // Nothing else may ask for a frame while it waits: one is asked for at the end of the wait.
-        content.postDelayed({ content.invalidate() }, SPLASH_ANIMATION_MILLIS)
+        content.postDelayed({ content.invalidate() }, splashHoldMillis)
         splashScreen.setOnExitAnimationListener { splash ->
             if (animationsOn) {
                 // Compose takes over with the same picture and fades it into the app; the
@@ -242,10 +256,24 @@ class MainActivity : ComponentActivity() {
             window.decorView.viewTreeObserver.registerFrameCommitCallback { ResumeLog.once("first frame") }
         }
         super.onStart()
+        // Follows a change of the animator duration scale while the app is in front.
+        SystemAnimation.start(this)
+        AppVisibility.set(true)
         // The widgets get the position of the app and fresh data while it is in front.
         WidgetUpdates.onAppForeground(this)
         // The watch gets favourites, places and the position of the phone, and every later change of them.
         PhoneBridge.watchPlaces(this)
+        // The disruption watch checks the routes with the bell while the app is in front
+        // (there is no job every n minutes, see the battery rule); reads files, so off the main thread.
+        val app = applicationContext
+        lifecycleScope.launch(Dispatchers.IO) { DisruptionWatch.checkInFront(app) }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        SystemAnimation.stop(this)
+        // Loops on a timer rest from here on (see AppVisibility).
+        AppVisibility.set(false)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -254,11 +282,22 @@ class MainActivity : ComponentActivity() {
     }
 
     // A tap on the notification of a trip, or on the trip widget, opens the page of the trip;
+    // one of the disruption watch opens "My routes" at its notices, one of a planned trip that trip;
     // a tap on another widget opens the departures of its stop or starts its connection; a
     // link of the app (see AppLinks) opens what it names, and so do a place shared by another
     // app and its "navigate here" link (geo:, google.navigation:, Google Maps).
     private fun followTap(intent: Intent?) {
-        if (intent?.action == ACTION_OPEN_TRIP) TripState.openRequested.value = true
+        // "Maps & beenden" of the trip notification (#189): the trip ends and Google Maps opens.
+        if (io.github.jnbp.nextstop.ui.followMapsAndEnd(this, intent)) return
+        if (intent?.action == ACTION_OPEN_TRIP) {
+            TripState.openRequested.value = true
+            // "Vorschau" of the notification of a shortcut (#120).
+            intent.getStringExtra(io.github.jnbp.nextstop.ui.EXTRA_FASTER_PREVIEW)?.let { io.github.jnbp.nextstop.ui.ShortcutPreview.open(it) }
+        }
+        // A notification of the disruption watch: "My routes", at the notices it reported.
+        DisruptionTap.follow(intent)
+        // The reminder of a planned trip: that trip's page (or the companion, once it started).
+        PlannedTripTap.follow(this, intent)
         // A trip of the watch the phone could not take over in the background: followed now.
         PhoneBridge.followTap(intent)
         WidgetLaunch.follow(intent)

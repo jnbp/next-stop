@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Round 5 (dbgdata): the choice of connections at a change of a followed trip. -->
+<resources>
+    <string name="r5_choice_earliest">Earliest you can make: %1$s at %2$s</string>
+    <string name="r5_choice_sprint">With Sprint: an earlier one at %1$s</string>
+    <string name="r5_rescue">Connection no longer works – take the %1$s at %2$s?</string>
+    <string name="r5_rescue_take">Switch</string>
+    <string name="r5_rescue_title">Connection at %1$s no longer works</string>
+</resources>

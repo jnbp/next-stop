@@ -6,6 +6,7 @@ import java.net.URLEncoder
 import kotlinx.coroutines.flow.MutableStateFlow
 import io.github.jnbp.nextstop.data.PlaceKind
 import io.github.jnbp.nextstop.data.SharedPlace
+import io.github.jnbp.nextstop.data.StationIdentity
 import io.github.jnbp.nextstop.data.Stop
 import io.github.jnbp.nextstop.data.isShortMapLink
 import io.github.jnbp.nextstop.data.parseNavLink
@@ -171,6 +172,8 @@ internal fun linkPlace(name: String?, position: Pair<Double, Double>?, id: Strin
 /** What the link with [path] (as "/route") and the decoded [params] asks for; null for an unknown one. */
 internal fun parseOpenLink(path: String, params: Map<String, String>): OpenLink? = when (path.trim('/')) {
     AppLinks.PATH_ROUTE -> {
+        params["toId"]?.let { StationIdentity.noteStored(it.trim(), params["toKey"]) }
+        params["fromId"]?.let { StationIdentity.noteStored(it.trim(), params["fromKey"]) }
         val to = linkPlace(params["toName"], parseLatLon(params["to"]), params["toId"], params["toKind"])
         if (to == null) {
             null
@@ -181,6 +184,7 @@ internal fun parseOpenLink(path: String, params: Map<String, String>): OpenLink?
     }
     AppLinks.PATH_DEPARTURES -> {
         val id = params["stopId"]?.trim()?.takeIf { it.isNotEmpty() }
+        id?.let { StationIdentity.noteStored(it, params["key"]) }
         if (id == null) {
             OpenLink.Departures(null)
         } else {
@@ -215,6 +219,8 @@ private fun routeEnd(prefix: String, place: Stop): List<Pair<String, String?>> {
         "${prefix}Name" to place.name,
         prefix to place.position?.let { "${it.first},${it.second}" },
         "${prefix}Id" to place.id.takeIf { keepId },
+        // The station's key, so a link outlives a renamed feed (see StationIdentity.resolveId).
+        "${prefix}Key" to StationIdentity.stationKey(place).takeIf { keepId },
         "${prefix}Kind" to place.kind.name.takeIf { keepId },
     )
 }
@@ -233,6 +239,7 @@ internal fun departuresLinkText(stop: Stop?): String = openLinkText(
     } else {
         listOf(
             "stopId" to stop.id,
+            "key" to StationIdentity.stationKey(stop),
             "name" to stop.name,
             "lat" to stop.latitude?.toString(),
             "lon" to stop.longitude?.toString(),

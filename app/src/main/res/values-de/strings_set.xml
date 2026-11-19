@@ -22,14 +22,13 @@
     <string name="settings_live_page">Live-Seite</string>
     <string name="setup_restart_short">Farben, Ansicht, Umstiege und Benachrichtigungen – Schritt für Schritt mit Vorschau.</string>
     <!-- Die Einrichtung: Sprint-Hinweis, Fahrzeuge auf der Strecke, die beiden „schneller“-Funktionen. -->
-    <string name="setup_sprint_note">Sprint (0–1 Min.): nur rennend oder mit Glück – oft unrealistisch.</string>
+    <string name="setup_sprint_note">Sprint (0–1′): nur rennend oder mit Glück – oft unrealistisch.</string>
     <string name="setup_tag_remembered">Einstellung, gilt für jede Fahrt</string>
     <string name="setup_tag_per_trip">Pro Fahrt, in einer Verbindung einschalten</string>
     <string name="setup_shortcut_short">Während du einer Fahrt folgst, meldet sich die App, wenn sich seit deiner Wahl etwas geändert hat – etwa ein schnellerer Weg.</string>
     <string name="setup_shortcut_when">Wann</string>
     <string name="setup_shortcut_when_text">Nur bei Bedarf: wenn du ihn bei einer Fahrt einschaltest oder mit „Jede Minute zählt“. Immer an: bei jeder Fahrt.</string>
-    <string name="setup_every_minute_short">Schalte es für eine Fahrt in einer Verbindung ein: Es aktiviert Sprint-Umstiege und den Abkürzungs-Alarm für diese Fahrt.</string>
-    <string name="setup_level_relaxed">Entspannt: viel Puffer, gemütlich gehen.</string>
+    <string name="setup_level_relaxed">Relaxed: viel Puffer, gemütlich gehen.</string>
     <string name="setup_level_normal">Normal: normales Gehtempo.</string>
     <string name="setup_level_risky">Knapp: zügig gehen.</string>
 </resources>

@@ -3,7 +3,7 @@
 The way of one change walk as tools/build_transfer_walks.py finds it, for checking the asset:
 the seconds, the metres, the levels it passes and the way itself as a GeoJSON LineString.
 
-    python3 tools/walk_path.py "Yorckstraße:1:2" "Südkreuz:1:s3" [--step-free] [--geojson out.json]
+    python3 tools/walk_path.py "Friedrichstraße:3:4" "Südkreuz:1:s3" [--step-free] [--geojson out.json]
 
 Each place is "<complex name>:<from platform>:<to platform>" with the platform indices of
 osm-berlin.json (and of "p" in transfer-walks-berlin.json), or "s<k>" for the k-th stop

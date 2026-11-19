@@ -43,8 +43,8 @@ android {
         applicationId = "io.github.jnbp.nextstop"
         minSdk = 31
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -110,6 +110,7 @@ dependencies {
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
     implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.metrics.performance)
     implementation(libs.play.services.wearable)
     implementation(libs.androidx.wear.remote.interactions)
     implementation(libs.kotlinx.coroutines.play.services)

@@ -1,8 +1,6 @@
 package io.github.jnbp.nextstop.wear.ui
 
 import android.content.Context
-import android.os.VibrationEffect
-import android.os.Vibrator
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
@@ -55,7 +53,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
+import io.github.jnbp.nextstop.wear.data.TripBuzz
 import io.github.jnbp.nextstop.wear.data.WatchStore
+import io.github.jnbp.nextstop.wear.data.playBuzz
 
 /*
  * The motion of the watch app: the same feel as the phone, held back. Buttons give way a
@@ -120,15 +120,15 @@ fun Modifier.watchSpringPress(interactions: InteractionSource): Modifier = compo
 /** The moments that buzz: a trip starts, a change was made, the trip arrived. */
 enum class WatchMoment { Start, ChangeMade, Arrived }
 
-/** A short haptic for [moment]: a click for the start, a heavy click for a change made and for the arrival. */
+/** The pattern of [moment] (see [TripBuzz]): the start and a change made are boarding, the arrival a soft pulse. */
+fun momentBuzz(moment: WatchMoment): TripBuzz = when (moment) {
+    WatchMoment.Start, WatchMoment.ChangeMade -> TripBuzz.Board
+    WatchMoment.Arrived -> TripBuzz.Arrival
+}
+
+/** A short vibration for [moment], in its pattern (see [playBuzz]). */
 fun buzz(context: Context, moment: WatchMoment) {
-    val vibrator = context.getSystemService(Vibrator::class.java) ?: return
-    if (!vibrator.hasVibrator()) return
-    val effect = when (moment) {
-        WatchMoment.Start -> VibrationEffect.EFFECT_CLICK
-        WatchMoment.ChangeMade, WatchMoment.Arrived -> VibrationEffect.EFFECT_HEAVY_CLICK
-    }
-    vibrator.vibrate(VibrationEffect.createPredefined(effect))
+    playBuzz(context, momentBuzz(moment))
 }
 
 /** How long the arrival on the watch is celebrated, in seconds. */

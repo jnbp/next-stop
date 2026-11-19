@@ -129,6 +129,7 @@ private fun metersApart(a: Pair<Double, Double>, b: Pair<Double, Double>): Doubl
  * same box; null before the map has a size.
  */
 fun visibleBox(map: MapLibreMap): List<Double>? {
+    if (!MapAlive.alive(map)) return null
     val region = map.projection.visibleRegion
     val corners = listOfNotNull(region.farLeft, region.farRight, region.nearLeft, region.nearRight)
     if (corners.size < 4) return null

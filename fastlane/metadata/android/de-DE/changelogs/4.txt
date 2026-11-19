@@ -1,0 +1,8 @@
+• Live-Fahrt erkennt per Standort, ob du schon im Zug sitzt, mit Aufwach-Alarm und Hinweis bei Gleiswechsel
+• Anschluss unterwegs wählen, „Andere Wege“, Abkürzungs-Alarm und „Jede Minute zählt“
+• Fahrt planen mit Erinnerung
+• Meine Wege neu, mit Störungen und Statistik
+• Umstiegsstufen Relaxed, Normal, Knapp und Sprint
+• Sonnenseite im Zug, Hinweise zu Fahrrad, Barrierefreiheit und Auslastung
+• Fernverkehr mit richtigen Zugnamen und Verspätungen
+• Fehlerbehebungen

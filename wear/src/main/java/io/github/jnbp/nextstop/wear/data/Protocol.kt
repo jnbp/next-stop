@@ -13,7 +13,8 @@ import org.json.JSONObject
  *   optionally "appointments" (next calendar entries with a location) and "contacts" (contacts
  *   with a postal address), when the phone may read them; "transferComfort", the name of the
  *   phone's change time (Relaxed, Normal, Risky, VeryRisky); "alightReminders", the phone's
- *   setting for the reminder before getting off (boolean). Every key is optional.
+ *   setting for the reminder before getting off (boolean); "delayDisplay", the name of the
+ *   phone's setting how delays are shown (see [DelayDisplay]). Every key is optional.
  * - [PATH_TRIP]: the next step of the trip the phone follows, or `active = false`.
  * - [PATH_MAP_IMAGE]`/<slot>`: the answer to [MSG_MAP_IMAGE]: the key of the request
  *   ([KEY_MAP_KEY]) and, when the phone could draw it, the map as a WebP picture
@@ -26,6 +27,7 @@ import org.json.JSONObject
  * - [MSG_SYNC]: asks the phone to write [PATH_PLACES] (and the trip) again.
  * - [MSG_START_TRIP]: payload `{"token": "<refresh token>"}`, follows that journey on the phone.
  * - [MSG_STOP_TRIP]: no payload, ends the trip the phone follows.
+ * - [MSG_RESCUE_SWITCH]: `{"key"}`, switches the phone's trip to the rescue offer it sent.
  * - [MSG_MAP_IMAGE]: payload `{"key", "slot", "lat", "lon", "zoom", "width", "height", "ratio", "dark"}`
  *   (see [MapImageRequest]), optionally `"quick": {"zoom", "width", "height"}` (a small picture of
  *   the same area to draw first, [MapImageRequest.quick]): asks the phone to draw the map there
@@ -68,6 +70,9 @@ object Protocol {
     const val MSG_SYNC = "/nextstop/sync"
     const val MSG_START_TRIP = "/nextstop/start-trip"
     const val MSG_STOP_TRIP = "/nextstop/stop-trip"
+
+    /** "Wechseln" on the watch's rescue card: `{"key"}` of the offer shown (see RescueOffer); the phone switches the trip to it. */
+    const val MSG_RESCUE_SWITCH = "/nextstop/rescue-switch"
     const val MSG_MAP_IMAGE = "/nextstop/map-image"
     const val PATH_MAP_IMAGE = "/nextstop/mapimg"
 
@@ -76,6 +81,21 @@ object Protocol {
     const val MSG_QUERY = "/nextstop/query"
     const val MSG_ANSWER = "/nextstop/answer"
     const val CAPABILITY_PHONE = "nextstop_phone"
+
+    /**
+     * The test of the phone's developer options: opens the companion as a trip started on the
+     * phone would (see CompanionAutoOpen.test). No payload. The only message the watch's
+     * listener service takes while the app is closed (its own filter in the manifest).
+     */
+    const val MSG_COMPANION_TEST = "/nextstop/companion-test"
+
+    /**
+     * The wake-up alarm of the phone (see WakeRing): `{"ringing": true, "key", "stop",
+     * "arrival", "ring", "line"?}` while it rings (a new "ring" every minute), `{"ringing": false}`
+     * once it stops. "Ich bin wach" on the watch sends [MSG_WAKE_OK]; the phone stops on both.
+     */
+    const val PATH_WAKE = "/nextstop/wake"
+    const val MSG_WAKE_OK = "/nextstop/wake-ok"
 
     /** The keys of an answer at [PATH_MAP_IMAGE]: the key of its request and the picture. */
     const val KEY_MAP_KEY = "key"
@@ -116,6 +136,10 @@ data class SyncedPlaces(
     val phoneComfort: TransferComfort? = null,
     /** The phone's setting "reminder before getting off" ("alightReminders"); null from an older phone app. */
     val phoneAlightReminders: Boolean? = null,
+    /** The walking pace, step-free ways and products of the phone's searches ("searchOptions"), for the watch's own. */
+    val phoneSearch: PhoneSearchOptions = PhoneSearchOptions(),
+    /** How the phone shows delays ("Verspätungen", "delayDisplay", #227b); the default from an older phone app. */
+    val phoneDelayDisplay: DelayDisplay = DelayDisplay.RealtimeAndDelay,
     /** True once the phone wrote anything at all. */
     val synced: Boolean = false,
 ) {
@@ -144,6 +168,8 @@ data class SyncedPlaces(
                     contacts = contacts(root.optJSONArray("contacts")),
                     phoneComfort = TransferComfort.parse(root.optString("transferComfort", "")),
                     phoneAlightReminders = if (root.has("alightReminders")) root.optBoolean("alightReminders", true) else null,
+                    phoneSearch = PhoneSearchOptions.parse(root.optJSONObject("searchOptions")),
+                    phoneDelayDisplay = DelayDisplay.parse(root.optString("delayDisplay", "")),
                     synced = true,
                 )
             } catch (e: Exception) {
@@ -194,6 +220,7 @@ data class SyncedPlaces(
                     latitude = if (item.has("lat")) item.optDouble("lat").takeIf { !it.isNaN() } else null,
                     longitude = if (item.has("lon")) item.optDouble("lon").takeIf { !it.isNaN() } else null,
                     kind = kind,
+                    key = item.optString("key", "").ifEmpty { null },
                 )
                 SyncedPlace(place, item.optString("label", "").ifEmpty { name }, item.optString("icon", "").ifEmpty { null })
             }
@@ -201,9 +228,11 @@ data class SyncedPlaces(
     }
 }
 
-/** A place as JSON, in the form of the places the phone sends: id, name, lat, lon, kind. */
+/** A place as JSON, in the form of the places the phone sends: id, the station key where known, name, lat, lon, kind. */
 fun placeJson(place: Place): JSONObject = JSONObject().apply {
     put("id", place.id)
+    // The phone's station identity key goes back with the place (it was dropped before).
+    place.key?.let { put("key", it) }
     put("name", place.name)
     place.latitude?.let { put("lat", it) }
     place.longitude?.let { put("lon", it) }
@@ -232,6 +261,7 @@ fun parsePlaceJson(item: JSONObject): Place? {
             "address" -> PlaceKind.Address
             else -> PlaceKind.Stop
         },
+        key = item.optString("key", "").ifEmpty { null },
     )
 }
 
@@ -317,9 +347,10 @@ enum class ChangeRating {
         /**
          * A rough rating for a trip the watch follows itself, which knows neither the station
          * nor the stop positions: a change needs 3 minutes, a walk its minutes and one more.
-         * From 5 minutes to spare relaxed, from 2 normal; tight where the change still works at
-         * a brisk pace (the walk x 0.8, at least 2 minutes), else sprint (the rule of the phone,
-         * paceTightness there).
+         * From 5 minutes to spare relaxed, from 1 normal (the phone's defaults, RELAXED_SPARE and
+         * NORMAL_SPARE there: a change of 4 minutes, what a search at "normal" leaves, is normal);
+         * tight where the change still works at a brisk pace (the walk x 0.8, at least 2
+         * minutes), else sprint (the rule of the phone, paceTightness there).
          */
         fun estimate(gapMinutes: Long, walkMinutes: Long): Pair<ChangeRating, Int> {
             val need = if (walkMinutes > 0) walkMinutes + 1 else 3
@@ -327,7 +358,7 @@ enum class ChangeRating {
             val spare = (gapMinutes - need).toInt()
             val rating = when {
                 spare >= 5 -> Comfortable
-                spare >= 2 -> Tight
+                spare >= 1 -> Tight
                 gapMinutes >= brisk -> Risky
                 else -> VeryRisky
             }
@@ -428,6 +459,8 @@ data class PlanRide(
     val color: Long? = null,
     /** The way before this ride ([walkBefore]) is ridden by bike ("bikeBefore"). */
     val bikeBefore: Boolean = false,
+    /** The times of this ride are live data, not only the timetable ("live"). */
+    val live: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("line", line ?: JSONObject.NULL)
@@ -446,6 +479,7 @@ data class PlanRide(
         if (cancelled) put("cancelled", true)
         color?.let { put("color", it) }
         if (bikeBefore) put("bikeBefore", true)
+        if (live) put("live", true)
     }
 
     companion object {
@@ -470,6 +504,7 @@ data class PlanRide(
                     cancelled = item.optBoolean("cancelled", false),
                     color = lineColorOf(item),
                     bikeBefore = item.optBoolean("bikeBefore", false),
+                    live = item.optBoolean("live", false),
                 )
             }
         }
@@ -610,6 +645,40 @@ data class TripSnapshot(
     val leave: Boolean = false,
     /** With [leave]: the departure of the ride the walk leads to. */
     val departure: Long = 0,
+    /** With [StepKind.Board]: the phone has the traveller at the stop by position, waiting for the ride ("waiting"). */
+    val waiting: Boolean = false,
+    /** With [StepKind.GetOff]: on board by position in a vehicle that stands ("standing"). */
+    val standing: Boolean = false,
+    /** With [StepKind.Board]: the ride has probably gone without the traveller ("missed"). */
+    val missed: Boolean = false,
+    /**
+     * With [waiting]: when the vehicle waited for is due at the stop by the phone ("dueAt", epoch
+     * ms, its TripStep.dueAt: the live position where known); 0 for the ride's [time]. See [waitPhaseOf].
+     */
+    val dueAt: Long = 0,
+    /**
+     * The Data Layer node that wrote this state of the phone ("node", kept by the watch only):
+     * a state of another phone (an old pairing, a second phone with the app) does not end
+     * the trip of this one. Null when unknown (a trip of the watch, an older stored state).
+     */
+    val node: String? = null,
+    /** The phone's offer where a delay broke the chosen change ahead ("rescue"); null while it works. */
+    val rescue: RescueOffer? = null,
+    /** The ride of this step has live times ("realtime"), not only the timetable. */
+    val realtime: Boolean = false,
+    /**
+     * #277: [time] is the phone's estimate from the position ("estimated"), not the provider's
+     * live time: shown blue with "ca.". Older phones send none.
+     */
+    val estimated: Boolean = false,
+    /** When the phone last got live times of the trip ("liveAt", epoch ms); 0 for none yet. See [LiveAge]. */
+    val liveAt: Long = 0,
+    /**
+     * With [StepKind.Board]: the side of the vehicle the sun shines in, in the direction of travel
+     * ("sunSide": "Left" or "Right"), as the phone's hint shows it (#176): true left, false right,
+     * null for no hint (off, night, clouds, short ride, no clear side). The watch asks for no weather.
+     */
+    val sunLeft: Boolean? = null,
 ) {
     /**
      * True for a trip of the phone that no longer runs there although the phone never said so
@@ -620,6 +689,17 @@ data class TripSnapshot(
         if (!active || !fromPhone) return false
         if (arrival > 0 && now > arrival + PHONE_AFTER_ARRIVAL_MILLIS) return true
         return updated > 0 && now - updated > PHONE_SILENCE_MILLIS
+    }
+
+    /**
+     * When this state turns [stale] by itself (epoch ms), so what shows it can go then without
+     * a wakeup; 0 for never (no running trip of the phone, or nothing to tell it by).
+     */
+    fun staleAt(): Long {
+        if (!active || !fromPhone) return 0
+        val afterArrival = if (arrival > 0) arrival + PHONE_AFTER_ARRIVAL_MILLIS + 1 else Long.MAX_VALUE
+        val silence = if (updated > 0) updated + PHONE_SILENCE_MILLIS + 1 else Long.MAX_VALUE
+        return minOf(afterArrival, silence).takeIf { it != Long.MAX_VALUE } ?: 0
     }
 
     fun toJson(): String = JSONObject().apply {
@@ -667,6 +747,16 @@ data class TripSnapshot(
         gap?.let { put("gap", it) }
         map?.let { put("map", it.toJson()) }
         color?.let { put("color", it) }
+        if (waiting) put("waiting", true)
+        if (standing) put("standing", true)
+        if (estimated) put("estimated", true)
+        if (missed) put("missed", true)
+        if (dueAt > 0) put("dueAt", dueAt)
+        node?.let { put("node", it) }
+        rescue?.let { put("rescue", it.toJson()) }
+        if (realtime) put("realtime", true)
+        sunLeft?.let { put("sunSide", if (it) "Left" else "Right") }
+        if (liveAt > 0) put("liveAt", liveAt)
     }.toString()
 
     companion object {
@@ -679,14 +769,23 @@ data class TripSnapshot(
         // The phone writes the state of a running trip at least every minute; after this long without one it is gone.
         private const val PHONE_SILENCE_MILLIS = 3 * 60_000L
 
+        /**
+         * Reads a state of the trip. Tolerant: the root must be a JSON object, every other
+         * part is read on its own, so a part this watch cannot read (a newer phone app, a
+         * broken value) is left out instead of dropping the whole trip. Unknown keys are ignored.
+         */
         fun parse(text: String?): TripSnapshot {
             if (text.isNullOrEmpty()) return NONE
+            val root = try {
+                JSONObject(text)
+            } catch (e: Exception) {
+                return NONE
+            }
             return try {
-                val root = JSONObject(text)
                 TripSnapshot(
                     active = root.optBoolean("active", false),
                     kind = StepKind.entries.firstOrNull { it.name == root.optString("kind") } ?: StepKind.Arrived,
-                    line = rapidLineName(root.text("line"), root.optString("product", "")),
+                    line = part(null) { rapidLineName(root.text("line"), root.optString("product", "")) },
                     product = root.optString("product", ""),
                     direction = root.text("direction"),
                     place = root.optString("place", ""),
@@ -694,7 +793,7 @@ data class TripSnapshot(
                     time = root.optLong("leaveAt").takeIf { it > 0 } ?: root.optLong("time"),
                     delayMinutes = root.optInt("delay"),
                     hint = root.text("hint"),
-                    progress = root.optDouble("progress", 0.0).toFloat(),
+                    progress = root.optDouble("progress", 0.0).toFloat().takeIf { !it.isNaN() } ?: 0f,
                     arrival = root.optLong("arrival"),
                     destination = root.optString("destination", ""),
                     stopsLeft = root.optInt("stopsLeft", -1),
@@ -702,32 +801,50 @@ data class TripSnapshot(
                     alertKey = root.optString("alertKey", ""),
                     fromPhone = root.optBoolean("fromPhone", true),
                     change = root.optBoolean("change", false),
-                    target = root.optJSONObject("target")?.let { parsePlaceJson(it) },
+                    target = part(null) { root.optJSONObject("target")?.let { parsePlaceJson(it) } },
                     rideTo = root.text("rideTo"),
                     rideArrival = root.optLong("rideArrival"),
-                    next = root.optJSONObject("next")?.let { NextRide.parse(it) },
-                    walk = root.optJSONObject("walk")?.let { WalkSketch.parse(it) },
+                    next = part(null) { root.optJSONObject("next")?.let { NextRide.parse(it) } },
+                    walk = part(null) { root.optJSONObject("walk")?.let { WalkSketch.parse(it) } },
                     tripKey = root.text("tripKey"),
                     started = root.optLong("started"),
                     updated = root.optLong("updated"),
                     boardPart = root.optInt("boardPart", -1).takeIf { it in 0..2 } ?: -1,
                     boardEstimated = root.optBoolean("boardEstimated", false),
-                    stops = RideStop.parseList(root.optJSONArray("stops")),
-                    plan = PlanRide.parseList(root.optJSONArray("plan")),
+                    stops = part(emptyList()) { RideStop.parseList(root.optJSONArray("stops")) },
+                    plan = part(emptyList()) { PlanRide.parseList(root.optJSONArray("plan")) },
                     planWalkEnd = root.optInt("planWalkEnd"),
                     planBikeEnd = root.optBoolean("planBikeEnd", false),
                     planIndex = root.optInt("planIndex", -1),
-                    rating = ChangeRating.parse(root.optString("rating", "")),
+                    rating = part(null) { ChangeRating.parse(root.optString("rating", "")) },
                     spare = if (root.has("spare") && !root.isNull("spare")) root.optInt("spare") else null,
                     gap = if (root.has("gap") && !root.isNull("gap")) root.optInt("gap") else null,
-                    map = root.optJSONObject("map")?.let { ChangeMap.parse(it) },
-                    color = lineColorOf(root),
+                    map = part(null) { root.optJSONObject("map")?.let { ChangeMap.parse(it) } },
+                    color = part(null) { lineColorOf(root) },
                     leave = root.optLong("leaveAt") > 0,
                     departure = if (root.optLong("leaveAt") > 0) root.optLong("time") else 0,
+                    waiting = root.optBoolean("waiting", false),
+                    standing = root.optBoolean("standing", false),
+                    estimated = root.optBoolean("estimated", false),
+                    missed = root.optBoolean("missed", false),
+                    dueAt = root.optLong("dueAt").coerceAtLeast(0L),
+                    node = root.text("node"),
+                    rescue = part(null) { root.optJSONObject("rescue")?.let { RescueOffer.parse(it) } },
+                    realtime = root.optBoolean("realtime", false),
+                    sunLeft = part(null) { sunLeftOf(root.text("sunSide")) },
+                    liveAt = root.optLong("liveAt").coerceAtLeast(0L),
                 )
             } catch (e: Exception) {
+                // Only the plain values are left here, all read with defaults: not expected.
                 NONE
             }
+        }
+
+        // One part of a state, or [fallback] when it cannot be read.
+        private inline fun <T> part(fallback: T, read: () -> T): T = try {
+            read()
+        } catch (e: Exception) {
+            fallback
         }
 
         private fun JSONObject.text(key: String): String? = if (isNull(key)) null else optString(key).ifEmpty { null }
@@ -745,7 +862,7 @@ fun snapshotOf(journey: Journey, now: Long): TripSnapshot {
     val upcoming = rides.firstOrNull { it.departure > now }
     val total = (journey.arrival - journey.departure).coerceAtLeast(1)
     val progress = ((now - journey.departure).toFloat() / total).coerceIn(0f, 1f)
-    val destination = journey.legs.last().to
+    val destination = journey.legs.last().shownEnd
     val base = TripSnapshot(active = true, progress = progress, arrival = journey.arrival, destination = destination, fromPhone = false)
     val legs = journey.legs
     val plan = planOf(legs)
@@ -762,16 +879,18 @@ fun snapshotOf(journey: Journey, now: Long): TripSnapshot {
                 kind = StepKind.GetOff,
                 line = riding.line,
                 product = riding.product,
-                direction = riding.direction,
-                place = riding.to,
+                direction = riding.shownDirection,
+                place = riding.shownEnd,
                 time = riding.arrival,
                 delayMinutes = riding.arrivalDelayMinutes,
+                realtime = riding.realtime,
                 stopsLeft = left,
                 // On a long last hop the buzz waits for the last minutes, not hours ahead.
                 alert = if (left > 0) left <= 1 && getOffSoon(riding.arrival, now) else soon,
                 alertKey = "${riding.line}|${riding.to}|${riding.departure}",
                 change = rides.indexOf(riding) < rides.lastIndex,
                 platform = riding.arrivalPlatform,
+                color = riding.color,
                 next = nextRideAfter(legs, index),
                 // The walk of the change (or to the end) that follows getting off.
                 walk = walkOf(after),
@@ -797,12 +916,19 @@ fun snapshotOf(journey: Journey, now: Long): TripSnapshot {
                 kind = StepKind.Board,
                 line = upcoming.line,
                 product = upcoming.product,
-                direction = upcoming.direction,
-                place = upcoming.from,
+                direction = upcoming.shownDirection,
+                place = upcoming.shownStart,
                 platform = upcoming.platform,
+                color = upcoming.color,
                 time = if (leaving) leave!! else upcoming.departure,
                 delayMinutes = upcoming.departureDelayMinutes,
-                rideTo = upcoming.to,
+                realtime = upcoming.realtime,
+                // Where to board, as the phone worked it out for the journey it found (none for a
+                // journey the watch found itself): the boarding page shows the train and the hint.
+                hint = upcoming.boardHint,
+                boardPart = upcoming.boardPart,
+                boardEstimated = upcoming.boardEstimated,
+                rideTo = upcoming.shownEnd,
                 rideArrival = upcoming.arrival,
                 next = nextRideAfter(legs, index),
                 walk = walkOf(walkingBefore(legs, index)),
@@ -851,18 +977,30 @@ private fun nextRideAfter(legs: List<Leg>, index: Int): NextRide? {
     val nextIndex = (index + 1 until legs.size).firstOrNull { !legs[it].walking } ?: return null
     val next = legs[nextIndex]
     val walks = legs.subList(index + 1, nextIndex)
-    val walk = walkMinutesOf(walks)
     val arriving = legs[index].takeIf { !it.walking }
+    // The minutes of the walk as the phone counts them for a change (its next ride says the same).
+    val walk = if (arriving == null) walkMinutesOf(walks) else changeWalkMinutesOf(walks)
     val gap = arriving?.let { Math.floorDiv(next.departure - it.arrival, 60_000L) }
     val rated = gap?.let { ChangeRating.estimate(it, walk.toLong()) }
     return NextRide(
-        next.line, next.product, next.direction, next.from, next.platform, next.departure, walk,
-        rating = rated?.first,
+        next.line, next.product, next.shownDirection, next.shownStart, next.platform, next.departure, walk,
+        // The phone's rating where it sent one (one rule for both), else the estimate.
+        rating = if (rated == null) null else next.changeRating ?: rated.first,
         spare = rated?.second,
         gap = gap?.toInt(),
         map = changeMapOf(arriving, walks, next),
+        color = next.color,
     )
 }
+
+/** The names of a leg as the phone shows them where it sent them (see [Leg.fromShown]), else the provider's. */
+private val Leg.shownStart: String get() = fromShown ?: from
+private val Leg.shownEnd: String get() = toShown ?: to
+private val Leg.shownDirection: String? get() = directionShown ?: direction
+
+/** The minutes of [walks] of a change together: the phone's where it sent them ([Leg.changeWalkMinutes]), else their times. */
+private fun changeWalkMinutesOf(walks: List<Leg>): Int =
+    walks.sumOf { it.changeWalkMinutes ?: ((it.arrival - it.departure) / 60_000).coerceAtLeast(0).toInt() }
 
 /** The minutes of [walks] together. */
 private fun walkMinutesOf(walks: List<Leg>): Int = walks.sumOf { ((it.arrival - it.departure) / 60_000).coerceAtLeast(0) }.toInt()
@@ -871,7 +1009,10 @@ private fun walkMinutesOf(walks: List<Leg>): Int = walks.sumOf { ((it.arrival - 
 private fun stopsOf(ride: Leg): List<RideStop> =
     if (ride.stopTimes.isEmpty()) emptyList() else listOf(RideStop("", ride.departure)) + ride.stopTimes.map { RideStop("", it) }
 
-/** Every ride of [legs] for the overview, with the walk before it and a rough rating of its change (see [ChangeRating.estimate]). */
+/**
+ * Every ride of [legs] for the overview, with the walk before it and the rating of its change:
+ * the phone's ([Leg.changeRating]) where it sent one, else a rough one (see [ChangeRating.estimate]).
+ */
 private fun planOf(legs: List<Leg>): List<PlanRide> {
     var previous: Leg? = null
     var walk = 0
@@ -886,18 +1027,19 @@ private fun planOf(legs: List<Leg>): List<PlanRide> {
         plan += PlanRide(
             line = leg.line,
             product = leg.product,
-            direction = leg.direction,
-            from = leg.from,
-            to = leg.to,
+            direction = leg.shownDirection,
+            from = leg.shownStart,
+            to = leg.shownEnd,
             departure = leg.departure,
             arrival = leg.arrival,
             departurePlatform = leg.platform,
             arrivalPlatform = leg.arrivalPlatform,
             walkBefore = walk,
-            rating = rated?.first,
+            rating = if (rated == null) null else leg.changeRating ?: rated.first,
             spare = rated?.second,
             gap = gap?.toInt(),
             cancelled = leg.cancelled,
+            color = leg.color,
         )
         previous = leg
         walk = 0
@@ -929,3 +1071,35 @@ private fun walkOf(legs: List<Leg>): WalkSketch? {
 
 // Without the stops of a ride, the alert to get off comes this long before its arrival.
 private const val ALERT_FALLBACK_MILLIS = 2 * 60_000L
+
+/** The sunny side as the phone sends it ("Left", "Right"): true left, false right, null for anything else. */
+fun sunLeftOf(text: String?): Boolean? = when (text) {
+    "Left" -> true
+    "Right" -> false
+    else -> null
+}
+
+/**
+ * A journey before it starts as the overview of the watch shows it (#175): its rides with the
+ * change ratings the watch works out ([planOf]) and their stops named as the watch shows them
+ * (without the town it is used in), and the minutes on foot after the last ride.
+ */
+data class JourneyPlan(val rides: List<PlanRide>, val walkEnd: Int)
+
+/**
+ * [journeys] without those with a change tighter than [comfort] allows, as the phone's search
+ * list hides them (journeySelection there): a search at "knapp" asks the provider for changes of
+ * 0 minutes and more, and every change shorter than 2 minutes is a sprint by the rule of the
+ * phone, so such journeys come back and must not be offered at "knapp". Rated as the overview
+ * rates them ([planOf]: the phone's rating, else the estimate); a journey without a change is
+ * always kept. The order is kept.
+ */
+fun journeysWithin(journeys: List<Journey>, comfort: TransferComfort): List<Journey> =
+    journeys.filter { journey -> planOf(journey.legs).all { (it.rating?.ordinal ?: 0) <= comfort.ordinal } }
+
+/** The [JourneyPlan] of [journey]; [home] the town the watch is used in. */
+fun journeyPlan(journey: Journey, home: String? = WatchTown.reference): JourneyPlan {
+    fun shown(name: String): String = if (name.isBlank()) name else stopNameParts(name, home).title
+    val rides = planOf(journey.legs).map { it.copy(from = shown(it.from), to = shown(it.to), direction = it.direction?.let(::shown)) }
+    return JourneyPlan(rides, walkMinutesOf(walkingBefore(journey.legs, journey.legs.size)))
+}

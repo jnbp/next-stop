@@ -19,6 +19,7 @@ import io.github.jnbp.nextstop.data.startAfterClose
 import java.io.File
 import java.time.OffsetDateTime
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -34,7 +35,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 object OpenJourneyKeeper {
     private const val FILE_NAME = "open_journey.json"
 
-    // One thread writes, in order; the last write wins.
+    // One thread writes; the latest page wins (see save).
     private val writer = Executors.newSingleThreadExecutor { task -> Thread(task, "OpenJourneyKeeper").apply { isDaemon = true } }
 
     @Volatile
@@ -99,24 +100,37 @@ object OpenJourneyKeeper {
         return kept
     }
 
+    // The page waiting to be written; a newer one replaces it, so a burst of saves (a change and
+    // the app leaving the screen) is written once, with the latest. Null when none waits.
+    private val waiting = AtomicReference<Waiting?>(null)
+
+    private class Waiting(val file: File, val page: KeptPage?)
+
     /** Writes [page], or removes the file when nothing worth keeping is open. */
     fun save(context: Context, page: KeptPage?) {
-        val file = file(context)
-        writer.execute {
-            try {
-                if (page == null || page.empty) {
+        // Only one write is queued at a time: a page that waits is replaced, not queued behind.
+        if (waiting.getAndSet(Waiting(file(context), page)) == null) writer.execute { writeWaiting() }
+    }
+
+    private fun writeWaiting() {
+        val next = waiting.getAndSet(null) ?: return
+        val file = next.file
+        val page = next.page
+        val temp = File(file.parentFile, "$FILE_NAME.tmp")
+        try {
+            if (page == null || page.empty) {
+                file.delete()
+            } else {
+                temp.writeText(keptPageJson(page))
+                if (!temp.renameTo(file)) {
                     file.delete()
-                } else {
-                    val temp = File(file.parentFile, "$FILE_NAME.tmp")
-                    temp.writeText(keptPageJson(page))
-                    if (!temp.renameTo(file)) {
-                        file.delete()
-                        temp.renameTo(file)
-                    }
+                    temp.renameTo(file)
                 }
-            } catch (e: Exception) {
-                // Only a copy: the page works without it.
             }
+        } catch (e: Throwable) {
+            // Only a copy: the page works without it. Never let it end the app, not even when
+            // memory runs short (#72): the half-built text is garbage at once, the old file stays.
+            temp.delete()
         }
     }
 }

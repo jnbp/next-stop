@@ -132,10 +132,48 @@ class LineColorsTest {
     @Test
     fun berlinsSAndUBahnKeepTheirColours() {
         LineColors.addOsm(listOf(OsmLineColor("u", "U2", "00aeef", brandenburgHavel.first, brandenburgHavel.second)))
-        assertEquals(0xFFDA421E.toInt(), LineColors.rideStyle("U2", "subway", ruhleben)?.color)
-        assertEquals(0xFF7DAD4C.toInt(), LineColors.rideStyle("U1", "subway", pankow)?.color)
+        assertEquals(0xFFED3C12.toInt(), LineColors.rideStyle("U2", "subway", ruhleben)?.color)
+        assertEquals(0xFF419328.toInt(), LineColors.rideStyle("U1", "subway", pankow)?.color)
         assertEquals(0xFFDA6BA2.toInt(), LineColors.rideStyle("1", "suburban", pankow)?.color)
         assertEquals(0xFFAD5937.toInt(), LineColors.rideStyle("S41", "suburban", ruhleben)?.color)
+    }
+
+    private val white = 0xFFFFFFFF.toInt()
+    private val black = 0xFF000000.toInt()
+
+    @Test
+    fun berlinsUBahnHasTheColoursAndInkOfTheBvgSigns() {
+        val signs = mapOf(
+            "U1" to 0xFF419328, "U2" to 0xFFED3C12, "U3" to 0xFF016144, "U4" to 0xFFFFC101, "U5" to 0xFF603B2C,
+            "U6" to 0xFF504F87, "U7" to 0xFF0279BD, "U8" to 0xFF013F75, "U9" to 0xFFF96815,
+        )
+        for ((line, color) in signs) {
+            val style = LineColors.rideStyle(line, "subway", pankow)
+            assertEquals(line, color.toInt(), style?.color)
+            // White on every line, black on the U4 only: fixed, not by lightness (the U9 is white).
+            assertEquals(line, if (line == "U4") black else white, style?.text)
+        }
+    }
+
+    @Test
+    fun berlinsUBahnTableWinsOverAProvidersColour() {
+        // A feed's own orange and black text for the U9 in Berlin: the badge stays the BVG's.
+        val sent = LineColors.rideStyle("U9", "subway", pankow, provided = 0xFFF3791D.toInt(), providedText = black)
+        assertEquals(0xFFF96815.toInt(), sent?.color)
+        assertEquals(white, sent?.text)
+        // Only for the U-Bahn of Berlin: an S-Bahn of Berlin and a U1 elsewhere keep the feed's colour.
+        val sBahn = LineColors.rideStyle("S41", "suburban", ruhleben, provided = 0xFF123456.toInt(), providedText = white)
+        assertEquals(0xFF123456.toInt(), sBahn?.color)
+        val hamburg = 53.55 to 10.0
+        val elsewhere = LineColors.rideStyle("U1", "subway", hamburg, provided = 0xFF123456.toInt(), providedText = white)
+        assertEquals(0xFF123456.toInt(), elsewhere?.color)
+        assertEquals(white, elsewhere?.text)
+        // A regional train named U1 is no U-Bahn of Berlin.
+        assertNull(LineColors.berlinSubwayStyle("U1", "regional", pankow))
+        assertNull(LineColors.berlinSubwayStyle("S1", "suburban", pankow))
+        // Of no known product only a name with its U is one.
+        assertEquals(0xFFF96815.toInt(), LineColors.berlinSubwayStyle("U9", "", pankow)?.color)
+        assertNull(LineColors.berlinSubwayStyle("9", "", pankow))
     }
 
     @Test
@@ -179,5 +217,22 @@ class LineColorsTest {
         // A short name is no part of another one.
         assertFalse(nameFits(osmNameKey("Dortmund Post"), osmNameKey("Post")))
         assertFalse(nameFits(osmNameKey("Mannheim Tattersall"), osmNameKey("Kunsthalle")))
+    }
+
+    @Test
+    fun versionCountsUpOnlyForNewColours() {
+        val start = LineColors.version.value
+        LineColors.noteProvider("5", "tram", "123456", "FFFFFF", mannheim)
+        val afterNew = LineColors.version.value
+        assertTrue(afterNew > start)
+        // The same colour of the same line nearby again: nothing to draw anew.
+        LineColors.noteProvider("5", "tram", "123456", "FFFFFF", mannheim)
+        assertEquals(afterNew, LineColors.version.value)
+        // Another colour for it, or the line elsewhere: drawn anew.
+        LineColors.noteProvider("5", "tram", "654321", "FFFFFF", mannheim)
+        assertTrue(LineColors.version.value > afterNew)
+        val afterChange = LineColors.version.value
+        LineColors.noteProvider("5", "tram", "654321", "FFFFFF", karlsruhe)
+        assertTrue(LineColors.version.value > afterChange)
     }
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Round 6, field test of the blue cards (r6live2). -->
+    <string name="r6l2_map_open">Open map</string>
+    <string name="r6l2_map_open_big">Open on the big map</string>
+</resources>

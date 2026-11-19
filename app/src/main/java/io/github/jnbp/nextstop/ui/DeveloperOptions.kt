@@ -48,9 +48,11 @@ import io.github.jnbp.nextstop.data.DiagLog
 import io.github.jnbp.nextstop.data.DiagReportInput
 import io.github.jnbp.nextstop.ui.theme.AppColors
 import io.github.jnbp.nextstop.ui.theme.AppFont
+import io.github.jnbp.nextstop.wear.PhoneBridge
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -58,7 +60,8 @@ import kotlinx.coroutines.withContext
  * The end of Settings > Advanced: the version of the app, and above it the developer options
  * once the version was tapped [DEVELOPER_TAPS] times. They hold aids for testing and for bug
  * reports: the detailed recording, the bug report with the log of what happened before (see
- * DiagCapture), the last crash, the performance lab and the simulated faster connection.
+ * DiagCapture), the last crash, the performance lab, the test of the sunny side and the
+ * simulated faster connection.
  */
 
 // Taps on the version that unlock the developer options.
@@ -71,6 +74,9 @@ private const val TAPS_TOLD = 3
 private const val NOTE_LENGTH = 2000
 
 private const val LOG_TAG = "Developer"
+
+// The numbers of the jank meter are read again this often while the options show them (ms).
+private const val JANK_REFRESH_MILLIS = 1_000L
 
 /** The version of the app, and above it the developer options once they are unlocked. */
 @Composable
@@ -90,6 +96,7 @@ internal fun DeveloperSection() {
                 prefs.developerOptions = false
                 PerfLab.unlock(false)
                 DiagCapture.setVerbose(context, false)
+                SunSideSetting.updateTest(context, false)
                 DiagLog.i(LOG_TAG) { "developer options hidden" }
             },
         )
@@ -141,13 +148,33 @@ private fun DeveloperOptions(prefs: AppPrefs, onHide: () -> Unit) {
     var events by remember { mutableIntStateOf(DiagLog.size) }
     var reportOpen by remember { mutableStateOf(false) }
     var crashShown by remember { mutableStateOf<String?>(null) }
+    var sunIntroShown by remember { mutableStateOf(false) }
     // The files are read off the main thread as the options open.
     LaunchedEffect(Unit) {
         val (crash, count) = withContext(Dispatchers.IO) { DiagCapture.lastCrashTime(context) to DiagCapture.eventCount(context) }
         crashTime = crash
         events = count
     }
-    val rows = if (crashTime != null) 7 else 6
+    SunSideSetting.load(context)
+    // Shown from here it stays due: the next hint of a ride opens it again.
+    if (sunIntroShown) SunSideIntroSheet(side = io.github.jnbp.nextstop.data.SunSide.Left, onDone = { sunIntroShown = false })
+    // The jank meter's numbers, read again every second while it counts (see JankMeter).
+    val jankOn = JankMeter.enabled
+    var jankLines by remember { mutableStateOf(JankMeter.lines()) }
+    var jankMap by remember { mutableStateOf(JankMeter.mapText(context)) }
+    var jankTransitions by remember { mutableStateOf(JankMeter.transitionsText(context)) }
+    LaunchedEffect(jankOn) {
+        while (jankOn) {
+            jankLines = JankMeter.lines()
+            jankMap = JankMeter.mapText(context)
+            jankTransitions = JankMeter.transitionsText(context)
+            delay(JANK_REFRESH_MILLIS)
+        }
+    }
+    // The switch of the jank meter; while on, a row per screen (or one saying there are none
+    // yet), the map in rest, reset and copy.
+    val jankRows = 1 + if (jankOn) jankLines.size.coerceAtLeast(1) + 4 else 0
+    val rows = (if (crashTime != null) 11 else 10) + jankRows
     val last = rows - 1
     SettingsGroup(label = stringResource(R.string.developer_options)) {
         // Counted afresh each time the rows are composed.
@@ -217,6 +244,89 @@ private fun DeveloperOptions(prefs: AppPrefs, onHide: () -> Unit) {
         )
         SwitchRow(
             shape = groupShape(index++, last),
+            title = stringResource(R.string.r5perf_jank_meter),
+            text = stringResource(R.string.r5perf_jank_meter_text),
+            checked = jankOn,
+            onChange = { value -> JankMeter.enabled = value },
+        )
+        if (jankOn) {
+            if (jankLines.isEmpty()) {
+                DevInfoRow(shape = groupShape(index++, last), title = stringResource(R.string.r5perf_jank_meter), text = stringResource(R.string.r5perf_jank_empty))
+            } else {
+                val framesWord = stringResource(R.string.r5perf_jank_frames)
+                val jankyWord = stringResource(R.string.r5perf_jank_janky)
+                val lateWord = stringResource(R.string.r6perf_jank_late)
+                for (line in jankLines) {
+                    DevInfoRow(shape = groupShape(index++, last), title = line.screen, text = jankText(line, framesWord, jankyWord, lateWord))
+                }
+            }
+            DevInfoRow(shape = groupShape(index++, last), title = stringResource(R.string.r5perf_jank_map), text = jankMap)
+            DevInfoRow(shape = groupShape(index++, last), title = stringResource(R.string.r6perf_jank_transitions), text = jankTransitions)
+            DevActionRow(
+                shape = groupShape(index++, last),
+                title = stringResource(R.string.r5perf_jank_reset),
+                text = stringResource(R.string.r5perf_jank_reset_text),
+                onClick = {
+                    JankMeter.reset()
+                    jankLines = JankMeter.lines()
+                    jankMap = JankMeter.mapText(context)
+                    jankTransitions = JankMeter.transitionsText(context)
+                },
+            )
+            DevActionRow(
+                shape = groupShape(index++, last),
+                title = stringResource(R.string.r5perf_jank_copy),
+                text = stringResource(R.string.r5perf_jank_copy_text),
+                onClick = {
+                    JankMeter.copy(context)
+                    Toast.makeText(context, R.string.r5perf_jank_copied, Toast.LENGTH_SHORT).show()
+                },
+            )
+        }
+        DevActionRow(
+            shape = groupShape(index++, last),
+            title = stringResource(R.string.developer_wake_test),
+            text = stringResource(R.string.developer_wake_test_text),
+            onClick = { WakeAlarm.test(context) },
+        )
+        // Asks the watch to open its companion now, as for a trip started here.
+        DevActionRow(
+            shape = groupShape(index++, last),
+            title = stringResource(R.string.developer_companion_test),
+            text = stringResource(R.string.developer_companion_test_text),
+            onClick = {
+                scope.launch {
+                    val result = PhoneBridge.testCompanionOnWatch(context)
+                    val text = when (result) {
+                        PhoneBridge.CompanionTest.Sent -> R.string.developer_companion_test_sent
+                        PhoneBridge.CompanionTest.NoWatch -> R.string.developer_companion_test_no_watch
+                        PhoneBridge.CompanionTest.NoAppOnWatch -> R.string.developer_companion_test_no_app
+                        PhoneBridge.CompanionTest.Failed -> R.string.developer_companion_test_failed
+                    }
+                    Toast.makeText(context, text, Toast.LENGTH_LONG).show()
+                }
+            },
+        )
+        // Forces the hint of the sunny side on every ride, whatever the sun and the weather.
+        SwitchRow(
+            shape = groupShape(index++, last),
+            title = stringResource(R.string.developer_sun_test),
+            text = stringResource(R.string.developer_sun_test_text),
+            checked = SunSideSetting.test,
+            onChange = { value -> SunSideSetting.updateTest(context, value) },
+        )
+        // Opens the explanation of the sunny side now, and lets it open again with the next hint.
+        DevActionRow(
+            shape = groupShape(index++, last),
+            title = stringResource(R.string.r5_developer_sun_intro),
+            text = stringResource(R.string.r5_developer_sun_intro_text),
+            onClick = {
+                SunSideSetting.resetIntro(context)
+                sunIntroShown = true
+            },
+        )
+        SwitchRow(
+            shape = groupShape(index++, last),
             title = stringResource(R.string.developer_simulate_faster),
             text = stringResource(R.string.developer_simulate_faster_text),
             checked = simulate,
@@ -239,6 +349,22 @@ private fun DeveloperOptions(prefs: AppPrefs, onHide: () -> Unit) {
 /** A short date and time in the format of the phone. */
 private fun formatTime(millis: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(millis))
+
+/** A row that only tells something (the numbers of the jank meter). */
+@Composable
+private fun DevInfoRow(shape: Shape, title: String, text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(AppColors.Card)
+            .defaultMinSize(minHeight = 56.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SettingText(title, text, modifier = Modifier.weight(1f))
+    }
+}
 
 /** A row that does something on a tap, like the rows of the notification channels. */
 @Composable

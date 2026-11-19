@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The sunny side on the boarding page (#176): right after the boarding hint, spelt out for TalkBack. -->
+    <string name="r6w2_sun_left_short">li</string>
+    <string name="r6w2_sun_right_short">re</string>
+    <string name="r6w2_sun_left_spoken">Sonne links in Fahrtrichtung</string>
+    <string name="r6w2_sun_right_spoken">Sonne rechts in Fahrtrichtung</string>
+    <!-- The ride page on one short line under the number of stops (#180); the station follows below. -->
+    <string name="r6w2_stops_to_change">Halte bis Umstieg</string>
+    <string name="r6w2_stops_to_end">Halte bis Ziel</string>
+    <!-- The connection card of the results and its overview (#174, #175). -->
+    <string name="r6w2_details">Details</string>
+    <string name="r6w2_journey">Verbindung</string>
+</resources>

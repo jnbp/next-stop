@@ -5,14 +5,20 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
 import io.github.jnbp.nextstop.wear.R
+import io.github.jnbp.nextstop.wear.complication.statusLead
+import io.github.jnbp.nextstop.wear.complication.statusText
+import io.github.jnbp.nextstop.wear.complication.tripGlyph
+import io.github.jnbp.nextstop.wear.complication.tripGlyphIcon
+import io.github.jnbp.nextstop.wear.complication.tripIcons
+import io.github.jnbp.nextstop.wear.complication.tripState
 import io.github.jnbp.nextstop.wear.tile.tripLines
 import io.github.jnbp.nextstop.wear.ui.OpenRequest
+import io.github.jnbp.nextstop.wear.ui.clock
 
 /**
  * The followed trip on the watch face and in the recents: an Ongoing Activity with the
@@ -62,23 +68,29 @@ object TripOngoing {
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setContentIntent(open)
-        // The countdown runs on the watch face by itself, also between two states of the trip.
-        // The parts of Status count in the time base of SystemClock.elapsedRealtime().
-        val zero = SystemClock.elapsedRealtime() + (trip.time - System.currentTimeMillis()).coerceAtLeast(0)
-        val label = when (trip.kind) {
-            // Before the walk to the first ride: "Leave · 5'", not the ride.
-            StepKind.Board -> if (trip.leave) context.getString(R.string.leave_short) else trip.line ?: trip.place
-            StepKind.GetOff -> trip.line ?: trip.place
-            else -> trip.place
-        }
+        // On the watch face: the app's icon (#282; also with the option, where the complications
+        // show the state, #253) and a short status ("U3 · 6'", "Aussteigen 2'"),
+        // renewed with every new state of the trip (at least once a minute), no wakeups of its own.
+        val now = System.currentTimeMillis()
+        val state = tripState(trip)
+        val count = if (watchShowsClock(trip.time - now)) clock(trip.time) else "${minutesUntil(trip.time, now)}'"
+        val text = statusText(
+            lead = statusLead(state, trip.kind, trip.leave, trip.line),
+            line = trip.line,
+            count = count,
+            getOff = context.getString(R.string.r6ideas_ongoing_get_off),
+            change = context.getString(R.string.r6ideas_ongoing_change),
+            leave = context.getString(R.string.leave_short),
+        )
         val status = Status.Builder()
-            .addTemplate("#label# · #time#")
-            .addTemplate("#time#")
-            .addPart("label", Status.TextPart(label))
-            .addPart("time", Status.TimerPart(zero))
+            .addTemplate("#status#")
+            .addPart("status", Status.TextPart(text))
             .build()
+        // A trip of the phone that goes silent leaves the watch face when it turns stale, as on the tile.
+        val staleAt = trip.staleAt()
+        if (staleAt > now) builder.setTimeoutAfter(staleAt - now)
         OngoingActivity.Builder(context, NOTIFICATION_ID, builder)
-            .setStaticIcon(R.drawable.ic_launcher_monochrome)
+            .setStaticIcon(tripIcons(WatchStore.stateIcons.value, tripGlyphIcon(tripGlyph(state, trip.product)), R.drawable.ic_launcher_monochrome).ongoing)
             .setTouchIntent(open)
             .setStatus(status)
             .build()

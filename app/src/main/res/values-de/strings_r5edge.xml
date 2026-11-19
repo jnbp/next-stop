@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chart_edge_loading_earlier">Früher …</string>
+    <string name="chart_edge_loading_later">Später …</string>
+    <string name="chart_edge_failed">Laden fehlgeschlagen. Zum Wiederholen erneut ziehen.</string>
+    <string name="chart_edge_hidden">Nur ausgeblendete Verbindungen. Für mehr erneut ziehen.</string>
+    <string name="chart_edge_nothing_earlier">Keine neuen früheren Verbindungen. Für mehr erneut ziehen.</string>
+    <string name="chart_edge_nothing_later">Keine neuen späteren Verbindungen. Für mehr erneut ziehen.</string>
+    <string name="chart_edge_end_earlier">Keine früheren Verbindungen</string>
+    <string name="chart_edge_end_later">Keine späteren Verbindungen</string>
+</resources>

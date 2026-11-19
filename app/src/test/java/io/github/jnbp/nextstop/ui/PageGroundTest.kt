@@ -32,6 +32,16 @@ class PageGroundTest {
     }
 
     @Test
+    fun thePlanningPageLiesOnThePlainGroundWithTheBatterySaver() {
+        assertEquals(PageGround.Plain, pageGround(Screen.Plan, startMap = false, planMap = false))
+        // Only the planning page: the trip and the course keep their map.
+        assertEquals(PageGround.Map, pageGround(Screen.Trip, startMap = false, planMap = false))
+        assertEquals(PageGround.Map, pageGround(Screen.Course, startMap = false, planMap = false))
+        // From it to the map tab the plain ground goes last, as from the start page.
+        assertEquals(true, groundLast(Screen.Plan, Screen.MapSheet, startMap = false, planMap = false) || tabSlideOf(Screen.Plan, Screen.MapSheet) != 0)
+    }
+
+    @Test
     fun everyPageHasAGround() {
         for (page in Screen.values()) {
             pageGround(page, startMap = true)

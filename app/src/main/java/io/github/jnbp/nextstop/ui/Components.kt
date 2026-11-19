@@ -26,6 +26,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
@@ -61,7 +64,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -103,6 +109,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -127,7 +134,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.isBareTrainNumber
-import io.github.jnbp.nextstop.data.DataSource
+import io.github.jnbp.nextstop.data.FailureKind
+import io.github.jnbp.nextstop.data.failureKind
 import io.github.jnbp.nextstop.data.DelayDisplay
 import io.github.jnbp.nextstop.data.DelayTone
 import io.github.jnbp.nextstop.data.MinutesTone
@@ -135,8 +143,10 @@ import io.github.jnbp.nextstop.data.TimeTone
 import io.github.jnbp.nextstop.data.delayTone
 import io.github.jnbp.nextstop.data.minutesTone
 import io.github.jnbp.nextstop.data.timeTone
+import io.github.jnbp.nextstop.data.StopTime
+import io.github.jnbp.nextstop.data.shownTime
+import io.github.jnbp.nextstop.data.shownTone
 import io.github.jnbp.nextstop.data.Departure
-import io.github.jnbp.nextstop.data.HttpStatusException
 import io.github.jnbp.nextstop.data.Journey
 import io.github.jnbp.nextstop.data.Leg
 import io.github.jnbp.nextstop.data.RailReplacement
@@ -158,11 +168,14 @@ import io.github.jnbp.nextstop.data.ringWayOf
 import io.github.jnbp.nextstop.data.NotSupportedException
 import io.github.jnbp.nextstop.data.SourceUnreachableException
 import io.github.jnbp.nextstop.data.Stop
+import io.github.jnbp.nextstop.data.StopAction
+import io.github.jnbp.nextstop.data.stopMenuEntries
 import io.github.jnbp.nextstop.data.Tightness
 import io.github.jnbp.nextstop.data.Warning
 import io.github.jnbp.nextstop.data.shortStopName
 import io.github.jnbp.nextstop.ui.theme.AppColors
 import io.github.jnbp.nextstop.ui.theme.contrastOf
+import io.github.jnbp.nextstop.ui.theme.readableOn
 
 internal val BERLIN: ZoneId = ZoneId.of("Europe/Berlin")
 private val CLOCK: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -358,14 +371,14 @@ val LocalMapCover = compositionLocalOf<FloatArray?> { null }
 @Composable
 fun Modifier.coversMapTop(): Modifier {
     val edges = LocalMapCover.current ?: return this
-    return this.onGloballyPositioned { edges[0] = it.boundsInRoot().bottom }
+    return this.onGloballyPositioned { MapEdges.report(edges, 0, it.boundsInRoot().bottom) }
 }
 
 /** Reports this element as what covers the bottom of the map, by its upper edge. */
 @Composable
 fun Modifier.coversMapBottom(): Modifier {
     val edges = LocalMapCover.current ?: return this
-    return this.onGloballyPositioned { edges[1] = it.boundsInRoot().top }
+    return this.onGloballyPositioned { MapEdges.report(edges, 1, it.boundsInRoot().top) }
 }
 
 /** Reports this element as a panel that covers the left side of the map, by its right edge. */
@@ -387,7 +400,7 @@ fun appearModifier(index: Int): Modifier {
     LaunchedEffect(progress) {
         if (progress.value >= 1f) return@LaunchedEffect
         // One row after the other from below, each settling with a little bounce.
-        delay(staggerDelay(index))
+        animationDelay(staggerDelay(index))
         progress.animateTo(1f, spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow))
     }
     return Modifier.graphicsLayer {
@@ -418,7 +431,7 @@ fun LineBadge(
         return
     }
     val color = lineColor(line, product, at, provided)
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(LINE_BADGE_CORNER)
     val outline = badgeOutline(color)
     val mode = modeHint(line, product)
     val spoken = listOfNotNull(mode?.let { modeWord(it) }, line).joinToString(" ").ifEmpty { null }
@@ -450,6 +463,13 @@ fun LineBadge(
         }
     }
 }
+
+/**
+ * The corner of a line badge. A row that starts with a badge and clips itself (for its ripple)
+ * must not clip with a larger corner: it would cut the badge's left corners rounder than its
+ * right ones (#121: the ICE badge of the calm companion's ride card).
+ */
+val LINE_BADGE_CORNER = 10.dp
 
 /** The size of the mode icon in a line badge (see [ModeMark]). */
 val MODE_MARK_SIZE = 13.dp
@@ -502,10 +522,14 @@ private const val BADGE_OUTLINE_CONTRAST = 1.6f
 /**
  * The outline of a line badge in [color], or null where none is needed: the colours of the
  * lines are fixed, the grounds and the accent follow the scheme (Material You, an own accent),
- * so a white, a black or an accent-like line can melt into the card it lies on.
+ * so a white, a black or an accent-like line can melt into the card it lies on, into the
+ * accent, or into the container of the accent under a picked row.
  */
 internal fun badgeOutline(color: Color): Color? {
-    val close = listOf(AppColors.Card, AppColors.Ground, AppColors.Blue).any { contrastOf(color, it) < BADGE_OUTLINE_CONTRAST }
+    val close = contrastOf(color, AppColors.Card) < BADGE_OUTLINE_CONTRAST ||
+        contrastOf(color, AppColors.Ground) < BADGE_OUTLINE_CONTRAST ||
+        contrastOf(color, AppColors.Blue) < BADGE_OUTLINE_CONTRAST ||
+        contrastOf(color, AppColors.BlueContainer) < BADGE_OUTLINE_CONTRAST
     return if (close) AppColors.Ink.copy(alpha = 0.38f) else null
 }
 
@@ -619,8 +643,16 @@ fun LineBadge(departure: Departure, modifier: Modifier = Modifier, minWidth: Dp 
 
 
 @Composable
-fun MinutesPill(minutes: Long?, live: Boolean, cancelled: Boolean = false, modifier: Modifier = Modifier) {
+fun MinutesPill(
+    minutes: Long?,
+    live: Boolean,
+    cancelled: Boolean = false,
+    modifier: Modifier = Modifier,
+    // The time counted down to: in its last minute the pill counts seconds ("in 45 s") instead of "now".
+    at: OffsetDateTime? = null,
+) {
     val gone = minutes != null && minutes < 0
+    val lastSeconds = rememberLastMinuteSeconds(at, near = !cancelled && minutes != null && minutes in 0L..1L)
     val background = when {
         cancelled -> AppColors.DelayRed
         live && !gone -> AppColors.Lime
@@ -636,12 +668,15 @@ fun MinutesPill(minutes: Long?, live: Boolean, cancelled: Boolean = false, modif
         cancelled -> stringResource(R.string.cancelled)
         minutes == null -> "–"
         minutes <= -FAR_MINUTES -> stringResource(R.string.span_ago, spanLabel(-minutes))
+        // The minutes of the page may lag a little behind the clock of the last minute: it goes first.
+        lastSeconds != null -> stringResource(R.string.r9_in_seconds, lastSeconds)
         minutes < 0 -> stringResource(R.string.minutes_ago, -minutes)
         minutes <= 0 -> stringResource(R.string.now)
         else -> waitLabel(minutes)
     }
     Box(
         modifier = modifier
+            .speaks(spokenTime(label))
             .clip(RoundedCornerShape(20.dp))
             .background(background)
             .padding(horizontal = 14.dp, vertical = 7.dp),
@@ -672,7 +707,24 @@ val DEPARTURE_ROW_HEIGHT = 60.dp
 val LocalDelayDisplay = compositionLocalOf { DelayDisplay.RealtimeAndDelay }
 
 /** Whether a "+2" stands beside a time with this setting. */
-val DelayDisplay.showsDelay: Boolean get() = this != DelayDisplay.RealtimeOnly
+val DelayDisplay.showsDelay: Boolean get() = this != DelayDisplay.RealtimeOnly && this != DelayDisplay.StruckPlanned
+
+/** Whether the timetable time stands struck through beside a changed expected time with this setting. */
+val DelayDisplay.strikesPlanned: Boolean get() = this == DelayDisplay.StruckPlanned
+
+/** The timetable time of a late or early run, struck through (see DelayDisplay.StruckPlanned). */
+@Composable
+fun StruckTime(planned: OffsetDateTime, fontSize: TextUnit = 11.sp, modifier: Modifier = Modifier) {
+    Text(
+        text = planned.clock(),
+        color = AppColors.Muted,
+        textDecoration = TextDecoration.LineThrough,
+        fontWeight = FontWeight.Medium,
+        fontSize = fontSize,
+        maxLines = 1,
+        modifier = modifier,
+    )
+}
 
 /** Whether the time shown is the timetable time with this setting (when there is one). */
 val DelayDisplay.showsPlanned: Boolean get() = this == DelayDisplay.PlannedAndDelay
@@ -689,13 +741,30 @@ fun DelayDisplay.clockOf(actual: OffsetDateTime, planned: OffsetDateTime?): Offs
  * an expected time is red when late and green when on time.
  */
 fun DelayDisplay.timeColor(realtime: Boolean, delayMinutes: Long, plain: Color): Color =
-    if (showsPlanned) plain else timeToneColor(timeTone(realtime, delayMinutes), plain)
+    timeToneColor(shownTone(this, realtime, delayMinutes), plain)
 
 /** The colour of a clock time's mark (see timeTone, the same on the watch). */
 fun timeToneColor(tone: TimeTone, plain: Color): Color = when (tone) {
     TimeTone.Scheduled -> plain
     TimeTone.Late -> AppColors.DelayRed
     TimeTone.OnTime -> AppColors.Early
+    // #277: estimated from the position ("ca."): the blue of the own position on the map.
+    TimeTone.Estimated -> AppColors.Blue
+}
+
+/**
+ * #277: the colour of a time the app estimated from the position on the lime of the counters
+ * (hero, pinned line): the blue of the own position, darkened where it would not read there;
+ * [plain] for any other time.
+ */
+fun countInk(estimated: Boolean, plain: Color = AppColors.OnLime): Color =
+    if (estimated) readableOn(AppColors.Lime, AppColors.Blue) else plain
+
+/** #277: "ca." ([about]) and the clock time [time] the app estimated from the position, both blue. */
+fun AnnotatedString.Builder.appendEstimatedTime(about: String, time: OffsetDateTime) {
+    withStyle(SpanStyle(color = timeToneColor(TimeTone.Estimated, AppColors.Blue))) {
+        append(about + " " + time.clock())
+    }
 }
 
 /** The colour of a delay's mark (see delayTone, the same on the watch). */
@@ -716,20 +785,86 @@ fun AnnotatedString.Builder.appendDelayedTime(
     realtime: Boolean,
     plain: Color,
 ) {
-    withStyle(SpanStyle(color = display.timeColor(realtime, delayMinutes, plain))) {
-        append(display.clockOf(actual, planned).clock())
+    // One decision for every view (see shownTime): "Takt" style strikes the timetable time first.
+    val shown = shownTime(display, actual, planned, realtime, delayMinutes)
+    shown.struck?.let { struck ->
+        withStyle(SpanStyle(color = AppColors.Muted, textDecoration = TextDecoration.LineThrough, fontSize = 0.8.em)) {
+            append(struck.clock())
+        }
+        append("\u2009")
     }
-    val delayTone = delayTone(realtime, delayMinutes)
-    if (display.showsDelay && delayTone != null) {
+    withStyle(SpanStyle(color = timeToneColor(shown.tone, plain))) {
+        append(shown.clock.clock())
+    }
+    shown.delay?.let { delay ->
         withStyle(
             SpanStyle(
-                color = delayToneColor(delayTone),
+                color = delayToneColor(if (delay > 0) DelayTone.Late else DelayTone.Early),
                 fontSize = 0.62.em,
                 fontWeight = FontWeight.Bold,
             ),
         ) {
-            append("\u2009" + "%+d".format(delayMinutes))
+            append("\u2009" + "%+d".format(delay))
         }
+    }
+}
+
+/**
+ * One time of a ride ([time]) as the delay setting says (see shownTime), in one line: the
+ * timetable time struck through, the clock time green, red or [plain], the small "+2". A time
+ * the app estimated is blue with "ca." and without a delay (#277); [passed] stops are grey and plain.
+ */
+@Composable
+fun DelayedTime(
+    time: StopTime,
+    modifier: Modifier = Modifier,
+    fontSize: TextUnit = 14.sp,
+    fontWeight: FontWeight = FontWeight.SemiBold,
+    plain: Color = AppColors.Ink,
+    passed: Boolean = false,
+) {
+    val display = LocalDelayDisplay.current
+    Text(
+        text = when {
+            time.estimated && !passed -> buildAnnotatedString { appendEstimatedTime(stringResource(R.string.estimated_prefix), time.actual) }
+            time.estimated -> AnnotatedString(stringResource(R.string.estimated_prefix) + " " + time.actual.clock())
+            passed -> AnnotatedString(display.clockOf(time.actual, time.planned).clock())
+            else -> buildAnnotatedString { appendDelayedTime(display, time.actual, time.planned, time.delayMinutes, time.realtime, plain) }
+        },
+        color = if (time.estimated || passed) AppColors.Muted else plain,
+        fontWeight = fontWeight,
+        fontSize = fontSize,
+        maxLines = 1,
+        modifier = modifier,
+    )
+}
+
+/**
+ * The string [pattern] ("ab %s", "an %s", "dann %s %s") with [time] put in as the delay setting
+ * says (see DelayedTime); [args] are its arguments, null standing for the time. The time is
+ * coloured, the rest of the text keeps the colour of its Text.
+ */
+@Composable
+fun delayedTimeText(pattern: Int, time: StopTime, plain: Color, args: List<String?> = listOf(null)): AnnotatedString {
+    val display = LocalDelayDisplay.current
+    val template = stringResource(pattern, *args.map { it ?: "\u0000" }.toTypedArray())
+    val about = stringResource(R.string.estimated_prefix)
+    return buildAnnotatedString {
+        template.forEach { char ->
+            when {
+                char != '\u0000' -> append(char)
+                time.estimated -> appendEstimatedTime(about, time.actual)
+                else -> appendDelayedTime(display, time.actual, time.planned, time.delayMinutes, time.realtime, plain)
+            }
+        }
+    }
+}
+
+/** [parts] in one text, each apart by " · ", their styles kept. */
+fun joinedText(parts: List<AnnotatedString>): AnnotatedString = buildAnnotatedString {
+    parts.forEachIndexed { index, part ->
+        if (index > 0) append(" · ")
+        append(part)
     }
 }
 
@@ -802,13 +937,18 @@ fun DepartureRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            val platformText = platformLabel(departure.platform)
+            val platformText = platformLabel(departure.platform, departure.product)
             // Live times are coloured; a time without live data is marked as timetable.
             val realtime = departure.delaySeconds != null
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // "Takt" style: the timetable time struck through before the new one.
+                val struck = departure.plannedTime
+                if (display.strikesPlanned && realtime && delayMinutes != 0 && struck != null && time != null) {
+                    StruckTime(struck, fontSize = 12.sp)
+                }
                 // The time first, then where it leaves: "16:03 · Platform 11".
                 if (time != null) {
                     // A new expected time after a refresh rolls in as the minutes do: from
@@ -834,6 +974,8 @@ fun DepartureRow(
                         fontSize = 12.sp,
                     )
                 }
+                // How full it is expected to be, where the provider says so.
+                departure.occupancy?.let { OccupancyGauge(it) }
                 // A cancelled run has no live time either: the red pill says enough.
                 if (!realtime && !departure.cancelled) {
                     Text(
@@ -874,6 +1016,7 @@ fun DepartureRow(
             // Highlighted from SOON_MINUTES on, "now" included (see minutesTone, the same on the watch).
             live = minutesTone(minutes, departure.cancelled) == MinutesTone.Soon,
             cancelled = departure.cancelled,
+            at = time,
         )
     }
 }
@@ -916,17 +1059,40 @@ fun MoreDots(
     color: Color = AppColors.Muted,
     size: Dp = 40.dp,
 ) {
+    // Three drawn dots, exactly in the middle of the button (#186): the character "⋮" sits on the
+    // math axis of the font, below the middle of its line box, so a ⋮ centred as text stood low.
     Box(
         modifier = modifier
             .clip(CircleShape)
             .clickable(onClickLabel = label, onClick = onClick)
             .semantics { contentDescription = label }
-            .size(size),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(text = "⋮", color = color, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, maxLines = 1)
-    }
+            .size(size)
+            .drawBehind {
+                val radius = MORE_DOT_RADIUS.toPx()
+                val gap = MORE_DOT_GAP.toPx()
+                for (offset in -1..1) drawCircle(color, radius, center = Offset(this.size.width / 2f, this.size.height / 2f + offset * gap))
+            },
+    )
 }
+
+// The dots of MoreDots: their radius and the distance between their centres.
+private val MORE_DOT_RADIUS = 2.dp
+private val MORE_DOT_GAP = 5.5.dp
+
+/**
+ * The menu of a row without a ⋮ of its own (the stops between, #186): the row itself is the
+ * visible control, a tap opens the menu and so does a long press (Joel's rule: nothing may be
+ * reachable by a long press alone). A screen reader offers both, named [label].
+ */
+@OptIn(ExperimentalFoundationApi::class)
+fun Modifier.rowMenu(label: String, onOpen: () -> Unit): Modifier =
+    combinedClickable(
+        onClickLabel = label,
+        role = Role.Button,
+        onLongClickLabel = label,
+        onLongClick = onOpen,
+        onClick = onOpen,
+    )
 
 /**
  * A departure that can be used: a tap shows the course of its line; the ⋮ at its end (or,
@@ -1118,8 +1284,9 @@ fun ChoiceChip(
     minHeight: Dp = 48.dp,
 ) {
     val shape = RoundedCornerShape(24.dp)
-    // A pressed chip gives way and springs back.
+    // A pressed chip gives way and springs back, with a light click (see Haptics).
     val interactions = remember { MutableInteractionSource() }
+    val ticks = rememberTicks()
     Box(
         modifier = modifier
             .semantics { if (description != null) contentDescription = description }
@@ -1133,7 +1300,10 @@ fun ChoiceChip(
                 },
             )
             .border(1.dp, if (active && strong) AppColors.Blue else glassRim(), shape)
-            .clickable(interactionSource = interactions, indication = LocalIndication.current, onClick = onClick)
+            .clickable(interactionSource = interactions, indication = LocalIndication.current) {
+                ticks.tick()
+                onClick()
+            }
             .defaultMinSize(minHeight = minHeight)
             .widthIn(max = 260.dp)
             .padding(horizontal = 16.dp),
@@ -1312,7 +1482,8 @@ fun Chevron(open: Boolean, modifier: Modifier = Modifier, color: Color = AppColo
 enum class Glyph {
     Back, Close, Gear, Star, StarFilled, Play, Swap, Plus, Minus, Locate, Search, Home, Work, Recent, Route, Map, Walk,
     Heart, Gym, School, Shop, Station, Navigate, Share, Calendar, Family, Friends, Party, Pin, Via, More, Bike,
-    Paste, LiveShare, Message,
+    Paste, LiveShare, Message, Doctor, Food, Airport, Culture, Park, Hotel,
+    Alarm, Bolt, Flag, OpenFull,
 }
 
 /** The icon a favourite place is drawn with. */
@@ -1329,26 +1500,39 @@ fun placeGlyph(icon: PlaceIcon): Glyph = when (icon) {
     PlaceIcon.Friends -> Glyph.Friends
     PlaceIcon.Party -> Glyph.Party
     PlaceIcon.Pin -> Glyph.Pin
+    PlaceIcon.Doctor -> Glyph.Doctor
+    PlaceIcon.Food -> Glyph.Food
+    PlaceIcon.Airport -> Glyph.Airport
+    PlaceIcon.Culture -> Glyph.Culture
+    PlaceIcon.Park -> Glyph.Park
+    PlaceIcon.Hotel -> Glyph.Hotel
 }
 
 /** What a favourite place is called while the user gave it no name of its own. */
 @Composable
-fun placeIconLabel(icon: PlaceIcon): String = stringResource(
-    when (icon) {
-        PlaceIcon.Home -> R.string.home
-        PlaceIcon.Work -> R.string.work
-        PlaceIcon.Heart -> R.string.icon_heart
-        PlaceIcon.Star -> R.string.icon_star
-        PlaceIcon.Gym -> R.string.icon_gym
-        PlaceIcon.School -> R.string.icon_school
-        PlaceIcon.Shop -> R.string.icon_shop
-        PlaceIcon.Station -> R.string.icon_station
-        PlaceIcon.Family -> R.string.icon_family
-        PlaceIcon.Friends -> R.string.icon_friends
-        PlaceIcon.Party -> R.string.icon_party
-        PlaceIcon.Pin -> R.string.icon_pin
-    },
-)
+fun placeIconLabel(icon: PlaceIcon): String = stringResource(placeIconLabelRes(icon))
+
+/** The string of [placeIconLabel], for code outside of composition (the share texts). */
+internal fun placeIconLabelRes(icon: PlaceIcon): Int = when (icon) {
+    PlaceIcon.Home -> R.string.home
+    PlaceIcon.Work -> R.string.work
+    PlaceIcon.Heart -> R.string.icon_heart
+    PlaceIcon.Star -> R.string.icon_star
+    PlaceIcon.Gym -> R.string.icon_gym
+    PlaceIcon.School -> R.string.icon_school
+    PlaceIcon.Shop -> R.string.icon_shop
+    PlaceIcon.Station -> R.string.icon_station
+    PlaceIcon.Family -> R.string.icon_family
+    PlaceIcon.Friends -> R.string.icon_friends
+    PlaceIcon.Party -> R.string.icon_party
+    PlaceIcon.Pin -> R.string.icon_pin
+    PlaceIcon.Doctor -> R.string.icon_doctor
+    PlaceIcon.Food -> R.string.icon_food
+    PlaceIcon.Airport -> R.string.icon_airport
+    PlaceIcon.Culture -> R.string.icon_culture
+    PlaceIcon.Park -> R.string.icon_park
+    PlaceIcon.Hotel -> R.string.icon_hotel
+}
 
 @Composable
 fun GlyphIcon(glyph: Glyph, modifier: Modifier = Modifier, color: Color = AppColors.Ink, size: Dp = 22.dp) {
@@ -1630,6 +1814,54 @@ fun GlyphIcon(glyph: Glyph, modifier: Modifier = Modifier, color: Color = AppCol
                 drawCircle(color, radius = w * 0.09f, center = Offset(w * 0.5f, w * 0.38f))
             }
 
+            // A cross, as on a doctor's sign.
+            Glyph.Doctor -> drawPath(
+                polyline(
+                    0.38f, 0.14f, 0.62f, 0.14f, 0.62f, 0.38f, 0.86f, 0.38f, 0.86f, 0.62f, 0.62f, 0.62f,
+                    0.62f, 0.86f, 0.38f, 0.86f, 0.38f, 0.62f, 0.14f, 0.62f, 0.14f, 0.38f, 0.38f, 0.38f,
+                ).apply { close() },
+                color,
+                style = stroke,
+            )
+
+            // A cup with steam: eating out, a café.
+            Glyph.Food -> {
+                drawPath(polyline(0.18f, 0.38f, 0.7f, 0.38f, 0.64f, 0.84f, 0.24f, 0.84f).apply { close() }, color, style = stroke)
+                drawPath(polyline(0.7f, 0.46f, 0.84f, 0.48f, 0.84f, 0.62f, 0.67f, 0.66f), color, style = stroke)
+                segment(0.36f, 0.14f, 0.36f, 0.27f)
+                segment(0.52f, 0.14f, 0.52f, 0.27f)
+            }
+
+            // A plane from above, nose up.
+            Glyph.Airport -> {
+                segment(0.5f, 0.1f, 0.5f, 0.88f)
+                drawPath(polyline(0.12f, 0.6f, 0.5f, 0.38f, 0.88f, 0.6f), color, style = stroke)
+                drawPath(polyline(0.34f, 0.88f, 0.5f, 0.77f, 0.66f, 0.88f), color, style = stroke)
+            }
+
+            // A note of music: culture, a concert, a night out.
+            Glyph.Culture -> {
+                segment(0.62f, 0.16f, 0.62f, 0.7f)
+                segment(0.62f, 0.16f, 0.84f, 0.3f)
+                drawCircle(color, radius = w * 0.13f, center = Offset(w * 0.48f, w * 0.72f), style = stroke)
+            }
+
+            // A tree: a park, the green.
+            Glyph.Park -> {
+                drawCircle(color, radius = w * 0.25f, center = Offset(w * 0.5f, w * 0.38f), style = stroke)
+                segment(0.5f, 0.63f, 0.5f, 0.9f)
+                segment(0.36f, 0.9f, 0.64f, 0.9f)
+            }
+
+            // A bed with a pillow: a hotel, somewhere to sleep.
+            Glyph.Hotel -> {
+                segment(0.12f, 0.26f, 0.12f, 0.84f)
+                segment(0.12f, 0.66f, 0.88f, 0.66f)
+                segment(0.88f, 0.66f, 0.88f, 0.84f)
+                drawPath(polyline(0.4f, 0.66f, 0.4f, 0.46f, 0.82f, 0.46f, 0.88f, 0.54f, 0.88f, 0.66f), color, style = stroke)
+                drawCircle(color, radius = w * 0.08f, center = Offset(w * 0.25f, w * 0.54f), style = stroke)
+            }
+
             // A clipboard: a board with its clip on top and two lines of text.
             Glyph.Paste -> {
                 drawRoundRect(
@@ -1673,6 +1905,44 @@ fun GlyphIcon(glyph: Glyph, modifier: Modifier = Modifier, color: Color = AppCol
                 drawPath(polyline(0.3f, 0.72f, 0.24f, 0.88f, 0.46f, 0.72f), color, style = stroke)
                 segment(0.3f, 0.37f, 0.7f, 0.37f)
                 segment(0.3f, 0.53f, 0.56f, 0.53f)
+            }
+
+            // An alarm clock as Material draws it: a round face with two hands and the two
+            // bells on its shoulders.
+            Glyph.Alarm -> {
+                drawCircle(color, radius = w * 0.31f, center = Offset(w * 0.5f, w * 0.55f), style = stroke)
+                drawPath(polyline(0.5f, 0.38f, 0.5f, 0.56f, 0.62f, 0.64f), color, style = stroke)
+                drawArc(
+                    color, startAngle = 200f, sweepAngle = 70f, useCenter = false,
+                    topLeft = Offset(w * 0.06f, w * 0.1f), size = Size(w * 0.4f, w * 0.4f), style = stroke,
+                )
+                drawArc(
+                    color, startAngle = 270f, sweepAngle = 70f, useCenter = false,
+                    topLeft = Offset(w * 0.54f, w * 0.1f), size = Size(w * 0.4f, w * 0.4f), style = stroke,
+                )
+            }
+
+            // A lightning bolt, filled: "every minute counts".
+            Glyph.Bolt -> drawPath(
+                polyline(0.58f, 0.08f, 0.22f, 0.56f, 0.48f, 0.56f, 0.4f, 0.92f, 0.78f, 0.42f, 0.52f, 0.42f).apply { close() },
+                color,
+            )
+
+            // A flag on its pole: where the trip ends.
+            // "Open in full" (#191): two arrows out to opposite corners, each ending in a corner.
+            Glyph.OpenFull -> {
+                segment(0.58f, 0.42f, 0.82f, 0.18f)
+                drawPath(polyline(0.56f, 0.18f, 0.82f, 0.18f, 0.82f, 0.44f), color, style = stroke)
+                segment(0.42f, 0.58f, 0.18f, 0.82f)
+                drawPath(polyline(0.18f, 0.56f, 0.18f, 0.82f, 0.44f, 0.82f), color, style = stroke)
+            }
+
+            Glyph.Flag -> {
+                segment(0.26f, 0.12f, 0.26f, 0.9f)
+                drawPath(
+                    polyline(0.26f, 0.16f, 0.78f, 0.16f, 0.66f, 0.33f, 0.78f, 0.5f, 0.26f, 0.5f).apply { close() },
+                    color,
+                )
             }
 
             // A sheet of a calendar: a frame with a bar on top, two rings and a marked day.
@@ -2057,7 +2327,49 @@ data class PlaceTile(
     val onDisruptions: (() -> Unit)? = null,
     /** The radius [disruptions] were found in (see CardDisruptionLine). */
     val disruptionRadius: Int? = null,
+    /** Minutes until the journey leaves, for "leave in x min" (the grid of "My routes"); null: not shown. */
+    val leaveMinutes: Long? = null,
 )
+
+/**
+ * The header of a place tile: [title] (its glyph and name) at the start and [time] at the end
+ * of one row where both fit whole; else the title keeps the whole width and the time goes
+ * under it (see [tileTimeBelowTitle]). The title is measured once at its natural width, so
+ * the choice costs nothing per frame.
+ */
+@Composable
+private fun TileHeader(title: @Composable () -> Unit, time: @Composable () -> Unit) {
+    Layout(
+        contents = listOf(title, time),
+        modifier = Modifier.fillMaxWidth(),
+    ) { (titleParts, timeParts), constraints ->
+        val gap = 6.dp.roundToPx()
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val titlePlaceable = titleParts.firstOrNull()?.measure(loose)
+        val timePlaceables = timeParts.map { it.measure(loose) }
+        val titleWidth = titlePlaceable?.width ?: 0
+        val titleHeight = titlePlaceable?.height ?: 0
+        val timeWidth = timePlaceables.maxOfOrNull { it.width } ?: 0
+        val timeHeight = timePlaceables.maxOfOrNull { it.height } ?: 0
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else titleWidth + gap + timeWidth
+        val below = tileTimeBelowTitle(titleWidth, timeWidth, gap, width)
+        val height = when {
+            timeHeight == 0 -> titleHeight
+            below -> titleHeight + gap + timeHeight
+            else -> maxOf(titleHeight, timeHeight)
+        }.coerceIn(constraints.minHeight, constraints.maxHeight)
+        layout(width, height) {
+            if (below) {
+                titlePlaceable?.place(0, 0)
+                timePlaceables.forEach { it.place(0, titleHeight + gap) }
+            } else {
+                val rowHeight = maxOf(titleHeight, timeHeight)
+                titlePlaceable?.place(0, (rowHeight - titleHeight) / 2)
+                timePlaceables.forEach { it.place(width - it.width, (rowHeight - it.height) / 2) }
+            }
+        }
+    }
+}
 
 // What the lower part of a place tile shows (see its cross-fade).
 private const val TILE_JOURNEY = 0
@@ -2066,7 +2378,7 @@ private const val TILE_NOTE = 2
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PlaceTileCard(tile: PlaceTile, modifier: Modifier = Modifier) {
+fun PlaceTileCard(tile: PlaceTile, modifier: Modifier = Modifier, onNaturalHeight: ((Int) -> Unit)? = null) {
     val journey = tile.journey
     // A pressed tile gives way a little and springs back, like a chip.
     val interactions = remember { MutableInteractionSource() }
@@ -2100,122 +2412,152 @@ fun PlaceTileCard(tile: PlaceTile, modifier: Modifier = Modifier) {
                     onLongClick = tile.onLongClick,
                 )
                 .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            // The content at its own height, reported to a grid that sizes its rows (see
+            // PlaceTileGrid): measured without the height the tile is given, so no feedback.
+            val verticalPadding = with(LocalDensity.current) { 24.dp.roundToPx() }
+            val latestReport by rememberUpdatedState(onNaturalHeight)
+            Column(
+                modifier = if (onNaturalHeight != null) {
+                    Modifier
+                        .fillMaxWidth()
+                        .wrapContentHeight(Alignment.Top, unbounded = true)
+                        .onSizeChanged { latestReport?.invoke(it.height + verticalPadding) }
+                } else {
+                    Modifier.fillMaxWidth()
+                },
+                verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                GlyphIcon(tile.glyph, size = 20.dp)
-                Text(
-                    text = tile.title,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                // The minutes come in with the journey, fading and taking their room softly; the
-                // last ones stay while they go.
-                val minutes = journey?.durationMinutes?.toInt()
-                val heldMinutes = remember { IntArray(1) }
-                if (minutes != null) heldMinutes[0] = minutes
-                val shownMinutes = heldMinutes[0]
-                AnimatedVisibility(visible = minutes != null && !tile.here) {
-                    // From an hour on in hours and minutes ("2 h 23 min"), never one big number.
-                    val (hours, rest) = durationSpan(shownMinutes.toLong())
-                    Row {
-                        if (hours != null) {
-                            CountingText(
-                                value = hours.toInt(),
-                                color = AppColors.Ink,
-                                fontSize = 22.sp,
-                                modifier = Modifier.alignByBaseline(),
-                            )
+                // The title has priority over the time: on a narrow tile the whole "Zuhause"
+                // stays, and the time moves under it (see TileHeader, tileTimeBelowTitle).
+                TileHeader(
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            GlyphIcon(tile.glyph, size = 20.dp)
                             Text(
-                                text = stringResource(R.string.hours_unit),
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                modifier = Modifier
-                                    .alignByBaseline()
-                                    .padding(start = 3.dp, end = if (rest != null) 5.dp else 0.dp),
-                            )
-                        }
-                        if (rest != null) {
-                            CountingText(
-                                value = rest.toInt(),
-                                color = AppColors.Ink,
-                                fontSize = 22.sp,
-                                modifier = Modifier.alignByBaseline(),
-                            )
-                            Text(
-                                text = stringResource(R.string.minutes_unit),
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                modifier = Modifier
-                                    .alignByBaseline()
-                                    .padding(start = 3.dp),
-                            )
-                        }
-                    }
-                }
-            }
-            // The journey, its shimmering placeholder or a note: a change between them cross-fades
-            // instead of switching; a newer journey in place of the last one just updates.
-            val phase = when {
-                journey != null && !tile.here -> TILE_JOURNEY
-                tile.set && !tile.here && !tile.loaded -> TILE_LOADING
-                else -> TILE_NOTE
-            }
-            AnimatedContent(
-                targetState = phase to journey,
-                contentKey = { it.first },
-                transitionSpec = { fadeIn(tween(240, delayMillis = 60)) togetherWith fadeOut(tween(140)) using null },
-                modifier = Modifier.fillMaxWidth(),
-                label = "tileJourney",
-            ) { (shownPhase, shownJourney) ->
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    if (shownPhase == TILE_JOURNEY && shownJourney != null) {
-                        LegBar(journey = shownJourney, modifier = Modifier.padding(vertical = 4.dp))
-                        // A newer journey's times cross-fade in place of the last ones.
-                        FadeSwap(target = stringResource(R.string.tile_times, shownJourney.departure.clock(), shownJourney.arrival.clock())) { times ->
-                            Text(
-                                text = times,
-                                color = AppColors.Muted,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp,
+                                text = tile.title,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                    } else if (shownPhase == TILE_LOADING) {
-                        // While its journey loads: the bar and the times as shimmering placeholders.
-                        SkeletonLine(modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth().height(10.dp))
-                        SkeletonLine(modifier = Modifier.fillMaxWidth(0.6f).height(12.dp))
-                    } else {
-                        Text(
-                            text = stringResource(
-                                when {
-                                    !tile.set -> R.string.not_set
-                                    tile.here -> R.string.tile_here
-                                    !tile.loaded -> R.string.tile_loading
-                                    else -> R.string.tile_none
-                                },
-                            ),
-                            color = if (tile.here) AppColors.Blue else AppColors.Muted,
-                            fontWeight = if (tile.here) FontWeight.SemiBold else null,
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                    },
+                ) {
+                    // The minutes come in with the journey, fading and taking their room softly; the
+                    // last ones stay while they go.
+                    val minutes = journey?.durationMinutes?.toInt()
+                    val heldMinutes = remember { IntArray(1) }
+                    if (minutes != null) heldMinutes[0] = minutes
+                    val shownMinutes = heldMinutes[0]
+                    AnimatedVisibility(visible = minutes != null && !tile.here) {
+                        // From an hour on in hours and minutes ("2:23" and a small "h"), never one
+                        // big number; read out in words ("2 Stunden 23 Minuten").
+                        val clock = durationClock(shownMinutes.toLong())
+                        Row(modifier = Modifier.speaks(spokenDuration(shownMinutes.toLong()))) {
+                            if (clock != null) {
+                                RollingText(
+                                    value = shownMinutes.toLong(),
+                                    text = clock,
+                                    color = AppColors.Ink,
+                                    fontSize = 22.sp,
+                                    modifier = Modifier.alignByBaseline(),
+                                )
+                                Text(
+                                    text = stringResource(R.string.hours_unit),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    modifier = Modifier
+                                        .alignByBaseline()
+                                        .padding(start = 3.dp),
+                                )
+                            } else {
+                                CountingText(
+                                    value = shownMinutes,
+                                    color = AppColors.Ink,
+                                    fontSize = 22.sp,
+                                    modifier = Modifier.alignByBaseline(),
+                                )
+                                // The prime of minutes hugs its number, at the number's size.
+                                Text(
+                                    text = stringResource(R.string.minutes_unit),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = unitSize(stringResource(R.string.minutes_unit), 12.sp, 22.sp),
+                                    maxLines = 1,
+                                    modifier = Modifier
+                                        .alignByBaseline()
+                                        .padding(start = unitGap(stringResource(R.string.minutes_unit), 3.dp)),
+                                )
+                            }
+                        }
                     }
                 }
+                // The journey, its shimmering placeholder or a note: a change between them cross-fades
+                // instead of switching; a newer journey in place of the last one just updates.
+                val phase = when {
+                    journey != null && !tile.here -> TILE_JOURNEY
+                    tile.set && !tile.here && !tile.loaded -> TILE_LOADING
+                    else -> TILE_NOTE
+                }
+                AnimatedContent(
+                    targetState = phase to journey,
+                    contentKey = { it.first },
+                    transitionSpec = { fadeIn(tween(240, delayMillis = 60)) togetherWith fadeOut(tween(140)) using null },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "tileJourney",
+                ) { (shownPhase, shownJourney) ->
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        if (shownPhase == TILE_JOURNEY && shownJourney != null) {
+                            LegBar(journey = shownJourney, modifier = Modifier.padding(vertical = 4.dp))
+                            // A newer journey's times cross-fade in place of the last ones.
+                            val timesText = stringResource(R.string.tile_times, shownJourney.departure.clock(), shownJourney.arrival.clock())
+                            val leave = tile.leaveMinutes
+                            val line = when {
+                                leave == null || leave < 0 || leave >= 60 -> timesText
+                                leave == 0L -> stringResource(R.string.ways_leave_now) + " · " + timesText
+                                else -> stringResource(R.string.ways_leave_tile, leave.toInt()) + " · " + timesText
+                            }
+                            FadeSwap(target = line) { times ->
+                                Text(
+                                    text = times,
+                                    color = AppColors.Muted,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        } else if (shownPhase == TILE_LOADING) {
+                            // While its journey loads: the bar and the times as shimmering placeholders.
+                            SkeletonLine(modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth().height(10.dp))
+                            SkeletonLine(modifier = Modifier.fillMaxWidth(0.6f).height(12.dp))
+                        } else {
+                            Text(
+                                text = stringResource(
+                                    when {
+                                        !tile.set -> R.string.not_set
+                                        tile.here -> R.string.tile_here
+                                        !tile.loaded -> R.string.tile_loading
+                                        else -> R.string.tile_none
+                                    },
+                                ),
+                                color = if (tile.here) AppColors.Blue else AppColors.Muted,
+                                fontWeight = if (tile.here) FontWeight.SemiBold else null,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                // Disruptions on the lines near the place, in one line (see CardDisruptionLine).
+                CardDisruptionLine(items = tile.disruptions, onClick = tile.onDisruptions, radiusMeters = tile.disruptionRadius)
             }
-            // Disruptions on the lines near the place, in one line (see CardDisruptionLine).
-            CardDisruptionLine(items = tile.disruptions, onClick = tile.onDisruptions, radiusMeters = tile.disruptionRadius)
         }
     }
 }
@@ -2258,25 +2600,46 @@ fun PlaceTiles(tiles: List<PlaceTile>, modifier: Modifier = Modifier) {
 }
 
 /** What a long press on a stop offers to do with it. */
-enum class StopAction { From, To, Departures, Map, Pin }
+/**
+ * What every menu of a stop needs from the app (see [StopMenu]): the ids of the favourite stops,
+ * and what a choice does ([onAction]). Provided by AppRoot, so a stop anywhere (the companion's
+ * timeline, the search) offers the same menu without handing it through (#139). Null in previews.
+ */
+class StopMenuHost(val favoriteIds: Set<String>, val onAction: (Stop, StopAction) -> Unit)
+
+val LocalStopMenuHost = compositionLocalOf<StopMenuHost?> { null }
 
 /**
- * The small menu a long press on a stop opens. It closes itself after a choice. [omit] leaves
- * out what the place it opens from offers on its own.
+ * The small menu of a stop: "Von hier", "Hierhin", "Abfahrten hier", "Auf der Karte zeigen",
+ * "Auf den Startbildschirm", "Als Lieblingshaltestelle" (see stopMenuEntries). It closes itself
+ * after a choice. [omit] leaves out what the place it opens from offers on its own. With the
+ * [place] given, the favourite entry says whether it is one already (see LocalStopMenuHost).
  */
 @Composable
-fun StopMenu(open: Boolean, onDismiss: () -> Unit, onAction: (StopAction) -> Unit, omit: Set<StopAction> = emptySet()) {
+fun StopMenu(
+    open: Boolean,
+    onDismiss: () -> Unit,
+    onAction: (StopAction) -> Unit,
+    omit: Set<StopAction> = emptySet(),
+    place: Stop? = null,
+) {
     // "Add to home screen" only where the launcher takes pinned shortcuts.
     val context = LocalContext.current
     val pinnable = remember(context) { AppShortcuts.canPin(context) }
+    val host = LocalStopMenuHost.current
+    // A favourite is a stop of the timetable with an id (not a place or a position).
+    val favoriteOk = host != null && place != null && place.kind == PlaceKind.Stop
+    val favorite = favoriteOk && host!!.favoriteIds.contains(place!!.id)
     DropdownMenu(expanded = open, onDismissRequest = onDismiss) {
-        val entries = listOf(
-            StopAction.From to R.string.from_here,
-            StopAction.To to R.string.to_here,
-            StopAction.Departures to R.string.departures_here,
-            StopAction.Map to R.string.show_on_map,
-        ) + if (pinnable) listOf(StopAction.Pin to R.string.pin_to_home) else emptyList()
-        entries.filter { it.first !in omit }.forEach { (action, label) ->
+        stopMenuEntries(pinnable, favoriteOk, omit).forEach { action ->
+            val label = when (action) {
+                StopAction.From -> R.string.from_here
+                StopAction.To -> R.string.to_here
+                StopAction.Departures -> R.string.departures_here
+                StopAction.Map -> R.string.show_on_map
+                StopAction.Pin -> R.string.pin_to_home
+                StopAction.Favorite -> if (favorite) R.string.r6_stop_favorite_remove else R.string.r6_stop_favorite_add
+            }
             DropdownMenuItem(
                 text = { Text(text = stringResource(label)) },
                 onClick = {
@@ -2289,10 +2652,55 @@ fun StopMenu(open: Boolean, onDismiss: () -> Unit, onAction: (StopAction) -> Uni
 }
 
 /**
+ * The menu of [place] behind a tap, for a stop that has no menu of its own (the companion's
+ * timeline, #139): [content] is the row, the menu opens at its end. Nothing to tap without a
+ * host (previews) or a place.
+ */
+@Composable
+fun StopMenuBox(
+    place: Stop?,
+    modifier: Modifier = Modifier,
+    omit: Set<StopAction> = emptySet(),
+    // A stop between (#186): the menu opens on a long press as well as on a tap (see rowMenu).
+    longPress: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val host = LocalStopMenuHost.current
+    if (host == null || place == null) {
+        Box(modifier = modifier) { content() }
+        return
+    }
+    var open by remember { mutableStateOf(false) }
+    val label = stringResource(R.string.stop_menu)
+    val opening = if (longPress) Modifier.rowMenu(label) { open = true } else Modifier.clickable(onClickLabel = label, role = Role.Button) { open = true }
+    Box(modifier = modifier.then(opening)) {
+        content()
+        Box(modifier = Modifier.align(Alignment.CenterEnd)) {
+            StopMenu(
+                open = open,
+                onDismiss = { open = false },
+                onAction = { action -> host.onAction(place, action) },
+                omit = omit,
+                place = place,
+            )
+        }
+    }
+}
+
+/**
+ * True where a [SegmentedToggle] has to fit the width it is given (the rows of the settings
+ * and the setup): parts that do not fit side by side wrap into a grid of two columns or a list
+ * of their own, and nothing is ever pushed sideways or cut.
+ */
+val LocalWrapChoices = compositionLocalOf { false }
+
+/**
  * A toggle of two or more parts: the active part is blue, and the blue moves over softly.
  * [ground] is the colour of the other parts; on a white card they need a grey one to show.
  * With [fill] the parts share the whole width evenly. With [twoLines] a label too long for
- * its part wraps onto further lines, centred, and is never cut or ellipsized.
+ * its part wraps onto further lines, centred, and is never cut or ellipsized. Where
+ * [LocalWrapChoices] asks for it and the parts do not fit side by side, two or four parts
+ * stand in a grid of two columns, three or more than four in a list, one below the other.
  */
 @Composable
 fun SegmentedToggle(
@@ -2305,14 +2713,41 @@ fun SegmentedToggle(
     fill: Boolean = false,
     twoLines: Boolean = false,
 ) {
+    if (LocalWrapChoices.current && labels.size > 1) {
+        WrappingSegments(labels, selected, onSelect, modifier, minHeight, ground, fill)
+        return
+    }
+    SegmentRow(labels, selected, onSelect, modifier, minHeight, ground, fill, twoLines)
+}
+
+/** The parts of a [SegmentedToggle] side by side (the toggle as it always was). */
+@Composable
+private fun SegmentRow(
+    labels: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier,
+    minHeight: Dp,
+    ground: Color,
+    fill: Boolean,
+    twoLines: Boolean,
+    // The index of the first part, where a grid shows the parts in several rows.
+    first: Int = 0,
+    // The parts all as high as the highest (in a grid, where one label may wrap).
+    even: Boolean = false,
+    shapeOf: (Int) -> Shape = { index ->
+        when (index) {
+            0 -> RoundedCornerShape(24.dp, 8.dp, 8.dp, 24.dp)
+            labels.lastIndex -> RoundedCornerShape(8.dp, 24.dp, 24.dp, 8.dp)
+            else -> RoundedCornerShape(8.dp)
+        }
+    },
+) {
+    val ticks = rememberTicks()
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         labels.forEachIndexed { index, label ->
-            val shape = when (index) {
-                0 -> RoundedCornerShape(24.dp, 8.dp, 8.dp, 24.dp)
-                labels.lastIndex -> RoundedCornerShape(8.dp, 24.dp, 24.dp, 8.dp)
-                else -> RoundedCornerShape(8.dp)
-            }
-            val active = index == selected
+            val shape = shapeOf(index)
+            val active = first + index == selected
             val background by animateColorAsState(
                 if (active) AppColors.Blue else ground,
                 spring(stiffness = Spring.StiffnessMediumLow),
@@ -2325,9 +2760,13 @@ fun SegmentedToggle(
             )
             Box(
                 modifier = (if (fill) Modifier.weight(1f) else Modifier)
+                    .then(if (even) Modifier.fillMaxHeight() else Modifier)
                     .clip(shape)
                     .background(background)
-                    .clickable { onSelect(index) }
+                    .clickable {
+                        if (!active) ticks.tick()
+                        onSelect(first + index)
+                    }
                     .defaultMinSize(minHeight = minHeight)
                     .padding(horizontal = if (fill || labels.size > 3) 4.dp else 14.dp, vertical = if (twoLines) 2.dp else 0.dp),
                 contentAlignment = Alignment.Center,
@@ -2349,29 +2788,152 @@ fun SegmentedToggle(
 }
 
 /**
- * A calm line for a request that failed, naming what went wrong in plain words. The raw
- * message of the exception is never shown.
+ * A [SegmentedToggle] that fits its width: side by side where the labels fit, else two or
+ * four parts in a grid of two columns, and any other number as a list of radio rows.
  */
-fun errorText(context: Context, e: Exception): String = when {
-    // Shown only when every source in use failed; while one stands in, the hint names it instead.
-    e is SourceUnreachableException && e.tried.size > 1 -> context.getString(R.string.sources_all_unreachable)
-    e is SourceUnreachableException && e.tried.size == 1 ->
-        context.getString(R.string.source_unreachable, backendName(context, e.tried.first()))
-    e is SourceUnreachableException && e.cause is NotSupportedException -> context.getString(R.string.source_not_supported)
-    e is SourceUnreachableException && e.source == DataSource.Transitous -> context.getString(R.string.transitous_unreachable)
-    e is SourceUnreachableException -> context.getString(R.string.bvg_unreachable)
-    e is HttpStatusException -> context.getString(R.string.request_failed)
-    e is IOException -> context.getString(R.string.network_failed)
-    else -> context.getString(R.string.request_failed)
+@Composable
+private fun WrappingSegments(
+    labels: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier,
+    minHeight: Dp,
+    ground: Color,
+    fill: Boolean,
+) {
+    val measurer = rememberTextMeasurer()
+    val style = LocalTextStyle.current
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val count = labels.size
+        val fontSize = if (count > 3) 13.sp else 14.sp
+        val widths = remember(labels, style, density) {
+            labels.map { label ->
+                measurer.measure(label, style.merge(TextStyle(fontSize = fontSize, fontWeight = FontWeight.Bold)), maxLines = 1).size.width
+            }
+        }
+        val layout = segmentLayout(
+            labelWidths = widths,
+            available = constraints.maxWidth,
+            padding = with(density) { (if (fill || count > 3) 4.dp else 14.dp).roundToPx() },
+            gap = with(density) { 3.dp.roundToPx() },
+            evenly = fill,
+        )
+        when (layout) {
+            SegmentLayout.Row -> SegmentRow(labels, selected, onSelect, Modifier.fillMaxWidth(), minHeight, ground, fill, twoLines = false)
+            SegmentLayout.Grid -> Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                labels.chunked(2).forEachIndexed { row, pair ->
+                    val lastRow = row == (count - 1) / 2
+                    SegmentRow(
+                        labels = pair,
+                        selected = selected,
+                        onSelect = onSelect,
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                        minHeight = minHeight,
+                        ground = ground,
+                        fill = true,
+                        twoLines = true,
+                        first = row * 2,
+                        even = true,
+                        shapeOf = { index -> gridShape(top = row == 0, bottom = lastRow, start = index == 0, end = index == pair.lastIndex) },
+                    )
+                }
+            }
+            SegmentLayout.List -> ChoiceList(labels, selected, onSelect, minHeight, ground)
+        }
+    }
 }
 
-/** "Platform 4" for plain numbers; texts such as "Pos. 11" already say what they are. */
-@Composable
-fun platformLabel(platform: String?): String? = when {
-    platform.isNullOrBlank() -> null
-    platform.first().isDigit() -> stringResource(R.string.platform, platform)
-    else -> platform
+// The corners of a part of a grid: round on the outside of the whole, small inside.
+private fun gridShape(top: Boolean, bottom: Boolean, start: Boolean, end: Boolean): Shape {
+    val round = 20.dp
+    val small = 8.dp
+    return RoundedCornerShape(
+        topStart = if (top && start) round else small,
+        topEnd = if (top && end) round else small,
+        bottomEnd = if (bottom && end) round else small,
+        bottomStart = if (bottom && start) round else small,
+    )
 }
+
+/** The choices one below the other, each a row with a round mark; the picked one is blue. */
+@Composable
+private fun ChoiceList(labels: List<String>, selected: Int, onSelect: (Int) -> Unit, minHeight: Dp, ground: Color) {
+    val ticks = rememberTicks()
+    Column(modifier = Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        labels.forEachIndexed { index, label ->
+            val active = index == selected
+            val background by animateColorAsState(
+                if (active) AppColors.Blue else ground,
+                spring(stiffness = Spring.StiffnessMediumLow),
+                label = "choiceRow",
+            )
+            val ink by animateColorAsState(
+                if (active) AppColors.OnBlue else AppColors.Ink,
+                spring(stiffness = Spring.StiffnessMediumLow),
+                label = "choiceInk",
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(gridShape(top = index == 0, bottom = index == labels.lastIndex, start = true, end = true))
+                    .background(background)
+                    .selectable(selected = active, role = Role.RadioButton) {
+                        if (!active) ticks.tick()
+                        onSelect(index)
+                    }
+                    .defaultMinSize(minHeight = minHeight)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .border(2.dp, ink, CircleShape)
+                        .padding(4.dp)
+                        .clip(CircleShape)
+                        .background(if (active) ink else Color.Transparent),
+                )
+                Text(
+                    text = label,
+                    color = ink,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A calm line for a request that failed, naming what went wrong in plain words. The raw
+ * message of the exception is never shown. When no source could be reached at all (#196: no
+ * network, or every provider timed out or refused, see failureKind) it is "Dienste nicht
+ * erreichbar" and, on a second line, what to do: check the internet where the phone has none,
+ * else try again later. [problemText] sets the first line in bold.
+ */
+fun errorText(context: Context, e: Exception): String = when (failureKind(e)) {
+    FailureKind.NoNetwork -> context.getString(R.string.r6s2_services_down) + "\n" + context.getString(R.string.r6s2_check_internet)
+    FailureKind.ServicesDown -> context.getString(R.string.r6s2_services_down) + "\n" + context.getString(R.string.r6s2_try_later)
+    FailureKind.NothingFound, FailureKind.Failed -> when {
+        e is SourceUnreachableException && e.cause is NotSupportedException -> context.getString(R.string.source_not_supported)
+        else -> context.getString(R.string.request_failed)
+    }
+}
+
+/** [text] of [errorText] with its first line in bold where it has two (headline and what to do). */
+fun problemText(text: String): AnnotatedString {
+    val cut = text.indexOf('\n')
+    if (cut < 0) return AnnotatedString(text)
+    return buildAnnotatedString {
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = AppColors.Ink)) { append(text.substring(0, cut)) }
+        append(text.substring(cut))
+    }
+}
+
 
 /**
  * The classic signs of a place: S and U for rail, R for regional and F for long-distance
@@ -2463,8 +3025,9 @@ private fun DotSymbol(color: Color, size: Dp) {
 @Composable
 fun EveryMinuteChip(active: Boolean, onToggle: (Boolean) -> Unit, modifier: Modifier = Modifier, minHeight: Dp = 48.dp) {
     val shape = RoundedCornerShape(24.dp)
-    // A pressed pill gives way and springs back, as the other chips do.
+    // A pressed pill gives way and springs back, as the other chips do, with the tick of a switch.
     val interactions = remember { MutableInteractionSource() }
+    val ticks = rememberTicks()
     // The blue is laid over the glass and fades in and out, so the change is one smooth step.
     val fill by animateColorAsState(
         if (active) AppColors.Blue else AppColors.Blue.copy(alpha = 0f),
@@ -2494,7 +3057,10 @@ fun EveryMinuteChip(active: Boolean, onToggle: (Boolean) -> Unit, modifier: Modi
                 interactionSource = interactions,
                 indication = LocalIndication.current,
                 role = Role.Switch,
-                onValueChange = onToggle,
+                onValueChange = { value ->
+                    ticks.toggle(value)
+                    onToggle(value)
+                },
             )
             .defaultMinSize(minHeight = minHeight)
             .widthIn(max = 260.dp)
@@ -2533,25 +3099,6 @@ fun EveryMinuteChip(active: Boolean, onToggle: (Boolean) -> Unit, modifier: Modi
 // The size of the small switch in the pill of "Every minute counts".
 private val EVERY_MINUTE_TRACK_WIDTH = 28.dp
 private val EVERY_MINUTE_KNOB = 12.dp
-
-/**
- * Says that the search leaves out some kinds of transport (set under Settings, and shared
- * with the departures), so that a missing feeder bus or tram does not go unnoticed. A tap
- * searches again with every kind. Nothing shows while all of them are in use.
- */
-@Composable
-fun ProductsOffChip(off: Set<String>, onUseAll: () -> Unit, modifier: Modifier = Modifier, minHeight: Dp = 48.dp) {
-    if (off.isEmpty()) return
-    val names = PRODUCT_KEYS.filter { it in off }.map { key -> stringResource(productLabel(key)) }
-    ChoiceChip(
-        text = stringResource(R.string.products_off, names.joinToString(", ")) + "  \u2715",
-        active = true,
-        onClick = onUseAll,
-        modifier = modifier,
-        description = stringResource(R.string.products_use_all),
-        minHeight = minHeight,
-    )
-}
 
 /** The name of a kind of transport as the settings show it. */
 fun productLabel(key: String): Int = when (key) {

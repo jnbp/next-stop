@@ -16,6 +16,12 @@ public-transport-enabler
   Used through JitPack (com.github.schildbach:public-transport-enabler), pinned to
   a commit in gradle/libs.versions.toml.
 
+MapLibre GL JS 5.24.1 (map library of the web pages, bundled in web/shared/vendor)
+  Copyright MapLibre contributors; contains code of mapbox-gl-js v1.13 and earlier,
+  Copyright Mapbox
+  License: BSD-3-Clause, see web/shared/vendor/LICENSE-maplibre-gl.txt
+  Source: https://github.com/maplibre/maplibre-gl-js
+
 Google Sans Flex (font, bundled in app/src/main/res/font and web/shared/fonts)
   Copyright 2015 Google LLC
   License: SIL Open Font License 1.1, see docs/licenses/GoogleSansFlex-OFL.txt

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #248: above the explanation of the bicycle chip, the provider's own words about bicycles on the ride. -->
+    <string name="r8live_bike_provider_note">From the operator</string>
+</resources>

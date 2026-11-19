@@ -12,14 +12,31 @@ import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.layout.onSizeChanged
+import kotlin.math.roundToInt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -65,12 +82,22 @@ import org.maplibre.android.snapshotter.MapSnapshotter
 /*
  * A small map of a walk for the timeline of the companion: a still picture of the map
  * (MapSnapshotter, no live map view) with the way on foot, where it starts and the stop
- * position or entrance it leads to. A tap opens the walk on the full map.
+ * position or entrance it leads to. A tap opens the walk on the full map; in the calm
+ * companion it opens larger in place, a larger picture to move and zoom with the fingers (#114).
  */
 
 // The size of the picture in dp; it is cropped to the width of the card.
 private const val MINI_WIDTH_DP = 360
 private const val MINI_HEIGHT_DP = 140
+
+// The height of a small map opened in place (the calm companion, see LocalMiniMapInPlace).
+private const val TALL_HEIGHT_DP = 300
+
+/**
+ * True where a tap on a small map of a walk opens it larger in place instead of showing the walk
+ * on the big map: the calm companion, which keeps its view (#61). A second tap makes it small again.
+ */
+val LocalMiniMapInPlace = staticCompositionLocalOf { false }
 
 // The picture is given up after this long (no network, no style).
 private const val SNAPSHOT_TIMEOUT_MILLIS = 15_000L
@@ -82,9 +109,32 @@ private const val SNAPSHOT_RETRY_MILLIS = 1_500L
 // The picture fades in over this long.
 private const val PICTURE_FADE_MILLIS = 260
 
-// The zoom of the picture stays within these bounds.
-private const val MIN_ZOOM = 13.0
+// The fingers rest this long on an opened small map before the part in view is drawn sharp (#190).
+private const val SHARP_SETTLE_MILLIS = 350L
+
+// The sharp part of an opened small map is drawn at no closer zoom than this (#190).
+private const val SHARP_MAX_ZOOM = 20.0
+
+// The zoom of the picture stays within these bounds; a long walk is shown whole (#114).
+private const val MIN_ZOOM = 11.0
 private const val MAX_ZOOM = 18.0
+
+// The picture is as wide as its card, within these bounds (dp).
+private const val MIN_PICTURE_WIDTH_DP = 200
+private const val MAX_PICTURE_WIDTH_DP = 600
+
+// The room the walk keeps from the edges of its picture (dp): more on top, where the pins of
+// stop positions stand above their point (#114).
+private const val FRAME_SIDE_DP = 28.0
+private const val FRAME_TOP_DP = 24.0
+private const val FRAME_PIN_TOP_DP = 46.0
+private const val FRAME_BOTTOM_DP = 22.0
+
+// An opened small map (#114): its picture reaches this many times the box on each side, to
+// move around in; zoomed out it shows all of it, in up to this much.
+private const val TALL_SPAN = 1.5f
+private const val OPENED_MIN_SCALE = 1f / TALL_SPAN
+private const val OPENED_MAX_SCALE = 3f
 
 // MapLibre draws the world 512 logical pixels wide at zoom 0.
 private const val WORLD_TILE = 512.0
@@ -92,6 +142,9 @@ private const val WORLD_TILE = 512.0
 /** The last pictures, by walk and look, so scrolling the timeline does not ask for them again. */
 private object MiniMapCache {
     val pictures = LruCache<String, Bitmap>(6)
+
+    /** The one opened picture (#114), larger: kept apart, so it does not push the small ones out. */
+    val opened = LruCache<String, Bitmap>(1)
 }
 
 /**
@@ -105,6 +158,8 @@ private object MiniMapCache {
  * and the target in the accent colour. Where [targetIsPosition] the target (and a start with
  * [startColor]) is a stop position, drawn as its pin "Pos. 4" with the line chips as on the big
  * map; the station details along the way are those of [details] (see WalkMarks).
+ * Where the walk ends at the destination of the trip ([destination]), that end is the round
+ * badge of the big map (#181b), smaller (see MINI_BADGE_RADIUS_DP), instead of its own mark.
  */
 @Composable
 fun WalkMiniMap(
@@ -122,6 +177,7 @@ fun WalkMiniMap(
     details: WalkDetails = WalkDetails.EMPTY,
     brokenLifts: List<Pair<Double, Double>> = emptyList(),
     targetIsPosition: Boolean = false,
+    destination: Boolean = false,
 ) {
     val points = if (target != null && path.lastOrNull() != target) path + target else path
     if (points.size < 2) return
@@ -134,49 +190,195 @@ fun WalkMiniMap(
     val accent = targetColor
         ?: if (targetIsPosition) pinColor(targetLines, points.last(), AppColors.Blue.toArgb()) else AppColors.Blue.toArgb()
     val marks = StartMark(startLabel, startColor, startLines)
-    val ends = EndMarks(targetLabel, accent, targetLines, targetIsPosition)
-    val key = remember(points, styleUrl, walkColor, marks, ends, details, brokenLifts) {
+    // The destination: the badge in the colours of the big map's, as the map looks now.
+    val flag = if (destination) {
+        val look = rememberFlagLook()
+        MiniFlag(look.fill.toArgb(), look.ink.toArgb(), look.glyph.toArgb(), look.halo?.toArgb())
+    } else {
+        null
+    }
+    val ends = EndMarks(targetLabel, accent, targetLines, targetIsPosition && flag == null, flag)
+    // Opened larger in place by a tap (#61): a taller picture of its own, the small one meanwhile.
+    val inPlace = LocalMiniMapInPlace.current
+    var tall by remember { mutableStateOf(false) }
+    val opened = inPlace && tall
+    val heightDp = if (opened) TALL_HEIGHT_DP else MINI_HEIGHT_DP
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+    // The picture as wide as its card, so nothing of the walk is cropped away at its sides (#114).
+    val widthDp = if (maxWidth.value.isFinite()) maxWidth.value.roundToInt().coerceIn(MIN_PICTURE_WIDTH_DP, MAX_PICTURE_WIDTH_DP) else MINI_WIDTH_DP
+    // The walk framed in the room of the box, its pins clear of the edges (#114). Opened, the
+    // picture reaches beyond the box on every side, to move around in (see panMiniView).
+    val pins = marks.color != null || ends.position
+    val frame = remember(points, widthDp, heightDp, pins) {
+        miniMapFrame(
+            points,
+            widthDp.toDouble(),
+            heightDp.toDouble(),
+            side = FRAME_SIDE_DP,
+            top = if (pins) FRAME_PIN_TOP_DP else FRAME_TOP_DP,
+            bottom = FRAME_BOTTOM_DP,
+            minZoom = MIN_ZOOM,
+            maxZoom = MAX_ZOOM,
+        )
+    }
+    val pictureWidth = if (opened) (widthDp * TALL_SPAN).roundToInt() else widthDp
+    val pictureHeight = if (opened) (heightDp * TALL_SPAN).roundToInt() else heightDp
+    val key = remember(points, styleUrl, walkColor, marks, ends, details, brokenLifts, pictureWidth, pictureHeight, frame) {
         points.joinToString(";") { String.format(Locale.ROOT, "%.5f,%.5f", it.first, it.second) } +
             "|" + styleUrl + "|" + walkColor + "|" + marks + "|" + ends +
-            "|" + details.hashCode() + "|" + brokenLifts.hashCode()
+            "|" + details.hashCode() + "|" + brokenLifts.hashCode() + "|" + pictureWidth + "x" + pictureHeight + "|" + frame
     }
-    var picture by remember(key) { mutableStateOf<Bitmap?>(MiniMapCache.pictures.get(key)) }
+    val cache = if (opened) MiniMapCache.opened else MiniMapCache.pictures
+    // The last picture shown, and whether it was an opened one, stand in while the next one is made.
+    val lastPicture = remember { arrayOf<Bitmap?>(null) }
+    val lastOpened = remember { booleanArrayOf(false) }
+    var picture by remember(key) { mutableStateOf<Bitmap?>(cache.get(key) ?: lastPicture[0]) }
+    var pictureOpened by remember(key) { mutableStateOf(if (cache.get(key) != null) opened else lastOpened[0]) }
+    var fresh by remember(key) { mutableStateOf(cache.get(key) != null) }
     var failed by remember(key) { mutableStateOf(false) }
     LaunchedEffect(key) {
-        if (picture != null) return@LaunchedEffect
-        val made = snapshotWalk(context, styleUrl, points, density, walkColor, marks, ends, details, brokenLifts)
+        if (fresh) return@LaunchedEffect
+        val made = snapshotWalk(context, styleUrl, points, density, walkColor, marks, ends, details, brokenLifts, frame, pictureWidth, pictureHeight)
         if (made != null) {
-            MiniMapCache.pictures.put(key, made)
+            cache.put(key, made)
             picture = made
+            pictureOpened = opened
+            fresh = true
         } else {
             failed = true
         }
     }
+    picture?.let {
+        lastPicture[0] = it
+        lastOpened[0] = pictureOpened
+    }
+    val boxHeight by animateDpAsState(
+        heightDp.dp,
+        if (animate) spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow) else snap(),
+        label = "walkMapHeight",
+    )
     val shownAlpha by animateFloatAsState(
         targetValue = if (picture != null) 1f else 0f,
         animationSpec = if (animate) tween(PICTURE_FADE_MILLIS) else tween(0),
         label = "walkPicture",
     )
+    // How the opened picture is looked at: moved with one finger, zoomed with two (#114); back
+    // to its middle each time it is opened. No live map: the one picture, moved and scaled.
+    var view by remember(opened) { mutableStateOf(MiniView()) }
+    val viewSize = remember { floatArrayOf(0f, 0f) }
+    val pixels = LocalDensity.current
+    // #190: zoomed in with the fingers, the one picture was only scaled up and went soft. Once the
+    // fingers have rested a moment, the part in view is drawn anew at the zoom it is seen at, the
+    // size of the box (see miniSharpRequest), and laid over the picture where it belongs, so it
+    // moves and scales with it. The one before stays until the new one is there; one per map.
+    var sharp by remember(key, opened) { mutableStateOf<Pair<MiniSharp, Bitmap>?>(null) }
+    LaunchedEffect(key, opened, pictureOpened, view) {
+        if (!opened || !pictureOpened || picture == null) return@LaunchedEffect
+        delay(SHARP_SETTLE_MILLIS)
+        val ask = miniSharpRequest(frame, pictureWidth, pictureHeight, view, viewSize[0], viewSize[1], density, SHARP_MAX_ZOOM)
+            ?: return@LaunchedEffect
+        if (sharp?.first == ask) return@LaunchedEffect
+        val made = snapshotWalk(context, styleUrl, points, density, walkColor, marks, ends, details, brokenLifts, ask.frame, ask.widthDp, ask.heightDp)
+        if (made != null) sharp = ask to made
+    }
     // A walk keeps its box when the picture fails: it still opens the walk on the full map.
     val loading = picture == null && !failed
+    val inPlaceLabel = stringResource(if (tall) R.string.r5c_map_smaller else R.string.r5c_map_bigger)
     Box(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .height(MINI_HEIGHT_DP.dp)
+            .height(boxHeight)
             .clip(RoundedCornerShape(18.dp))
+            .onSizeChanged {
+                viewSize[0] = it.width.toFloat()
+                viewSize[1] = it.height.toFloat()
+            }
             .then(if (loading && animate) Modifier.shimmer() else Modifier.background(AppColors.Chip))
-            .clickable(onClick = onClick),
+            .then(
+                if (opened) {
+                    Modifier.pointerInput(pictureWidth, pictureHeight) {
+                        val contentWidth = pictureWidth * pixels.density
+                        val contentHeight = pictureHeight * pixels.density
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            var moving = false
+                            var travelled = 0f
+                            do {
+                                val event = awaitPointerEvent()
+                                val zoom = event.calculateZoom()
+                                val pan = event.calculatePan()
+                                val several = event.changes.count { it.pressed } > 1
+                                travelled += pan.getDistance()
+                                if (!moving && (several || travelled > viewConfiguration.touchSlop)) moving = true
+                                if (moving) {
+                                    val before = view
+                                    view = panMiniView(
+                                        before, zoom, pan.x, pan.y,
+                                        viewSize[0], viewSize[1], contentWidth, contentHeight,
+                                        minScale = OPENED_MIN_SCALE, maxScale = OPENED_MAX_SCALE,
+                                    )
+                                    // What the picture could not take (at its edge) is left to the page's scroll.
+                                    if (several || view != before) event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                }
+                            } while (event.changes.any { it.pressed })
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .then(
+                if (inPlace) {
+                    Modifier.clickable(onClickLabel = inPlaceLabel) { tall = !tall }
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                },
+            ),
     ) {
         picture?.let { shown ->
-            Image(
-                bitmap = shown.asImageBitmap(),
-                contentDescription = stringResource(R.string.walk_minimap),
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().alpha(shownAlpha),
-            )
+            if (pictureOpened && opened) {
+                // The opened picture at its own size, its middle in the middle of the box, moved and
+                // scaled; the sharper part in view over it (#190), in the same layer, so both move as one.
+                Box(
+                    modifier = Modifier
+                        .requiredSize(pictureWidth.dp, pictureHeight.dp)
+                        .graphicsLayer {
+                            alpha = shownAlpha
+                            scaleX = view.scale
+                            scaleY = view.scale
+                            translationX = view.x
+                            translationY = view.y
+                        },
+                ) {
+                    Image(
+                        bitmap = shown.asImageBitmap(),
+                        contentDescription = stringResource(R.string.walk_minimap),
+                        contentScale = ContentScale.FillBounds,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    sharp?.let { (at, bitmap) ->
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.FillBounds,
+                            modifier = Modifier
+                                .offset(at.left.dp, at.top.dp)
+                                .requiredSize(at.width.dp, at.height.dp),
+                        )
+                    }
+                }
+            } else {
+                Image(
+                    bitmap = shown.asImageBitmap(),
+                    contentDescription = stringResource(R.string.walk_minimap),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().alpha(shownAlpha),
+                )
+            }
         }
         // A way the foot router had none for is drawn straight: said so, not pretended.
         if (straight) StraightLineNote(modifier = Modifier.align(Alignment.BottomStart).padding(8.dp))
+    }
     }
 }
 
@@ -191,7 +393,10 @@ private data class StartMark(val label: String?, val color: Int?, val lines: Lis
  * (ARGB) with its [lines]; where [position] is true it is a stop position, drawn as its pin
  * "Pos. 4" with the line chips, else a round mark with the label.
  */
-private data class EndMarks(val label: String?, val color: Int, val lines: List<OsmLine>, val position: Boolean)
+private data class EndMarks(val label: String?, val color: Int, val lines: List<OsmLine>, val position: Boolean, val flag: MiniFlag? = null)
+
+/** The colours (ARGB) of the destination badge on a small map: see FlagLook. */
+private data class MiniFlag(val fill: Int, val ink: Int, val glyph: Int, val halo: Int? = null)
 
 /** The picture of the walk, or null when the map could not be drawn in time. Call on the main thread. */
 private suspend fun snapshotWalk(
@@ -204,27 +409,19 @@ private suspend fun snapshotWalk(
     end: EndMarks,
     details: WalkDetails,
     brokenLifts: List<Pair<Double, Double>>,
+    frame: MiniFrame,
+    widthDp: Int,
+    heightDp: Int,
 ): Bitmap? {
-    val width = MINI_WIDTH_DP.toDouble()
-    val height = MINI_HEIGHT_DP.toDouble()
-    // The camera is worked out here, so every point can be put on the picture by the same sums.
-    val xs = points.map { mercatorX(it.second) }
-    val ys = points.map { mercatorY(it.first) }
-    val centerX = (xs.min() + xs.max()) / 2.0
-    val centerY = (ys.min() + ys.max()) / 2.0
-    val spanX = max(xs.max() - xs.min(), 1e-9)
-    val spanY = max(ys.max() - ys.min(), 1e-9)
-    // A margin around the way, so its ends and their marks stay inside.
-    val fit = min((width - 2 * 36.0) / (spanX * WORLD_TILE), (height - 2 * 26.0) / (spanY * WORLD_TILE))
-    val zoom = log2(fit).coerceIn(MIN_ZOOM, MAX_ZOOM)
-    val center = LatLng(latitudeOf(centerY), longitudeOf(centerX))
-    val options = MapSnapshotter.Options(MINI_WIDTH_DP, MINI_HEIGHT_DP)
+    // The camera is worked out before (see miniMapFrame), so every point can be put on the picture by the same sums.
+    val center = LatLng(miniLatitudeOf(frame.centerY), miniLongitudeOf(frame.centerX))
+    val options = MapSnapshotter.Options(widthDp, heightDp)
         .withStyleBuilder(Style.Builder().fromUri(styleUrl))
-        .withCameraPosition(CameraPosition.Builder().target(center).zoom(zoom).build())
+        .withCameraPosition(CameraPosition.Builder().target(center).zoom(frame.zoom).build())
         .withPixelRatio(density)
         .withLogo(false)
     return takeSnapshot(context, options, SNAPSHOT_TIMEOUT_MILLIS) { base ->
-        drawWalk(base, points, centerX, centerY, zoom, density, walkColor, start, end, details, brokenLifts)
+        drawWalk(base, points, frame, widthDp, heightDp, density, walkColor, start, end, details, brokenLifts)
     }
 }
 
@@ -232,9 +429,9 @@ private suspend fun snapshotWalk(
 private fun drawWalk(
     base: Bitmap,
     points: List<Pair<Double, Double>>,
-    centerX: Double,
-    centerY: Double,
-    zoom: Double,
+    frame: MiniFrame,
+    widthDp: Int,
+    heightDp: Int,
     density: Float,
     walkColor: Int,
     start: StartMark,
@@ -244,12 +441,12 @@ private fun drawWalk(
 ): Bitmap {
     val bitmap = base.copy(Bitmap.Config.ARGB_8888, true)
     val canvas = AndroidCanvas(bitmap)
-    // Logical pixels of the camera to pixels of this picture.
-    val scale = bitmap.width / MINI_WIDTH_DP.toDouble()
-    val world = WORLD_TILE * Math.pow(2.0, zoom)
+    // Logical pixels of the camera to pixels of this picture. Measured on the picture's own
+    // size: a taller picture put its walk too high before, by half the difference (#114).
+    val scale = bitmap.width / widthDp.toDouble()
     fun pixel(point: Pair<Double, Double>): Pair<Float, Float> {
-        val x = (mercatorX(point.second) - centerX) * world + MINI_WIDTH_DP / 2.0
-        val y = (mercatorY(point.first) - centerY) * world + MINI_HEIGHT_DP / 2.0
+        val x = frame.x(point.second, widthDp.toDouble())
+        val y = frame.y(point.first, heightDp.toDouble())
         return (x * scale).toFloat() to (y * scale).toFloat()
     }
     val way = AndroidPath()
@@ -283,7 +480,8 @@ private fun drawWalk(
     canvas.drawPath(way, casing)
     canvas.drawPath(way, dots)
     // The entrances, lifts and escalators the way passes, on it; the pins of its stop positions.
-    drawWalkOver(canvas, details, brokenLifts, density, pins) { pixel(it) }
+    // Where the walk ends at the destination's badge, the signs near it give way (#181c).
+    drawWalkOver(canvas, details, brokenLifts, density, pins, badge = end.flag?.let { points.last() }, badgeRadiusDp = MINI_BADGE_RADIUS_DP) { pixel(it) }
     // Where the walk starts: a white dot with a ring.
     val (startX, startY) = pixel(points.first())
     val fill = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
@@ -326,12 +524,57 @@ private fun drawWalk(
             mark(startX, startY, start.label.takeIf { it.isNotBlank() }, walkColor)
         }
     }
-    // A target that is no stop position: a round mark in the accent colour with its letter, or a dot.
-    if (!end.position) {
+    // The destination of the trip: the badge of the big map, smaller (#181b).
+    if (end.flag != null) {
+        val (endX, endY) = pixel(points.last())
+        drawMiniFlag(canvas, endX, endY, density, end.flag)
+    } else if (!end.position) {
+        // A target that is no stop position: a round mark in the accent colour with its letter, or a dot.
         val (endX, endY) = pixel(points.last())
         mark(endX, endY, end.label?.takeIf { it.isNotBlank() }, end.color)
     }
     return bitmap
+}
+
+/**
+ * The destination badge (#181b) on [x], [y]: as drawDestinationFlag draws it on the big map,
+ * with a radius of MINI_BADGE_RADIUS_DP. Drawn once into the still picture, like the rest.
+ */
+private fun drawMiniFlag(canvas: AndroidCanvas, x: Float, y: Float, density: Float, flag: MiniFlag) {
+    val radius = MINI_BADGE_RADIUS_DP * density
+    val outline = badgeOutlineDp(MINI_BADGE_RADIUS_DP) * density
+    // On a dark map a thin light line outside the dark outline, no thick light ring.
+    flag.halo?.let { halo ->
+        val width = BADGE_DARK_HALO_DP * density
+        canvas.drawCircle(
+            x,
+            y,
+            radius + outline / 2f + width / 2f,
+            AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+                style = AndroidPaint.Style.STROKE
+                strokeWidth = width
+                color = halo
+            },
+        )
+    }
+    canvas.drawCircle(x, y, radius, AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply { color = flag.fill })
+    canvas.drawCircle(
+        x,
+        y,
+        radius,
+        AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+            style = AndroidPaint.Style.STROKE
+            strokeWidth = outline
+            color = flag.ink
+        },
+    )
+    val g = flagGlyph(radius)
+    val glyph = AndroidPath().apply {
+        moveTo(x + g[0], y + g[1])
+        for (i in 2 until g.size step 2) lineTo(x + g[i], y + g[i + 1])
+        close()
+    }
+    canvas.drawPath(glyph, AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply { color = flag.glyph })
 }
 
 /** True for a light colour (ARGB), which takes dark ink. */

@@ -13,7 +13,7 @@ PLAN
 • Results as a chart on a time axis or as a list.
 
 ON THE MOVE
-• Trip companion: next step, countdown and stops left with live times – in the app and as a live notification.
+• Live trip: next step, countdown and stops left with live times – in the app and as a live notification.
 • Boarding hints: "board at the front, middle or rear".
 • Shortcut alert: keeps searching while you ride and speaks up when a faster way turns up.
 • Get-off reminders with sound and vibration; the way is recomputed if you leave the planned walk.
@@ -32,7 +32,7 @@ DISRUPTIONS
 
 WEAR OS
 • Tiles for the next departure and favourites, a complication for the watch face.
-• Companion pages, get-off alerts, a map of the stops nearby, destination search by keyboard or voice.
+• Live trip pages, get-off alerts, a map of the stops nearby, destination search by keyboard or voice.
 • The watch app works without the phone.
 
 SHARE

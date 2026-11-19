@@ -396,15 +396,6 @@ object ChangePositions {
 
 private const val LOG_TAG = "ChangePos"
 
-/** A line name in one form: no spaces, upper case, without a word for the product in front ("S 2", "Bus M41"). */
-fun normalLine(line: String): String {
-    val plain = line.trim().replace(Regex("\\s+"), " ")
-    val word = plain.substringBefore(' ', "")
-    val rest = if (word.lowercase() in PRODUCT_WORDS && plain.length > word.length) plain.substring(word.length + 1) else plain
-    return rest.replace(" ", "").uppercase()
-}
-
-private val PRODUCT_WORDS = setOf("bus", "tram", "str", "u-bahn", "s-bahn", "ubahn", "sbahn", "metro", "fähre", "ferry")
 
 private fun isVbbNumber(id: String): Boolean = id.length == 9 && id.startsWith("900") && id.all { it.isDigit() }
 

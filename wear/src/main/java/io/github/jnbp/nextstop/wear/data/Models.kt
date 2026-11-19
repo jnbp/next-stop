@@ -39,6 +39,11 @@ data class Place(
     val distanceMeters: Int? = null,
     val lines: List<StopLine> = emptyList(),
     val products: List<String> = emptyList(),
+    /**
+     * The phone's station identity key (one station across feeds, see the phone's
+     * StationIdentity); kept as received and sent back with the place, null where none came.
+     */
+    val key: String? = null,
 )
 
 /**
@@ -59,6 +64,10 @@ data class Departure(
     val additional: Boolean = false,
     /** The line of a cancelled run this additional run stands in for (see mergeReplacements); null where none. */
     val replaces: String? = null,
+    /** The short texts of the provider's warnings for this run (disruptions, construction work); empty where none are sent. */
+    val warnings: List<String> = emptyList(),
+    /** The colour of the run's line as the phone works it out (ARGB, "color"); null where none came (see [lineArgb]). */
+    val color: Long? = null,
 )
 
 /** One section of a journey: a ride on a line or a walk. Times as epoch milliseconds. */
@@ -84,6 +93,45 @@ data class Leg(
     val toPosition: Pair<Double, Double>? = null,
     /** A walk of 0 m within a station (the phone's walkMeters): nothing to set off for. */
     val inStation: Boolean = false,
+    /**
+     * How tight the change to this ride is by the phone's rule ("rating", which knows the station,
+     * its platforms and walks); null where the phone sent none (a search of the watch itself, an
+     * older phone app): then the watch estimates it (see [ChangeRating.estimate]).
+     */
+    val changeRating: ChangeRating? = null,
+    /**
+     * Where to board this ride, as the phone works it out for the journeys it finds for the
+     * watch ("boardHint", "boardPart", "boardEstimated"): its hint text ("Mitte einsteigen –
+     * kurzer Weg zur U2") and the third of the train, 0 rear, 1 middle, 2 front, -1 unknown.
+     * Null and -1 for a search of the watch itself, which knows no change positions.
+     */
+    val boardHint: String? = null,
+    val boardPart: Int = -1,
+    val boardEstimated: Boolean = false,
+    /**
+     * The colour of the ride's line as the phone works it out ("color": its provider's colour,
+     * where it runs, see lineColor there); null for a walk and a search of the watch itself,
+     * which falls back to Berlin's network map (see [lineArgb]).
+     */
+    val color: Long? = null,
+    /**
+     * The names of [from], [to] and [direction] as the phone's trip state shows them, where they
+     * differ ("fromShown", "toShown", "dirShown": railway style on a long-distance ride, #93, the
+     * railway's short words on a regional train, #168; on the last leg the destination as short
+     * as the phone names it, #146); null else and for a search of the watch itself. Only for
+     * showing: [from] and [to] stay the provider's names, which keys and matches use.
+     */
+    val fromShown: String? = null,
+    val toShown: String? = null,
+    val directionShown: String? = null,
+    /**
+     * For a walk of a change, the minutes it takes as the phone counts them ("changeWalk", its
+     * changeWalkMinutes), where fewer than its times: a walk the provider stretched over the wait.
+     * Null else, and for a search of the watch itself (then its times count).
+     */
+    val changeWalkMinutes: Int? = null,
+    /** The provider sent live times for this ride ("realtime" from the phone), not only the timetable (#227b). */
+    val realtime: Boolean = false,
 )
 
 /** A connection from A to B. [refreshToken] loads it again with live data, on the watch or the phone. */
@@ -97,7 +145,7 @@ data class Journey(val legs: List<Leg>, val refreshToken: String?) {
 /**
  * Within this time before the arrival at the stop to get off, "next stop: get off" is said
  * (and the watch buzzes); farther ahead, on a long hop of a night coach or an ICE, the time
- * left is told instead ("Get off in 2 h 58 min"). The twin of the phone's GET_OFF_SOON_SECONDS.
+ * left is told instead ("Get off in 2:58 h"). The twin of the phone's GET_OFF_SOON_SECONDS.
  */
 const val GET_OFF_SOON_MILLIS = 10 * 60_000L
 
@@ -106,7 +154,7 @@ fun getOffSoon(arrival: Long, now: Long): Boolean = arrival - now <= GET_OFF_SOO
 
 /**
  * [minutes] split for a label: below an hour the minutes alone (hours null), from an hour on the
- * whole hours and the minutes left, those null for whole hours ("2 h", not "2 h 0 min").
+ * whole hours and the minutes left, those null for whole hours (shown "2:00 h").
  */
 fun hoursAndMinutes(minutes: Long): Pair<Long?, Long?> {
     val safe = minutes.coerceAtLeast(0L)

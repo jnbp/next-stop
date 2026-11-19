@@ -107,4 +107,11 @@ class WatchScheduleTest {
         assertEquals(60, watchPeriod(60))
         assertEquals(WatchSchedule(DEFAULT_PERIOD_MINUTES, emptyList()), watchSchedule(1, false, 0, 45, emptyList()))
     }
+
+    @Test
+    fun theCheckOnTheWayPausesWhileSavingBattery() {
+        // "Unterwegs prüfen" is chosen, but the battery saver is active: only the daily times run.
+        assertEquals(WatchSchedule(null, listOf(420)), watchSchedule(1, false, 0, 30, listOf(420), saving = true))
+        assertEquals(WatchSchedule(30, listOf(420)), watchSchedule(1, false, 0, 30, listOf(420), saving = false))
+    }
 }

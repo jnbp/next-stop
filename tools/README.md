@@ -149,14 +149,12 @@ To check a walk, `tools/walk_path.py` prints the way the builder finds as GeoJSO
 seconds, metres and levels (`"<complex>:<platform>:<platform or s<stop>>"`, indices as in
 osm-berlin.json and "s" of transfer-walks-berlin.json):
 
-    python3 tools/walk_path.py "Yorckstraße:1:2" "Südkreuz:1:s4" --geojson /tmp/walks.geojson
+    python3 tools/walk_path.py "Friedrichstraße:3:4" "Südkreuz:1:s4" --geojson /tmp/walks.geojson
 
 Checked in November 2026 (asset of 2026-11-13; seconds, metres, levels):
 
 | change | s | m | levels | note |
 |---|---|---|---|---|
-| Yorckstraße U7 (p1) -> S1 (p2) | 184 | 155 | -2 .. 1 | west exit of the U7, along Yorckstraße, up to the north end of the S1 platform |
-| Yorckstraße S2 (p0) -> S1 (p2) | 292 | 314 | 1, 0 | |
 | Friedrichstraße S1/S2 (p3) -> U6 (p4) | 107 | 98 | -2, -1 | |
 | Friedrichstraße S3/5/7/9 (p2) -> U6 (p4) | 150 | 118 | 3 .. -2 | the graph gives 143 s; the floor of 30 s per level (5 levels) decides |
 | Friedrichstraße S3/5/7/9 (p2) -> S1/S2 (p3) | 150 | 28 | 3 .. -2 | the graph gives 101 s over 28 m (an untagged flight); the floor decides |
@@ -524,3 +522,22 @@ of the states do. Things a loaded pack has already (the same name close by) are 
 twice. Without packs the app knows Berlin only, as before. `tools/estimate_region_size.py FILE` prints the size of each
 section of an asset (or of an extract, built in memory), plain and gzip, and with
 `--scale-stations N --scale-stop-areas M` a rough extrapolation from its averages.
+
+## Rail tunnels for the sunny-side hint
+
+    python3 tools/build_tunnel_asset.py tools/osm-pbf/germany-latest.osm.pbf --cache /tmp/rail-ways.jsonl
+
+writes `app/src/main/assets/rail-tunnels-germany.json` (about 135 kB, 44 kB zipped): one grid of
+about 50 m cells over the Germany box (47.2-55.1 N, 5.8-15.1 E; cellLon is 50 m at 51 N, so a
+cell is 54 m wide in the south and 46 m in the north), listing the cells crossed by rail ways
+(railway=subway|light_rail|rail, without service=* and industrial, military or tourist usage;
+no trams) in a tunnel (tunnel=* other than no, location=underground, or a negative layer that
+is not a cutting) and the cells crossed by open ones, but only within two cells of a tunnel
+cell: the app decides a cell crossed by both (or neither) by its eight neighbours, so open cells
+further away never matter, and any cell not listed counts as open. The lists are sorted cell
+indices (row * cols + col) as base-36 gaps. `--cache FILE` keeps the rail polylines read from
+the extract (two passes, the slow part) for a rerun, `--cell METERS` sets another cell size
+(75 m would roughly halve the asset). The app counts only the parts of a ride above ground for
+the sunny side and shows no hint for a ride mostly underground (`data/RailTunnels.kt`,
+`sunSide`). Tests: `python3 tools/test_build_tunnel_asset.py`. Data (c) OpenStreetMap
+contributors, ODbL 1.0.

@@ -41,6 +41,8 @@ fun rememberWatchStatus(): WatchStatus? {
     var status by remember { mutableStateOf<WatchStatus?>(null) }
     LaunchedEffect(Unit) {
         while (true) {
+            // Not while the app is in the background (battery rule).
+            AppVisibility.awaitVisible()
             status = WatchLink.check(context)
             delay(10_000)
         }

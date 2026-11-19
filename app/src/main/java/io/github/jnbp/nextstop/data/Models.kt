@@ -1,6 +1,8 @@
 package io.github.jnbp.nextstop.data
 
 import java.time.Duration
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.time.OffsetDateTime
 import kotlin.math.atan2
 import kotlin.math.ceil
@@ -85,7 +87,15 @@ data class SearchOptions(
     val bikeCombo: Boolean = false,
     /** For one search only, never stored: the searches of "Jede Minute zählt" walk at a brisk pace. */
     val brisk: Boolean = false,
+    /**
+     * "Eigener Faktor" of "Langsamer unterwegs" (#198): every walk takes this many times as long,
+     * in place of [SLOWER_WALK_FACTOR]; null where it is not chosen. See [walkFactorInUse].
+     */
+    val ownWalkFactor: Double? = null,
 ) {
+    /** The factor on every walk: the own one where chosen, else that of [slower] (see walkFactor). */
+    val walkFactorInUse: Double get() = walkFactor(slower, ownWalkFactor)
+
     /**
      * Only local and regional transport, as the Deutschlandticket covers it: no long-distance
      * trains, no coaches. Not a setting of its own but what the products say (see [withLocalOnly]).
@@ -98,6 +108,7 @@ data class SearchOptions(
     /** The walking speed to ask the providers for: slow when [slower], fast for a [brisk] search, else normal. */
     val walkingSpeed: WalkingSpeed
         get() = when {
+            ownWalkFactor != null -> walkingSpeedFor(walkFactorInUse).let { if (brisk && it == WalkingSpeed.Normal) WalkingSpeed.Fast else it }
             slower -> WalkingSpeed.Slow
             brisk -> WalkingSpeed.Fast
             else -> WalkingSpeed.Normal
@@ -245,7 +256,10 @@ fun sameStation(firstPlace: Stop?, firstName: String, secondPlace: Stop?, second
     fun vbb(id: String?) = id != null && id.length == 9 && id.startsWith("900") && id.all { it.isDigit() }
     if (vbb(first) && vbb(second)) return first == second
     val a = stationNameKey(firstPlace?.name ?: firstName)
-    return a.isNotEmpty() && a == stationNameKey(secondPlace?.name ?: secondName)
+    if (a.isNotEmpty() && a == stationNameKey(secondPlace?.name ?: secondName)) return true
+    // One station of two feeds or under two names ("Francfort sur le Main" beside Frankfurt
+    // (Main) Hbf, "Hauptbahnhof, Saarbrücken" and "Saarbrücken Hbf"): see StationIdentity.
+    return firstPlace != null && secondPlace != null && StationIdentity.same(firstPlace, secondPlace)
 }
 
 /**
@@ -404,8 +418,14 @@ var stepFreeWalks: Boolean = false
     set(value) {
         if (field == value) return
         field = value
+        stepFreeFlow.value = value
         ratingSettingsChanged()
     }
+
+private val stepFreeFlow = MutableStateFlow(false)
+
+/** [stepFreeWalks] to observe: the interface follows a change of the setting with it (see rememberStepFree). */
+val stepFreeSetting: StateFlow<Boolean> get() = stepFreeFlow
 
 // A change measured over the walking network needs its walk and this much more (getting off,
 // finding the way; the default of [changeBufferSeconds], which the settings can change), and
@@ -621,7 +641,8 @@ private fun ridesGapMeters(arriving: Leg, next: Leg): Double? {
 
 /** True when the walk joins two rides at one station: equal normalised station ids, at either end of the walk. */
 private fun sameStation(walk: Leg, arriving: Leg, next: Leg): Boolean {
-    fun same(a: Stop?, b: Stop?) = a != null && b != null && normalStationId(a.id) == normalStationId(b.id)
+    // By the stop place: the last part of a platform id alone ("…:3:4") says nothing.
+    fun same(a: Stop?, b: Stop?) = a != null && b != null && StationIdentity.sameStopPlace(a, b)
     return same(arriving.toPlace, next.fromPlace) || same(walk.fromPlace, walk.toPlace)
 }
 
@@ -666,6 +687,8 @@ data class Departure(
      * depends on the place, such as the colour of its line; null where it is not known.
      */
     val at: Pair<Double, Double>? = null,
+    /** How full the run is expected to be, where the provider says so (see [Occupancy]). */
+    val occupancy: Occupancy? = null,
 )
 
 /** A vehicle that reaches a stop: which run, which line, and when. */
@@ -810,6 +833,38 @@ data class Leg(
     val providerColor: Int? = null,
     /** The colour of the text on [providerColor] as the provider sends it (ARGB); null where it sends none. */
     val providerTextColor: Int? = null,
+    /** How full the ride is expected to be, where the provider says so (see [Occupancy]). */
+    val occupancy: Occupancy? = null,
+    /** The hints of the provider shown as icons: bicycles allowed, step-free (see [rideFeatures]). */
+    val features: Set<RideFeature> = emptySet(),
+    /** The provider's own words about bicycles on this ride, shown behind the bicycle chip (#248, see [bikeRemarkText]); null where it sends none. */
+    val bikeNote: String? = null,
+    /**
+     * The platform of the timetable where the provider sends it apart from the live one in
+     * [departurePlatform]; null where it sends none. A difference is a change of platform (see PlatformWatch).
+     */
+    val plannedDeparturePlatform: String? = null,
+    /** The platform of the timetable where the ride arrives, as [plannedDeparturePlatform]. */
+    val plannedArrivalPlatform: String? = null,
+    /**
+     * Where this ride was joined from a change into a later vehicle of the same line and
+     * direction that staying seated beats (see [staysSeatedAhead]): the legs as the provider
+     * sent them, the ride and the later ride. Empty else. The times
+     * from the change on are those of the later vehicle, at the latest, until another journey
+     * of the same search tells those of the vehicle itself (see [withSeatedTimes]).
+     */
+    val seatedParts: List<Leg> = emptyList(),
+    /**
+     * The name the provider's timetable gave this ride where the app named it after another
+     * source that knows the same run ("ICE 171" for a ride shown as "RJ 171", see RideKinds);
+     * null else. Ids and keys of journeys go by it, so a journey keeps them when it is renamed.
+     */
+    val timetableLine: String? = null,
+    /**
+     * True when [realtime] comes from a HAFAS source that knows the same run, standing in for a
+     * provider without live data for it (#274, see RideLive); such times may be replaced by newer ones.
+     */
+    val hafasLive: Boolean = false,
 ) {
     val departureDelayMinutes: Long
         get() = plannedDeparture?.let { Duration.between(it, departure).toMinutes() } ?: 0
@@ -857,6 +912,10 @@ const val THROUGH_RUN_MAX_WAIT_MINUTES = 2L
  * the vehicle is the same: the same handle, or [Leg.stayOnBoard]. The line, its direction or
  * end may differ. Cancelled rides are never joined. Stops and ways are put together, and each
  * later part is kept as a [ThroughRun], so its run can be loaded again.
+ *
+ * Also joined: a change into a later vehicle of the same line in the same direction where
+ * staying seated is not slower (see [staysSeatedAhead], #34: two bunched trams 66, the
+ * traveller's one ahead); the vehicle stays the first one.
  */
 fun mergeThroughRuns(journey: Journey): Journey {
     val legs = journey.legs
@@ -864,15 +923,39 @@ fun mergeThroughRuns(journey: Journey): Journey {
     val merged = mutableListOf<Leg>()
     // For each leg as it came, the index of the leg it is (part of) in [merged].
     val at = IntArray(legs.size) { -1 }
+    val stayAfter = journey.via?.takeIf { it.minutes > 0 }?.afterLegs
+    // True when the stay at the place on the way lies between the ride before [index] and it.
+    fun stayBreak(index: Int): Boolean {
+        if (stayAfter == null) return false
+        val ride = (index - 1 downTo 0).firstOrNull { !legs[it].walking } ?: return false
+        return stayAfter in (ride + 1)..index
+    }
     for ((index, leg) in legs.withIndex()) {
         val last = merged.lastOrNull()
-        if (last != null && isThroughRun(last, leg)) {
+        // The walk between the two feeds' stops of one train at one station (#96) is none.
+        if (last != null && leg.walking && !stayBreak(index + 1)) {
+            val next = legs.getOrNull(index + 1)
+            if (next != null && isFeedSplit(last, next)) {
+                at[index] = merged.lastIndex
+                continue
+            }
+        }
+        if (last != null && (isThroughRun(last, leg) || (!stayBreak(index) && isFeedSplit(last, leg)))) {
             merged[merged.lastIndex] = joinRides(last, leg)
             at[index] = merged.lastIndex
-        } else {
-            merged += leg
-            at[index] = merged.lastIndex
+            continue
         }
+        // A change right into a later vehicle of the same line and direction that staying
+        // seated beats (see staysSeatedAhead): the traveller stays on board. Never across a
+        // place on the way with a stay, where the traveller gets off, nor where the provider
+        // sends a walk between the two rides.
+        if (last != null && !stayBreak(index) && staysSeatedAhead(last, leg)) {
+            merged[merged.lastIndex] = staySeated(last, emptyList(), leg)
+            at[index] = merged.lastIndex
+            continue
+        }
+        merged += leg
+        at[index] = merged.lastIndex
     }
     if (merged.size == legs.size) return journey
     // A journey put together from two (a place on the way, a swapped rest) can be one ride over
@@ -907,6 +990,27 @@ fun isThroughRun(ride: Leg, next: Leg): Boolean {
     return arriving == null || leaving == null || arriving == leaving
 }
 
+// One train found in two feeds stops this long at most between the two parts.
+private const val FEED_SPLIT_MAX_WAIT_MINUTES = 10L
+
+/**
+ * True when [next] is the train of [ride] going on in another feed's timetable (#96, Transitous
+ * Frankfurt → Paris: the ICE 9552 of DELFI to "Mannheim, Hauptbahnhof" at 12:38, then the ICE
+ * 9552 of the SNCF from "Mannheim Hbf" at 12:42 after a "walk" of 36 m): the same train run
+ * (see trainRunOf), one station by StationIdentity, at most FEED_SPLIT_MAX_WAIT_MINUTES between
+ * arrival and departure. The traveller stays on board.
+ */
+fun isFeedSplit(ride: Leg, next: Leg): Boolean {
+    if (ride.walking || next.walking || ride.cancelled || next.cancelled) return false
+    val first = trainRunOf(ride) ?: return false
+    val second = trainRunOf(next) ?: return false
+    if (first.number != second.number) return false
+    if (first.kind != null && second.kind != null && first.kind != second.kind) return false
+    if (!sameStation(ride.toPlace, ride.to, next.fromPlace, next.from)) return false
+    val wait = Duration.between(ride.arrival, next.departure).toMinutes()
+    return wait in 0..FEED_SPLIT_MAX_WAIT_MINUTES
+}
+
 /** [ride] and [next] as one ride: from where the first starts to where the second ends. */
 private fun joinRides(ride: Leg, next: Leg): Leg {
     val firstStops = ride.stopovers
@@ -938,6 +1042,7 @@ private fun joinRides(ride: Leg, next: Leg): Leg {
         arrival = next.arrival,
         plannedArrival = next.plannedArrival,
         arrivalPlatform = next.arrivalPlatform,
+        plannedArrivalPlatform = next.plannedArrivalPlatform,
         direction = ride.direction ?: next.direction,
         realtime = ride.realtime || next.realtime,
         path = path,
@@ -987,6 +1092,40 @@ data class JourneyAltChange(
     val journey: Journey,
 )
 
+/**
+ * An id kept by a journey (see [Journey.keptId]): [id], for the rides of [rides] (see
+ * [journeyRideStamp]); [loose] for rides of a provider without a timetable, whose times move
+ * with every refresh: then [rides] is their shape without times (see [journeyRideShape]).
+ */
+data class KeptJourneyId(val id: String, val rides: String, val loose: Boolean = false) {
+    /** True while this id holds for a journey of [legs]. */
+    fun holdsFor(legs: List<Leg>): Boolean =
+        rides == if (loose) journeyRideShape(legs) else journeyRideStamp(legs)
+}
+
+/** The id of a journey of [legs]: planned times, lines and starts of all legs, walks too. */
+fun journeyLegsId(legs: List<Leg>): String = legs.joinToString("|") { leg ->
+    "${leg.plannedDeparture ?: leg.departure}>${leg.plannedArrival ?: leg.arrival}:${leg.timetableLine ?: leg.line ?: "walk"}:${leg.from}"
+}
+
+/** The part of [journeyLegsId] that belongs to the rides of [legs] alone: the walks left out. */
+fun journeyRideStamp(legs: List<Leg>): String = journeyLegsId(legs.filter { !it.walking })
+
+/**
+ * The rides of [legs] without their times: lines and where each starts and ends. What stays of
+ * a journey over refreshes where the provider sends no planned times (see [KeptJourneyId.loose]).
+ */
+fun journeyRideShape(legs: List<Leg>): String = legs.filter { !it.walking }.joinToString("|") { leg ->
+    "${leg.timetableLine ?: leg.line ?: "?"}:${leg.from}>${leg.to}"
+}
+
+/**
+ * Whether a planned time is known for every ride of [legs]. Where one is not (a provider
+ * without a timetable), no planned time is made up for it: it would show as a delay.
+ */
+fun ridesPlanned(legs: List<Leg>): Boolean =
+    legs.all { it.walking || (it.plannedDeparture != null && it.plannedArrival != null) }
+
 /** A connection from A to B, made of legs. */
 data class Journey(
     val legs: List<Leg>,
@@ -1008,11 +1147,21 @@ data class Journey(
      * the journey once per change point; it is shown once, with the others on offer. Not part of [id].
      */
     val altChanges: List<JourneyAltChange> = emptyList(),
+    /**
+     * How many other journeys of the search this one stands for in the chart: the same rides
+     * with only another short last bus or tram that gets there about as early (see
+     * groupFeederAlternatives, #57). Not part of [id].
+     */
+    val groupedAlternatives: Int = 0,
+    /**
+     * The id this journey keeps after it came back from a stand-in provider with other walks
+     * (see ontoKnown, #185); it holds only while the rides stay the same (see [journeyRideStamp]),
+     * so a journey with other rides gets its own id again.
+     */
+    val keptId: KeptJourneyId? = null,
 ) {
-    /** Tells journeys apart: planned times and lines of all legs. */
-    val id: String = legs.joinToString("|") { leg ->
-        "${leg.plannedDeparture ?: leg.departure}>${leg.plannedArrival ?: leg.arrival}:${leg.line ?: "walk"}:${leg.from}"
-    }
+    /** Tells journeys apart: planned times and lines of all legs (or the [keptId] while it holds). */
+    val id: String = keptId?.takeIf { it.holdsFor(legs) }?.id ?: journeyLegsId(legs)
     val departure: OffsetDateTime get() = legs.first().departure
     val arrival: OffsetDateTime get() = legs.last().arrival
     val durationMinutes: Long get() = Duration.between(departure, arrival).toMinutes()
@@ -1037,7 +1186,9 @@ data class Journey(
         }
 
     /** The disruption notices of all legs, each one once. */
-    val warnings: List<Warning> get() = legs.flatMap { it.warnings }.distinct()
+    // Each text once: the notice of a station comes on the ride that arrives there and on the
+    // one that leaves (MOTIS puts it on both places), each time with its own platform as its stop.
+    val warnings: List<Warning> get() = legs.flatMap { it.warnings }.distinctBy { it.summary to it.text }
 }
 
 /**
@@ -1097,7 +1248,8 @@ data class SavedRoute(val from: Stop, val to: Stop) {
 
 /** The icons a favourite place can carry. The names are stored, so they must stay as they are. */
 /** The icons of saved places, in the order the pickers offer them; stored by name. */
-enum class PlaceIcon { Home, Work, School, Gym, Family, Friends, Shop, Party, Heart, Star, Pin, Station }
+/** The icons of places. New ones go at the end: the first free one is taken for a new favourite place. */
+enum class PlaceIcon { Home, Work, School, Gym, Family, Friends, Shop, Party, Heart, Star, Pin, Station, Doctor, Food, Airport, Culture, Park, Hotel }
 
 /**
  * A place the user wants on the start page: an icon, a name and where it is. An empty
@@ -1229,7 +1381,10 @@ fun List<Departure>.placedAt(place: Pair<Double, Double>?): List<Departure> =
 data class JourneyPage(val journeys: List<Journey>, val earlierRef: String?, val laterRef: String?)
 
 /** The stop name without city suffix and without bracket notes such as "[Gleis 1-8]". */
-fun String.plainStopName(): String = shortStopName().replace(Regex("\\s*\\[[^\\]]*\\]$"), "")
+fun String.plainStopName(): String = shortStopName().replace(TRAILING_BRACKET_NOTE, "")
+
+// A note in square brackets at the end of a stop name, made once (it is used for every key typed in the search).
+private val TRAILING_BRACKET_NOTE = Regex("\\s*\\[[^\\]]*\\]$")
 
 /** Short enough for a narrow label: without the signs of the network in front and "Bhf" behind. */
 fun String.briefStopName(): String =
@@ -1592,7 +1747,7 @@ fun journeyComfort(journey: Journey): TransferComfort =
  * same key.
  */
 fun journeyKey(journey: Journey): String = journey.rides.joinToString("|") { ride ->
-    "${ride.line?.let { normalLine(it) } ?: "?"}@${ride.plannedDeparture ?: ride.departure}>" +
+    "${(ride.timetableLine ?: ride.line)?.let { normalLine(it) } ?: "?"}@${ride.plannedDeparture ?: ride.departure}>" +
         "${ride.plannedArrival ?: ride.arrival}:${stationKey(ride.fromPlace, ride.from)}>${stationKey(ride.toPlace, ride.to)}"
 }
 
@@ -1709,7 +1864,7 @@ private const val SAME_COMPLEX_METERS = 150.0
  */
 private fun sameStopComplex(a: Stop?, b: Stop?): Boolean {
     if (a == null || b == null) return a == null && b == null
-    if (normalStationId(a.id) == normalStationId(b.id)) return true
+    if (StationIdentity.sameStopPlace(a, b)) return true
     if (a.id.contains("::") && a.id.substringBefore("::") == b.id.substringBefore("::")) return true
     val pa = a.position ?: return false
     val pb = b.position ?: return false

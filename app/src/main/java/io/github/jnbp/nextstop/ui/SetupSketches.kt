@@ -1,5 +1,6 @@
 package io.github.jnbp.nextstop.ui
 
+import io.github.jnbp.nextstop.data.SLOWER_WALK_FACTOR
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -86,13 +87,13 @@ internal fun DrawScope.accessibilitySketch(level: Accessibility, reveal: Float) 
 
 /**
  * "Slower on the move": the walk of a change as a dotted way to the next ride; with the
- * setting it counts 1.3 times as long and the way grows.
+ * setting it counts [factor] times as long (1.3, or an own factor, #198) and the way grows.
  */
 @Composable
-internal fun SlowerSketch(on: Boolean, height: Dp = 40.dp) {
+internal fun SlowerSketch(on: Boolean, height: Dp = 40.dp, factor: Double = SLOWER_WALK_FACTOR) {
     val animate = rememberAnimationsOn()
     val stretch by animateFloatAsState(
-        if (on) 1.3f else 1f,
+        if (on) factor.toFloat() else 1f,
         if (animate) spring<Float>(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow) else snap<Float>(),
         label = "slowerWalk",
     )

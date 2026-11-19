@@ -49,9 +49,12 @@ fun mergeSearchPages(shown: List<Journey>, added: List<Journey>, now: java.time.
     // A twin already shown stays and takes the new one as its other change (see withAltChanges).
     val shownKeys = shown.mapTo(HashSet()) { journeyKey(it) }
     // The rides they share take the freshest live times, those of the added pages (see shareLiveTimes).
+    // A ride joined by staying seated (see withSeatedTimes) takes the times of its own vehicle
+    // where another journey rides it: the two are then one and show once.
+    // Shared live times never leave a joined ride arriving after the next ride leaves (#57).
     return withoutReplacedJourneys(
-        shareLiveTimes(withAltChanges(withoutSameRunTwins((shown + fresh).distinctBy { journeyKey(it) }), shownKeys), fresher = fresh),
-    ).sortedWith(searchOrder)
+        shareLiveTimes(withAltChanges(withoutSameRunTwins(withSeatedTimes(shown + fresh).distinctBy { journeyKey(it) }), shownKeys), fresher = fresh),
+    ).map { withSeatingInBounds(it) }.sortedWith(searchOrder)
 }
 
 /**
@@ -93,7 +96,7 @@ private const val SAME_STOP_METERS = 400.0
 /**
  * True when [a] and [b] are the same journey found twice under different names: the same
  * number of rides, each pair the same train run (the same number; the same kind, or one of
- * them a bare number, see [trainRunOf]), boarded and left at the same stations (by name, or
+ * them a bare number, see [trainRunOf]; or a ride without a number on the very same trip), boarded and left at the same stations (by name, or
  * within SAME_STOP_METERS), leaving within SAME_RUN_MINUTES as planned. "RJ 174" of one
  * provider and "174" of another are one; "RE 1" and "RE 10", or an ICE 174 and an RJ 174, never.
  */
@@ -106,10 +109,17 @@ fun sameRunTwins(a: Journey, b: Journey): Boolean {
 }
 
 private fun sameRun(a: Leg, b: Leg): Boolean {
+    // The very same trip, boarded and left at the same stations (#280: the U-Bahn to a train found twice).
+    if (!a.walking && a.tripId != null && a.tripId == b.tripId && trainRunOf(a) == null) {
+        return sameRunStation(a.fromPlace, a.from, b.fromPlace, b.from) && sameRunStation(a.toPlace, a.to, b.toPlace, b.to)
+    }
     val runA = trainRunOf(a) ?: return false
     val runB = trainRunOf(b) ?: return false
     if (runA.number != runB.number) return false
-    if (runA.kind != null && runB.kind != null && runA.kind != runB.kind) return false
+    // Two kinds of one number are one run only as two Transitous feeds' copies of one train
+    // (Rejseplanen's "RJ 384" and DELFI's "ICE 384", #280) that leave and arrive at the very
+    // same planned minutes. Otherwise an ICE 174 and an RJ 174 are other trains.
+    if (runA.kind != null && runB.kind != null && runA.kind != runB.kind && !feedCopies(a, b)) return false
     val leaves = Duration.between(a.plannedDeparture ?: a.departure, b.plannedDeparture ?: b.departure).abs()
     if (leaves.toMinutes() > SAME_RUN_MINUTES) return false
     return sameRunStation(a.fromPlace, a.from, b.fromPlace, b.from) && sameRunStation(a.toPlace, a.to, b.toPlace, b.to)
@@ -125,13 +135,44 @@ private fun sameRunStation(placeA: Stop?, nameA: String, placeB: Stop?, nameB: S
     return Math.hypot(north, east) <= SAME_STOP_METERS
 }
 
+// True when [a] and [b] are copies of one trip from a German and a foreign Transitous feed with the same planned times.
+private fun feedCopies(a: Leg, b: Leg): Boolean {
+    val feedA = a.tripId?.let { TRANSITOUS_FEED.find(it) } ?: return false
+    val feedB = b.tripId?.let { TRANSITOUS_FEED.find(it) } ?: return false
+    if (isForeignFeedRide(a) == isForeignFeedRide(b) || feedA.value == feedB.value) return false
+    return samePlannedTimes(a, b)
+}
+
+// True when [a] and [b] leave and arrive at the same planned minutes (both planned times known).
+private fun samePlannedTimes(a: Leg, b: Leg): Boolean {
+    val leaveA = a.plannedDeparture ?: return false
+    val leaveB = b.plannedDeparture ?: return false
+    val reachA = a.plannedArrival ?: return false
+    val reachB = b.plannedArrival ?: return false
+    return leaveA.toEpochSecond() / 60 == leaveB.toEpochSecond() / 60 && reachA.toEpochSecond() / 60 == reachB.toEpochSecond() / 60
+}
+
+// The country of the feed in a Transitous trip handle: "dk" of "tr:20261119_10:37_dk-rejseplanen_1".
+private val TRANSITOUS_FEED = Regex("^tr:[0-9]{8}_[0-9]{1,2}:[0-9]{2}_([a-z]{2})-")
+
+/**
+ * True when [ride] is a Transitous trip from a feed outside Germany ("dk-rejseplanen"): its
+ * copy of a German train often lacks the way and the German names (#280). Other handles never are.
+ */
+fun isForeignFeedRide(ride: Leg): Boolean {
+    val country = ride.tripId?.let { TRANSITOUS_FEED.find(it) }?.groupValues?.get(1) ?: return false
+    return country != "de"
+}
+
 /**
  * How good a copy of a journey is when two providers found it (see [withoutSameRunTwins]):
- * live times first, then names with the kind of the train ("RJ 174" over "174").
+ * live times first, then the copy of the German feed over a foreign feed's (#280), then names
+ * with the kind of the train ("RJ 174" over "174").
  */
 private fun twinScore(journey: Journey): Int {
     val rides = journey.rides
-    return rides.count { it.realtime } * 100 + rides.count { trainRunOf(it)?.kind != null }
+    return rides.count { it.realtime } * 100 - rides.count { isForeignFeedRide(it) } * 10 +
+        rides.count { trainRunOf(it)?.kind != null }
 }
 
 /**
@@ -166,10 +207,11 @@ internal fun withTwinNames(kept: Journey, other: Journey): Journey {
  */
 fun withoutSameRunTwins(journeys: List<Journey>): List<Journey> {
     if (journeys.size < 2) return journeys
-    // Only journeys whose rides all have train numbers can be twins: grouped by those numbers,
+    // Only journeys whose rides all have train numbers (or handles) can be twins: grouped by those,
     // so the pairs are compared within a group only.
     val groups = journeys.indices.groupBy { index ->
-        val runs = journeys[index].rides.map { trainRunOf(it)?.number ?: return@groupBy null }
+        // A ride without a train number (a U-Bahn to the train) pairs only with the same trip (#280).
+        val runs = journeys[index].rides.map { ride -> trainRunOf(ride)?.number ?: ride.tripId?.let { "trip:$it" } ?: return@groupBy null }
         runs.takeIf { it.isNotEmpty() }
     }
     val result = journeys.toMutableList()
@@ -242,6 +284,35 @@ fun withoutDominated(journeys: List<Journey>): List<Journey> {
     }
 }
 
+/**
+ * [journeys] without a tighter twin of another (#130): a journey is left out when another one,
+ * not cancelled, rides the same lines in the same order, reaches the destination in the same
+ * minute and is of a looser category (see [journeyComfort]), e.g. "knapp" beside "normal". It
+ * gets there no sooner and only risks the change; leaving a few minutes later is not worth that
+ * (the tighter journeys made in the app are only kept where they arrive earlier, see
+ * tighterAlternatives). Journeys without a ride, without a change (always relaxed) or whose rest
+ * the user swapped ([Journey.split]) stay. The order is kept.
+ */
+fun withoutTightTwins(journeys: List<Journey>): List<Journey> {
+    if (journeys.size < 2) return journeys
+    val keys = journeys.map { journey ->
+        val rides = journey.rides
+        if (rides.isEmpty()) null else lineSequence(rides).joinToString("/") + "@" + journey.arrival.toInstant().epochSecond / 60
+    }
+    val levels = journeys.map { journeyComfort(it).ordinal }
+    // The loosest category of each set of lines and minute of arrival.
+    val loosest = HashMap<String, Int>()
+    journeys.forEachIndexed { index, journey ->
+        val key = keys[index] ?: return@forEachIndexed
+        if (!journey.cancelled) loosest[key] = minOf(loosest[key] ?: Int.MAX_VALUE, levels[index])
+    }
+    val kept = journeys.filterIndexed { index, journey ->
+        val key = keys[index]
+        journey.split != null || key == null || (loosest[key] ?: Int.MAX_VALUE) >= levels[index]
+    }
+    return if (kept.size == journeys.size) journeys else kept
+}
+
 /** What [dominates] asks of one journey, worked out once (see [withoutDominated]). */
 private class DominanceFacts(val journey: Journey) {
     private val rides = journey.rides
@@ -286,7 +357,7 @@ fun sameRidesOtherChange(a: Journey, b: Journey): Boolean {
     val lastB = ridesB.last()
     if (!sameStation(firstA.fromPlace, firstA.from, firstB.fromPlace, firstB.from) || plannedLeave(firstA) != plannedLeave(firstB)) return false
     if (!sameStation(lastA.toPlace, lastA.to, lastB.toPlace, lastB.to) || plannedReach(lastA) != plannedReach(lastB)) return false
-    if (!ridesA.indices.all { sameVehicle(ridesA[it], ridesB[it]) }) return false
+    if (!ridesA.indices.all { sameVehicleInJourneys(ridesA[it], ridesB[it]) }) return false
     // Somewhere the change is at another stop; else they are the same journey.
     return ridesA.indices.any { index ->
         !sameStation(ridesA[index].toPlace, ridesA[index].to, ridesB[index].toPlace, ridesB[index].to) ||
@@ -299,7 +370,7 @@ private fun plannedLeave(ride: Leg) = (ride.plannedDeparture ?: ride.departure).
 private fun plannedReach(ride: Leg) = (ride.plannedArrival ?: ride.arrival).toInstant()
 
 // One vehicle in two journeys, boarded or left at other stops.
-private fun sameVehicle(a: Leg, b: Leg): Boolean {
+private fun sameVehicleInJourneys(a: Leg, b: Leg): Boolean {
     if (a.tripId != null && a.tripId == b.tripId) return true
     if (a.product != b.product) return false
     val lineA = a.line?.let { normalLine(it) } ?: return false

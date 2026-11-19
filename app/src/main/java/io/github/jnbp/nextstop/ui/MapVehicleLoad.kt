@@ -54,6 +54,7 @@ internal suspend fun loadMapVehicles(
     before: List<Vehicle>,
     seen: SeenVehicles,
 ): List<Vehicle>? {
+    if (!MapAlive.alive(map)) return null
     val camera = map.cameraPosition
     if (camera.zoom < VEHICLE_DOT_MIN_ZOOM) return null
     val first = map.projection.fromScreenLocation(PointF(0f, 0f))
@@ -127,6 +128,37 @@ internal fun keepKnownVehicles(
     seen.at.keys.retainAll(kept)
     return result
 }
+
+/**
+ * The vehicles to show for the view of [map] at [tier] at once, from those [shown] and those
+ * kept in memory (see vehiclesForView, #74), at most as many as a refresh would give; and the
+ * uptime the newest kept one added was loaded at, null when none was added. Null where the map
+ * has no size yet.
+ */
+internal fun vehiclesAtOnce(map: MapLibreMap, tier: MapTier, shown: List<Vehicle>, seen: SeenVehicles): Pair<List<Vehicle>, Long?>? {
+    if (!MapAlive.alive(map) || map.width <= 0f || map.height <= 0f) return null
+    val first = map.projection.fromScreenLocation(PointF(0f, 0f))
+    val second = map.projection.fromScreenLocation(PointF(map.width, map.height))
+    val north = maxOf(first.latitude, second.latitude)
+    val south = minOf(first.latitude, second.latitude)
+    val east = maxOf(first.longitude, second.longitude)
+    val west = minOf(first.longitude, second.longitude)
+    // A margin around the screen: what is just beyond its edge glides in while the answer comes.
+    val marginLatitude = (north - south) * VIEW_MARGIN
+    val marginLongitude = (east - west) * VIEW_MARGIN
+    val cached = keptMapVehiclesWithin(north + marginLatitude, south - marginLatitude, east + marginLongitude, west - marginLongitude)
+    val result = vehiclesForView(
+        shown, cached, seen.at,
+        north + marginLatitude, south - marginLatitude, east + marginLongitude, west - marginLongitude,
+    )
+    if (result === shown) return shown to null
+    val shownIds = shown.mapTo(HashSet()) { it.tripId }
+    val newest = cached.filter { (vehicle, _) -> vehicle.tripId !in shownIds }.maxOfOrNull { it.second }
+    return thinnedVehicles(result, if (tier == MapTier.Neighbourhood) Int.MAX_VALUE else MAX_DOT_VEHICLES) to newest
+}
+
+// How far beyond the screen, as a share of its size, vehicles are kept and taken from memory.
+private const val VIEW_MARGIN = 0.25
 
 /** At most [cap] of [vehicles]: trains first, then trams, then buses; the order within each kind kept. */
 internal fun thinnedVehicles(vehicles: List<Vehicle>, cap: Int): List<Vehicle> {

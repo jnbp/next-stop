@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #212: a ride named by its kind -->
+    <string name="r7p_missed_bus">Missed the bus</string>
+    <string name="r7p_missed_tram">Missed the tram</string>
+    <string name="r7p_missed_ubahn">Missed the U-Bahn</string>
+    <string name="r7p_missed_sbahn">Missed the S-Bahn</string>
+    <string name="r7p_missed_ferry">Missed the ferry</string>
+    <string name="r7p_missed_ride">Missed my ride</string>
+    <string name="r7p_late_bus">My bus is late or cancelled</string>
+    <string name="r7p_late_tram">My tram is late or cancelled</string>
+    <string name="r7p_late_ubahn">My U-Bahn is late or cancelled</string>
+    <string name="r7p_late_sbahn">My S-Bahn is late or cancelled</string>
+    <string name="r7p_late_ferry">My ferry is late or cancelled</string>
+    <string name="r7p_late_ride">My ride is late or cancelled</string>
+    <string name="r7p_wrong_bus">I am on the wrong bus</string>
+    <string name="r7p_wrong_tram">I am on the wrong tram</string>
+    <string name="r7p_wrong_ubahn">I am on the wrong U-Bahn</string>
+    <string name="r7p_wrong_sbahn">I am on the wrong S-Bahn</string>
+    <string name="r7p_wrong_ferry">I am on the wrong ferry</string>
+    <string name="r7p_wrong_ride">I am on the wrong vehicle</string>
+    <string name="r7p_where_ride">Where\'s my vehicle?</string>
+    <!-- #217: the line under each entry of the sheets of the Live-Fahrt bar -->
+    <string name="r7p_missed_text">Finds the next connections from the stop you wanted to leave from</string>
+    <string name="r7p_wrong_text">New connections from where you are now, also mid-ride</string>
+    <string name="r7p_retarget_text">Pick another destination and find the way from here</string>
+    <string name="r7p_other_connection_text">Take another connection at the next change</string>
+    <string name="r7p_other_ways_text">Searches other ways on from the next change</string>
+    <string name="r7p_shortcuts_text">Tells you when a faster way turns up</string>
+    <string name="r7p_every_minute_text">Sprint changes, and an alert from one minute faster</string>
+    <string name="r7p_wake_text">Rings before you have to get off</string>
+</resources>

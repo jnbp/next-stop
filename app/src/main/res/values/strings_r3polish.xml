@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Round 3 polish: the sunny side (switchable, only when the sun shines), the compact chip of transport left out. -->
+<resources>
+    <string name="sun_side_info_title">Sunny side</string>
+    <string name="sun_side_info_text">From the course of the line and the position of the sun, Next Stop works out on which side the sun shines in during the ride. The hint shows on rides of 20 minutes or more, in daylight, and only when the weather forecast (Open-Meteo) says it is really sunny. Only the parts above ground count: a ride mostly in a tunnel, like most U-Bahn lines, gets no hint. For that, only a roughly rounded place (about 10 km) is sent to Open-Meteo.</string>
+    <string name="sun_side_switch">Show sunny side</string>
+    <string name="sun_side_setting_text">On longer rides in daylight: on which side the sun shines in – only when it is really sunny.</string>
+    <string name="sun_side_info_open">Explain the sunny side</string>
+    <string name="developer_sun_test">Test sunny side</string>
+    <string name="developer_sun_test_text">Shows the hint of the sunny side on every ride, whatever the sun and the weather.</string>
+    <string name="sources_weather_use">Cloud cover for the hint of the sunny side</string>
+    <!-- The compact chip of transport left out with more than one kind: "Coach +1". -->
+    <string name="products_off_more">%1$s +%2$d</string>
+</resources>

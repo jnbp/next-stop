@@ -1,5 +1,9 @@
 # Prepared answers for the Play Console forms
 
+> **0.2:** the trip companion now also uses the foreground service type *location* and the wake-up alarm uses
+> `USE_FULL_SCREEN_INTENT`. See [play-console-0.2.md](play-console-0.2.md); it overrides the statements below
+> that the service uses no location and that the app does not use `USE_FULL_SCREEN_INTENT`.
+
 Answers for *App content* and the declaration forms of Next Stop (`io.github.jnbp.nextstop`, phone
 and Wear OS). They follow the code as of branch `play` (main `0fc4051`); re-check them when a data flow
 or permission changes. Sources: Play Console help

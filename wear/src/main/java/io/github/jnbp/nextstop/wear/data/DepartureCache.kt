@@ -113,6 +113,7 @@ object DepartureCache {
         put("planned", departure.plannedTime ?: JSONObject.NULL)
         if (departure.additional) put("additional", true)
         departure.replaces?.let { put("replaces", it) }
+        departure.color?.let { put("color", it) }
     }
 
     private fun parse(item: JSONObject): Departure = Departure(
@@ -127,6 +128,7 @@ object DepartureCache {
         plannedTime = if (item.isNull("planned")) null else item.optLong("planned"),
         additional = item.optBoolean("additional", false),
         replaces = if (item.isNull("replaces")) null else item.optString("replaces"),
+        color = lineColorOf(item),
     )
 
     private const val KEY_STOPS = "stops"

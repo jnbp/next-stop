@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The card of a planned trip: what a tap does, for accessibility services. -->
+    <string name="r3_planned_open">Show the trip</string>
+    <!-- The peek card of a connection, one row per ride and change. -->
+    <string name="r3_peek_minutes">%1$d′</string>
+    <string name="r3_peek_change">Change · %1$d′</string>
+</resources>

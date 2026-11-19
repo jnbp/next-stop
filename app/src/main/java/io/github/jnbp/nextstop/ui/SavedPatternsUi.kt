@@ -93,6 +93,9 @@ fun PatternRow(
     onRemove: () -> Unit,
     disruptions: List<Disruption> = emptyList(),
     onDisruptions: (() -> Unit)? = null,
+    // The key of its bell (the route between its ends, see DisruptionWatch); null: no bell.
+    bellKey: String? = null,
+    onWatchSettings: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -139,6 +142,7 @@ fun PatternRow(
             // The notices on its lines, in one line (see CardDisruptionLine).
             CardDisruptionLine(items = disruptions, onClick = onDisruptions)
         }
+        if (bellKey != null) DisruptionBell(watchKey = bellKey, onSettings = onWatchSettings)
         RoundButton(
             glyph = Glyph.Close,
             description = stringResource(R.string.pattern_forget),

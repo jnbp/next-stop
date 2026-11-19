@@ -55,6 +55,7 @@ import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.BUNDLED_FONTS
 import io.github.jnbp.nextstop.data.BvgRestSource
 import io.github.jnbp.nextstop.data.PhotonSearch
+import io.github.jnbp.nextstop.data.SunWeather
 import io.github.jnbp.nextstop.data.ProjectLinks
 import io.github.jnbp.nextstop.data.PteSource
 import io.github.jnbp.nextstop.data.THIRD_PARTY_LIBRARIES
@@ -340,7 +341,8 @@ private const val ODBL = "ODbL 1.0"
  * Every source of data the app uses, with the attribution it asks for: OpenStreetMap (map,
  * stations, entrances, change positions; ODbL), the map tiles of OpenFreeMap (OpenMapTiles
  * schema), the timetable sources of the settings, Photon and the OSRM foot and bike server
- * (both on OpenStreetMap), the change positions of vbb-change-positions and the lift data.
+ * (both on OpenStreetMap), the change positions of vbb-change-positions, the lift data and the
+ * cloud cover of Open-Meteo for the hint of the sunny side.
  * public-transport-enabler only where the build includes it.
  */
 @Composable
@@ -397,6 +399,7 @@ private fun DataSourcesSheet(onDismiss: () -> Unit) {
             ),
         )
         add(SourceCredit("DB FaSta", stringResource(R.string.sources_fasta_use), "Deutsche Bahn · CC BY 4.0", FASTA_PAGE))
+        add(SourceCredit("Open-Meteo", stringResource(R.string.sources_weather_use), "Open-Meteo.com · CC BY 4.0", SunWeather.OPEN_METEO_PAGE))
     }
     AboutSheetFrame(title = stringResource(R.string.about_sources), onDismiss = onDismiss) {
         SheetText(stringResource(R.string.sources_intro))

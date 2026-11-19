@@ -8,7 +8,8 @@ package io.github.jnbp.nextstop.data
  * - Minutes: a cancelled run says so (red); one that has left is muted; one leaving within
  *   SOON_MINUTES ("now" included) is highlighted in lime; later ones are plain. The minutes do
  *   not say whether a run is late: the delay beside them does.
- * - Clock time: without live data muted (timetable), late red, on time or early green.
+ * - Clock time: without live data muted (timetable), late red, on time or early green;
+ *   a time the app estimated from the position ("ca.", #277) blue.
  * - Delay ("+4", "-1"): only with live data and when not zero; red when late, green when early.
  */
 
@@ -28,7 +29,7 @@ fun minutesTone(minutes: Long?, cancelled: Boolean): MinutesTone = when {
 }
 
 /** How a clock time is marked (see [timeTone]). */
-enum class TimeTone { Scheduled, Late, OnTime }
+enum class TimeTone { Scheduled, Late, OnTime, Estimated }
 
 /** The mark of a clock time: [realtime] whether the provider sent live data, [delayMinutes] its delay. */
 fun timeTone(realtime: Boolean, delayMinutes: Long): TimeTone = when {

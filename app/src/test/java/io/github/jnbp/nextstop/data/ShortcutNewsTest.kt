@@ -38,7 +38,8 @@ class ShortcutNewsTest {
     private val skipped = Journey(listOf(ride("S1", "A", "Z", 1, 25, "t2")))
     private val known = knownWays(chosen, listOf(chosen, skipped))
 
-    private val alertOnly = ShortcutRules(everyMinute = false, userLevel = TransferComfort.Normal)
+    // The threshold at one minute: these tests are about news, not about the threshold (see ShortcutTruthTest).
+    private val alertOnly = ShortcutRules(everyMinute = false, userLevel = TransferComfort.Normal, thresholdMinutes = 1)
     private val everyMinute = ShortcutRules(everyMinute = true, userLevel = TransferComfort.Normal)
     private val longAgo = at(-60)
 

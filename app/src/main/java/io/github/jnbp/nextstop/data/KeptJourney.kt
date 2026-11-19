@@ -142,8 +142,42 @@ private fun objects(list: JSONArray): List<JSONObject> = (0 until list.length())
 private fun strings(list: JSONArray?): List<String> =
     if (list == null) emptyList() else (0 until list.length()).map { list.getString(it) }
 
-private fun pathJson(path: List<Pair<Double, Double>>): JSONArray =
-    JSONArray().apply { path.forEach { put(it.first); put(it.second) } }
+// The way of a ride is kept with at most this many points (see keptPath).
+const val KEPT_PATH_MAX_POINTS = 600
+
+// Douglas-Peucker starts with this tolerance in metres and doubles it until the way is short enough.
+private const val KEPT_PATH_TOLERANCE_METRES = 2.0
+
+/**
+ * [path] as it is kept: as it is up to [KEPT_PATH_MAX_POINTS] points, else thinned by
+ * Douglas-Peucker (the ends stay, the bends are followed) until it has no more. A long-distance
+ * ride from Transitous brings tens of thousands of points; written for every connection of the
+ * page, as a tree of boxed numbers and one long text, that ran the heap out (#72). The kept page
+ * only has to show the way until the journey is loaded fresh.
+ */
+internal fun keptPath(path: List<Pair<Double, Double>>): List<Pair<Double, Double>> {
+    if (path.size <= KEPT_PATH_MAX_POINTS) return path
+    var tolerance = KEPT_PATH_TOLERANCE_METRES
+    var kept = simplify(path, tolerance)
+    while (kept.size > KEPT_PATH_MAX_POINTS) {
+        tolerance *= 2
+        kept = simplify(kept, tolerance)
+    }
+    return kept
+}
+
+// Five decimal places (about a metre) are kept: the rest is noise that only makes the file longer.
+private fun keptCoordinate(value: Double): Double = Math.round(value * 100_000.0) / 100_000.0
+
+private fun pathJson(path: List<Pair<Double, Double>>): JSONArray {
+    val kept = keptPath(path)
+    val list = JSONArray()
+    for (point in kept) {
+        list.put(keptCoordinate(point.first))
+        list.put(keptCoordinate(point.second))
+    }
+    return list
+}
 
 private fun pathOf(list: JSONArray?): List<Pair<Double, Double>> {
     if (list == null) return emptyList()
@@ -152,6 +186,7 @@ private fun pathOf(list: JSONArray?): List<Pair<Double, Double>> {
 
 internal fun keptStopJson(stop: Stop): JSONObject = JSONObject()
     .put("id", stop.id)
+    .putOpt("key", StationIdentity.stationKey(stop))
     .put("name", stop.name)
     .putOpt("lat", stop.latitude)
     .putOpt("lon", stop.longitude)
@@ -163,7 +198,7 @@ internal fun keptStopJson(stop: Stop): JSONObject = JSONObject()
     .putOpt("detail", stop.detail)
 
 internal fun keptStopOf(json: JSONObject): Stop = Stop(
-    id = json.getString("id"),
+    id = json.getString("id").also { StationIdentity.noteStored(it, json.optString("key", "")) },
     name = json.getString("name"),
     latitude = dbl(json, "lat"),
     longitude = dbl(json, "lon"),
@@ -278,6 +313,8 @@ private fun legJson(leg: Leg): JSONObject = JSONObject()
     .putOpt("pArr", leg.plannedArrival?.toString())
     .putOpt("depPlatform", leg.departurePlatform)
     .putOpt("arrPlatform", leg.arrivalPlatform)
+    .putOpt("pDepPlatform", leg.plannedDeparturePlatform)
+    .putOpt("pArrPlatform", leg.plannedArrivalPlatform)
     .putOpt("direction", leg.direction)
     .put("cancelled", leg.cancelled)
     .put("realtime", leg.realtime)
@@ -299,6 +336,12 @@ private fun legJson(leg: Leg): JSONObject = JSONObject()
     .put("cycling", leg.cycling)
     .putOpt("color", leg.providerColor)
     .putOpt("textColor", leg.providerTextColor)
+    // #264: the small chips of the ride card (occupancy, bicycles, step-free) survive a restart.
+    .putOpt("occupancy", leg.occupancy?.name)
+    .put("features", JSONArray(leg.features.map { it.name }))
+    .putOpt("bikeNote", leg.bikeNote)
+    .putOpt("ttLine", leg.timetableLine)
+    .put("hLive", leg.hafasLive)
 
 private fun legOf(json: JSONObject): Leg = Leg(
     line = str(json, "line"),
@@ -333,6 +376,15 @@ private fun legOf(json: JSONObject): Leg = Leg(
     cycling = json.optBoolean("cycling"),
     providerColor = int(json, "color"),
     providerTextColor = int(json, "textColor"),
+    plannedDeparturePlatform = str(json, "pDepPlatform"),
+    plannedArrivalPlatform = str(json, "pArrPlatform"),
+    occupancy = str(json, "occupancy")?.let { name -> Occupancy.entries.firstOrNull { it.name == name } },
+    features = json.optJSONArray("features")?.let { list ->
+        (0 until list.length()).mapNotNull { index -> RideFeature.entries.firstOrNull { it.name == list.optString(index) } }.toSet()
+    }.orEmpty(),
+    bikeNote = str(json, "bikeNote"),
+    timetableLine = str(json, "ttLine"),
+    hafasLive = json.optBoolean("hLive"),
 )
 
 /** [journey] as JSON, with its refresh handles. */
@@ -347,6 +399,7 @@ fun keptJourneyJson(journey: Journey): JSONObject = JSONObject()
         JSONObject().put("place", keptStopJson(it.place)).put("minutes", it.minutes).putOpt("afterLegs", it.afterLegs)
     })
     .putOpt("foundLevel", journey.foundLevel?.name)
+    .putOpt("keptId", journey.keptId?.let { JSONObject().put("id", it.id).put("rides", it.rides).putOpt("loose", if (it.loose) true else null) })
 
 /** The journey of [json], or null without legs. */
 fun keptJourneyOf(json: JSONObject): Journey? {
@@ -365,5 +418,8 @@ fun keptJourneyOf(json: JSONObject): Journey? {
             JourneyVia(keptStopOf(it.getJSONObject("place")), it.optInt("minutes"), int(it, "afterLegs"))
         },
         foundLevel = str(json, "foundLevel")?.let { name -> TransferComfort.entries.firstOrNull { it.name == name } },
+        keptId = json.optJSONObject("keptId")?.let { kept ->
+            str(kept, "id")?.let { id -> str(kept, "rides")?.let { rides -> KeptJourneyId(id, rides, loose = kept.optBoolean("loose")) } }
+        },
     )
 }

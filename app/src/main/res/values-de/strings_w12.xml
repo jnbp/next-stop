@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Battery: the category of the battery saver, its levels, and the refresh of the widgets by tap. -->
+<resources>
+    <string name="settings_group_battery">Akku</string>
+    <string name="battery_saver_level_save">Sparen</string>
+    <string name="battery_saver_level_extreme">Extrem</string>
+    <string name="battery_saver_level_save_text">Alles oben Genannte; etwas seltener aktualisieren, keine Leerlauf-Animationen, schlichte Flächen statt Glas.</string>
+    <string name="battery_saver_level_extreme_text">Zusätzlich: keine Animationen, Standort nur, wenn du fragst (z. B. Standort-Knopf), Widgets nur, wenn du ↻ antippst, selten aktualisieren.</string>
+</resources>

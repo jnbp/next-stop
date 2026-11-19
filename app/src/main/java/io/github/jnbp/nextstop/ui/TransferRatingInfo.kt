@@ -312,7 +312,9 @@ fun TransferTuningControls(modifier: Modifier = Modifier) {
             label = { durationText(it.toLong()) },
             onValue = { set(tuning.copy(changeBufferSeconds = it.toLong())) },
         )
-        if (tuning != TransferTuning()) {
+        // Comes and goes with a change away from the defaults: grows in and fades, never jumps (#200;
+        // at once without animations, see SettingReveal).
+        SettingReveal(visible = tuning != TransferTuning()) {
             Text(
                 text = stringResource(R.string.rating_tuning_reset),
                 color = AppColors.Blue,

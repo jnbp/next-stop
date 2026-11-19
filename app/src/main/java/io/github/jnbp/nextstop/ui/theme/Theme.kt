@@ -19,8 +19,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.graphics.ColorUtils
 import io.github.jnbp.nextstop.data.AppPrefs
@@ -235,31 +235,17 @@ private fun hsl(hue: Float, saturation: Float, lightness: Float): Color {
     return Color(ColorUtils.HSLToColor(floatArrayOf(h, saturation.coerceIn(0f, 1f), lightness.coerceIn(0f, 1f))))
 }
 
-/** The WCAG contrast ratio of two opaque colours (1 to 21). */
-fun contrastOf(a: Color, b: Color): Float {
-    val la = a.luminance()
-    val lb = b.luminance()
-    return (maxOf(la, lb) + 0.05f) / (minOf(la, lb) + 0.05f)
-}
-
-// Text on its ground reads at least at this contrast (WCAG AA), large marks and icons at the second.
-private const val TEXT_CONTRAST = 4.5f
-private const val MARK_CONTRAST = 3f
+/** The WCAG contrast ratio of two opaque colours (1 to 21); see contrastRatio. */
+fun contrastOf(a: Color, b: Color): Float = contrastRatio(a.toArgb(), b.toArgb())
 
 /**
  * [ink] where it reads on [ground] (at least [minimum]:1); else moved step by step towards
- * near-black or white, whichever stands out more from the ground, until it does. The hue is
- * kept as long as it can be, so a tinted text stays tinted.
+ * near-black or white, whichever stands out more from the ground, until it does (see
+ * readableArgb). The hue is kept as long as it can be, so a tinted text stays tinted.
  */
 fun readableOn(ground: Color, ink: Color, minimum: Float = TEXT_CONTRAST): Color {
     if (contrastOf(ground, ink) >= minimum) return ink
-    val darkEnd = Color(0xFF101114)
-    val target = if (contrastOf(ground, darkEnd) >= contrastOf(ground, Color.White)) darkEnd else Color.White
-    for (step in 1..10) {
-        val moved = lerp(ink, target, step / 10f)
-        if (contrastOf(ground, moved) >= minimum) return moved
-    }
-    return target
+    return Color(readableArgb(ground.toArgb(), ink.toArgb(), minimum))
 }
 
 /**
@@ -267,10 +253,15 @@ fun readableOn(ground: Color, ink: Color, minimum: Float = TEXT_CONTRAST): Color
  * grounds (cards, sheets, chips), on the main colour, its container and the highlight. The
  * colours of the wallpaper (Material You) and an own accent can come out in any lightness,
  * so a pair that reads in one scheme may not in another; this moves only those that fall short.
+ * The container of the main colour counts as a ground too: a picked row or chip lies on it
+ * with the plain ink and the muted text (dark on dark in a light scheme of some wallpapers).
  */
 private fun AppPalette.readable(): AppPalette {
-    val grounds = listOf(card, ground, chip, plainGround)
-    fun onGrounds(color: Color, minimum: Float): Color = grounds.fold(color) { ink, under -> readableOn(under, ink, minimum) }
+    val grounds = intArrayOf(card.toArgb(), ground.toArgb(), chip.toArgb(), plainGround.toArgb(), blueContainer.toArgb())
+    fun onGrounds(color: Color, minimum: Float): Color {
+        val shown = readableOnAll(grounds, color.toArgb(), minimum)
+        return if (shown == color.toArgb()) color else Color(shown)
+    }
     val shownInk = onGrounds(ink, TEXT_CONTRAST)
     // The main colour is also the colour of links, icons and selected marks on the grounds.
     val shownBlue = onGrounds(blue, MARK_CONTRAST)
@@ -534,6 +525,22 @@ private fun materialScheme(palette: AppPalette): ColorScheme {
     )
 }
 
+/**
+ * The colours of the wallpaper for the standard components, with the text and marks that the
+ * palette had to move for contrast (see readable): a switch, a button or a dialog reads as the
+ * rest of the app does. Pairs the palette left as they were stay the wallpaper's own.
+ */
+private fun readableDynamic(scheme: ColorScheme, palette: AppPalette): ColorScheme = scheme.copy(
+    primary = palette.blue,
+    onPrimary = palette.onBlue,
+    onPrimaryContainer = palette.onBlueContainer,
+    onSecondaryContainer = readableOn(scheme.secondaryContainer, scheme.onSecondaryContainer),
+    onTertiaryContainer = palette.onLime,
+    onBackground = palette.ink,
+    onSurface = palette.ink,
+    onSurfaceVariant = palette.muted,
+)
+
 /** True when the app is drawn dark: by the setting, or as the system is set. */
 @Composable
 fun appInDark(): Boolean = when (Appearance.darkChoice) {
@@ -553,7 +560,7 @@ fun NextStopTheme(content: @Composable () -> Unit) {
     if (AppColors.palette != palette) AppColors.palette = palette
     val scheme = remember(palette) {
         if (choice == ColorChoice.System) {
-            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            readableDynamic(if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context), palette)
         } else {
             materialScheme(palette)
         }

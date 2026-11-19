@@ -81,6 +81,30 @@ data class Disruption(
     fun on(myLines: Set<String>): Boolean = lines.any { it in myLines } || about.any { it.line in myLines }
 }
 
+/**
+ * Where the line badges of a notice take their colours from when the notice has no place of
+ * its own: Berlin. A [NoticeLine] carries no place; coloured by where the app happens to look
+ * ([LineColors.focus]) a U9 could turn up in the yellow of Stuttgart's or Frankfurt's U9
+ * (Berlin's is orange, yellow is its U4). See [Disruption.colourPlace].
+ */
+val NOTICE_COLOUR_PLACE: Pair<Double, Double> = LineColors.BERLIN_CENTRE
+
+/**
+ * The place the line badges of a notice are coloured at: the first of its [stops] with a
+ * position (the stops of the departures it was found on; a notice of a journey gets the stop
+ * of its ride, see legStopOf), else [NOTICE_COLOUR_PLACE]. So a notice in Stuttgart shows
+ * Stuttgart's U9 and one in Berlin always Berlin's network map.
+ */
+fun noticeColourPlace(stops: List<Stop>): Pair<Double, Double> =
+    stops.firstNotNullOfOrNull { it.position } ?: NOTICE_COLOUR_PLACE
+
+/** Where the line badges of this notice are coloured (see [noticeColourPlace]). */
+val Disruption.colourPlace: Pair<Double, Double> get() = noticeColourPlace(stops)
+
+/** The colour of the badge of [line] in a notice coloured at [place]; null where none is known. */
+fun noticeLineStyle(line: NoticeLine, place: Pair<Double, Double> = NOTICE_COLOUR_PLACE): LineColors.Style? =
+    LineColors.rideStyle(line.line, line.product, place)
+
 /** A line as a notice names it or was found on, with its kind of transport (see [PRODUCT_KEYS]). */
 data class NoticeLine(val line: String, val product: String)
 
@@ -179,6 +203,8 @@ data class RouteStatus(
     val spots: List<Stop> = emptyList(),
     /** The radius [around] was looked for in; 0 when it was not looked for. */
     val radiusMeters: Int = 0,
+    /** The next journeys found: when each leaves and the lines it rides (see patternLines). */
+    val next: List<Pair<OffsetDateTime, List<String>>> = emptyList(),
 ) {
     /** The notices on its rides and those around its spots, each once. */
     val all: List<Disruption> get() = disruptions + around
@@ -348,6 +374,7 @@ suspend fun routeStatus(source: TransitSource, route: SavedRoute, options: Searc
         around = withoutCopiesOf(mergeDisruptions(lists), ride),
         spots = spots,
         radiusMeters = radiusMeters,
+        next = journeys.filter { !it.cancelled }.map { it.departure to patternLines(it) },
     )
 }
 

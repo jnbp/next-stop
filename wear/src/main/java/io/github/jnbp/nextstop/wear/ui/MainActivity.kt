@@ -11,6 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import io.github.jnbp.nextstop.wear.data.BvgClient
+import io.github.jnbp.nextstop.wear.data.CompanionAutoOpen
 import io.github.jnbp.nextstop.wear.data.DepartureCache
 import io.github.jnbp.nextstop.wear.data.MapWarmUp
 import io.github.jnbp.nextstop.wear.data.WatchStore
@@ -38,6 +39,7 @@ class MainActivity : ComponentActivity() {
         }
         if (wanted.isNotEmpty() && savedInstanceState == null) permissions.launch(wanted.toTypedArray())
         if (savedInstanceState == null) OpenRequest.take(intent)
+        wakeFor(intent)
         setContent { WearApp() }
     }
 
@@ -45,11 +47,35 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         // Opened again from the ongoing activity or a tile while the app runs.
         OpenRequest.take(intent)
+        wakeFor(intent)
+    }
+
+    // Opened by itself for a trip started on the phone (CompanionAutoOpen): over a locked watch
+    // face and with the screen on, like the wake-up alarm; only until the app leaves the screen.
+    private fun wakeFor(intent: Intent?) {
+        if (intent?.getBooleanExtra(CompanionAutoOpen.EXTRA_WAKE, false) != true) return
+        intent.removeExtra(CompanionAutoOpen.EXTRA_WAKE)
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
+        woken = true
+    }
+
+    private var woken = false
+
+    override fun onStop() {
+        if (woken) {
+            woken = false
+            setShowWhenLocked(false)
+            setTurnScreenOn(false)
+        }
+        super.onStop()
     }
 
     override fun onResume() {
         super.onResume()
         AppForeground.resumed.value = true
+        // The app is in front: the nudge to open the companion has done its job.
+        CompanionAutoOpen.dismiss(this)
         // On every return to the app: read what the phone wrote, check the phone and ask it for fresh places.
         lifecycleScope.launch {
             WatchStore.refresh(this@MainActivity)

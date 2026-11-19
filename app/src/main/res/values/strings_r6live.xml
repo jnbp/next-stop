@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #184: a ride waited for at its stop, due now or late without news. -->
+    <string name="r6live_wait_any_moment">%1$s due any moment</string>
+    <string name="r6live_wait_overdue">%1$s overdue · +%2$d′</string>
+    <string name="r6live_any_moment_spoken">Any moment</string>
+    <string name="r6live_overdue_spoken">%1$s overdue</string>
+    <!-- #187: the stops a ride has passed, folded in the live trip. -->
+    <plurals name="r6live_stops_ridden">
+        <item quantity="one">%d stop passed</item>
+        <item quantity="other">%d stops passed</item>
+    </plurals>
+    <!-- #189: the Google Maps action of the trip notification at the end of the trip: opens it and ends the live trip. -->
+    <string name="r6live_maps_and_end">Maps &amp; end</string>
+</resources>

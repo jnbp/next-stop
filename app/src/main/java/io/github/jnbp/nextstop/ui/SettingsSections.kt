@@ -1,5 +1,13 @@
 package io.github.jnbp.nextstop.ui
 
+import io.github.jnbp.nextstop.data.SLOWER_WALK_FACTOR
+import io.github.jnbp.nextstop.data.MIN_OWN_WALK_FACTOR
+import io.github.jnbp.nextstop.data.MAX_OWN_WALK_FACTOR
+import io.github.jnbp.nextstop.data.OWN_WALK_FACTOR_STEP
+import io.github.jnbp.nextstop.data.pacedWalkMinutes
+import io.github.jnbp.nextstop.data.ownWalkFactor
+import java.util.Locale
+import kotlin.math.roundToInt
 import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -16,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +33,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +63,7 @@ import io.github.jnbp.nextstop.ui.theme.Appearance
 import io.github.jnbp.nextstop.ui.theme.ColorChoice
 import io.github.jnbp.nextstop.ui.theme.DarkChoice
 import io.github.jnbp.nextstop.ui.theme.MapStyleChoice
+import io.github.jnbp.nextstop.ui.theme.MapVehiclesChoice
 import io.github.jnbp.nextstop.ui.theme.NotificationLook
 import io.github.jnbp.nextstop.ui.theme.VehicleDirectionChoice
 import io.github.jnbp.nextstop.widget.WidgetColorChoice
@@ -128,6 +139,7 @@ internal fun AppearanceSettings(delayDisplay: DelayDisplay, onDelayDisplay: (Del
             title = stringResource(R.string.color_title),
             text = stringResource(R.string.color_text),
             preview = { ColorSchemePreview(Appearance.colorChoice) },
+            previewPick = { index -> Appearance.changeColorChoice(context, ColorChoice.entries[index]) },
         ) {
             SegmentedToggle(
                 labels = listOf(
@@ -158,6 +170,7 @@ internal fun AppearanceSettings(delayDisplay: DelayDisplay, onDelayDisplay: (Del
             title = stringResource(R.string.dark_title),
             text = stringResource(R.string.dark_text),
             preview = { DarkModePreview(Appearance.darkChoice) },
+            previewPick = { index -> Appearance.changeDarkChoice(context, DarkChoice.entries[index]) },
         ) {
             SegmentedToggle(
                 labels = listOf(
@@ -184,6 +197,11 @@ internal fun AppearanceSettings(delayDisplay: DelayDisplay, onDelayDisplay: (Del
             title = stringResource(R.string.widget_colors_title),
             text = stringResource(R.string.widget_colors_text),
             preview = { WidgetColorsPreview(widgetColors) },
+            previewPick = { index ->
+                widgetColors = WidgetColorChoice.entries[index]
+                AppPrefs(context).widgetColors = widgetColors
+                WidgetUpdates.redrawAll(context)
+            },
         ) {
             SegmentedToggle(
                 labels = listOf(
@@ -212,7 +230,7 @@ internal fun MapSettings(
     onFitLine: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
-    val last = 9
+    val last = 10
     SettingsGroup(label = stringResource(R.string.settings_group_map)) {
         SettingsRow(
             shape = groupShape(0, last),
@@ -253,6 +271,10 @@ internal fun MapSettings(
             scroll = false,
             // The same little map as in the setup, cross-fading with the level, lower to suit the list.
             preview = { VehicleMapSketch(Appearance.mapVehicles, sketchHeight = SETTINGS_VEHICLE_SKETCH_HEIGHT) },
+            previewTap = {
+                val all = MapVehiclesChoice.entries
+                Appearance.changeMapVehicles(context, all[cycleIndex(all.indexOf(Appearance.mapVehicles), all.size)])
+            },
         ) {
             MapVehiclesToggle(
                 selected = Appearance.mapVehicles,
@@ -264,6 +286,7 @@ internal fun MapSettings(
             title = stringResource(R.string.vehicle_direction_title),
             text = stringResource(R.string.vehicle_direction_text),
             preview = { VehicleDirectionPreview(Appearance.vehicleDirection) },
+            previewPick = { index -> Appearance.changeVehicleDirection(context, VehicleDirectionChoice.entries[index]) },
         ) {
             SegmentedToggle(
                 labels = listOf(
@@ -334,6 +357,15 @@ internal fun MapSettings(
             checked = fitLine,
             onChange = onFitLine,
         )
+        // Where the vehicles of the later rides of a followed trip still are, dashed in grey; off by default.
+        SwitchRow(
+            shape = groupShape(10, last),
+            title = stringResource(R.string.approach_setting_title),
+            text = stringResource(R.string.approach_setting_text),
+            preview = { ApproachPreview(ApproachSetting.shown(context)) },
+            checked = ApproachSetting.shown(context),
+            onChange = { value -> ApproachSetting.update(context, value) },
+        )
     }
 }
 
@@ -348,6 +380,10 @@ internal fun NotificationLookCard() {
             title = stringResource(R.string.notification_look_title),
             text = stringResource(R.string.notification_look_text),
             preview = { NotificationLookPreview(Appearance.notificationLook) },
+            previewPick = { index ->
+                Appearance.changeNotificationLook(context, NotificationLook.entries[index])
+                refreshTripNotification(context)
+            },
         ) {
             SegmentedToggle(
                 labels = listOf(
@@ -389,6 +425,7 @@ internal fun StartPageSettings(
             title = stringResource(R.string.start_layout_title),
             text = stringResource(R.string.start_layout_text),
             preview = { StartLayoutPreview(startClassic) },
+            previewPick = { index -> onStartClassic(index == 1) },
         ) {
             SegmentedToggle(
                 labels = listOf(stringResource(R.string.start_layout_sheet), stringResource(R.string.start_layout_classic)),
@@ -422,6 +459,10 @@ internal fun StartPageSettings(
             checked = startCalendar,
             onChange = onStartCalendar,
         )
+        // How long after its start an appointment is still offered (release 0.2).
+        SettingReveal(visible = startCalendar) {
+            AppointmentsAfterRow(shape = groupShape(1, 2))
+        }
         SwitchRow(
             shape = groupShape(4, last),
             title = stringResource(R.string.start_map_title),
@@ -447,33 +488,110 @@ internal fun StartPageSettings(
 @Composable
 internal fun AccessibilitySettings(options: SearchOptions, onOptions: (SearchOptions) -> Unit) {
     SettingsGroup(label = stringResource(R.string.settings_group_accessibility)) {
+        val levels = listOf(
+            stringResource(R.string.accessibility_none),
+            stringResource(R.string.accessibility_partial),
+            stringResource(R.string.accessibility_complete),
+        )
+        val pickLevel = { index: Int -> onOptions(options.copy(accessibility = Accessibility.entries[index])) }
         SettingsRow(
             shape = groupShape(0, 1),
             title = stringResource(R.string.accessibility_title),
             text = stringResource(R.string.accessibility_text),
+            // As in the setup (#197): a short line with two stations, stairs or a lift at each.
+            preview = {
+                SketchOptions(labels = levels, selected = Accessibility.entries.indexOf(options.accessibility), height = 72.dp) { index, reveal ->
+                    accessibilitySketch(Accessibility.entries[index], reveal)
+                }
+            },
+            previewPick = pickLevel,
         ) {
             SegmentedToggle(
-                labels = listOf(
-                    stringResource(R.string.accessibility_none),
-                    stringResource(R.string.accessibility_partial),
-                    stringResource(R.string.accessibility_complete),
-                ),
+                labels = levels,
                 selected = Accessibility.entries.indexOf(options.accessibility),
-                onSelect = { index -> onOptions(options.copy(accessibility = Accessibility.entries[index])) },
+                onSelect = pickLevel,
                 minHeight = 40.dp,
                 ground = AppColors.Chip,
             )
         }
-        // "Langsamer unterwegs": every walk counts 1.3 times as long, at every transfer level.
-        SwitchRow(
-            shape = groupShape(1, 1),
-            title = stringResource(R.string.slower_title),
-            text = stringResource(R.string.slower_text),
-            checked = options.slower,
-            onChange = { on -> onOptions(options.copy(slower = on)) },
-        )
+        // "Langsamer unterwegs": every walk counts 1.3 times as long, at every transfer level, or an
+        // own factor (#198) on a slider, with what it makes of a walk of 5 minutes.
+        SlowerPaceRow(options = options, onOptions = onOptions)
     }
 }
+
+/**
+ * "Langsamer unterwegs" (#198): off, 1.3 times as long, or "Eigener Faktor", which reveals a
+ * slider from [MIN_OWN_WALK_FACTOR] to [MAX_OWN_WALK_FACTOR] in steps of
+ * [OWN_WALK_FACTOR_STEP]; its label shows what the factor makes of a walk of 5 minutes while
+ * the thumb moves, and the value is stored when it is let go. The preview is the stretched walk.
+ */
+@Composable
+private fun SlowerPaceRow(options: SearchOptions, onOptions: (SearchOptions) -> Unit) {
+    val own = options.ownWalkFactor
+    val choice = when {
+        own != null -> 2
+        options.slower -> 1
+        else -> 0
+    }
+    val pick = { index: Int ->
+        onOptions(
+            when (index) {
+                0 -> options.copy(slower = false, ownWalkFactor = null)
+                1 -> options.copy(slower = true, ownWalkFactor = null)
+                else -> options.copy(slower = true, ownWalkFactor = own ?: SLOWER_WALK_FACTOR)
+            },
+        )
+    }
+    SettingsRow(
+        shape = groupShape(1, 1),
+        title = stringResource(R.string.slower_title),
+        text = stringResource(R.string.slower_text),
+        scroll = false,
+        preview = { SlowerSketch(on = choice != 0, factor = options.walkFactorInUse) },
+        previewTap = { pick((choice + 1) % 3) },
+    ) {
+        SegmentedToggle(
+            labels = listOf(
+                stringResource(R.string.r6s2_pace_off),
+                stringResource(R.string.r6s2_pace_slower),
+                stringResource(R.string.r6s2_pace_own),
+            ),
+            selected = choice,
+            onSelect = pick,
+            minHeight = 40.dp,
+            ground = AppColors.Chip,
+        )
+        SettingReveal(visible = own != null) {
+            val steps = remember { ownWalkFactorSteps() }
+            StepSlider(
+                title = null,
+                value = ((own ?: SLOWER_WALK_FACTOR) * 100).roundToInt(),
+                values = steps,
+                label = { hundredths ->
+                    val factor = hundredths / 100.0
+                    stringResource(
+                        R.string.r6s2_pace_own_value,
+                        String.format(Locale.getDefault(), "%.2f", factor),
+                        PACE_SAMPLE_MINUTES,
+                        pacedWalkMinutes(PACE_SAMPLE_MINUTES, factor),
+                    )
+                },
+                onValue = { hundredths -> onOptions(options.copy(slower = true, ownWalkFactor = ownWalkFactor(hundredths / 100.0))) },
+                commitOnRelease = true,
+            )
+        }
+    }
+}
+
+// The steps of the own factor in hundredths: 80, 85, ... 200.
+private fun ownWalkFactorSteps(): List<Int> {
+    val step = (OWN_WALK_FACTOR_STEP * 100).roundToInt()
+    return ((MIN_OWN_WALK_FACTOR * 100).roundToInt()..(MAX_OWN_WALK_FACTOR * 100).roundToInt() step step).toList()
+}
+
+// The walk the label of the own factor shows ("5 min werden zu 7 min").
+private const val PACE_SAMPLE_MINUTES = 5
 
 /**
  * The first name the live page shows for shared live links; stays on this phone and only
@@ -506,15 +624,14 @@ internal fun LiveNameSettings() {
 /** The row at the bottom that opens the page "Advanced". */
 @Composable
 internal fun AdvancedEntryRow(onClick: () -> Unit) {
-    SettingsGroup(label = null) {
+    // One glass surface like the headers of the categories around it, not a card in a glass frame (#133).
+    GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(groupShape(0, 0))
-                .background(AppColors.Card)
                 .clickable(onClick = onClick)
-                .defaultMinSize(minHeight = 56.dp)
-                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+                .defaultMinSize(minHeight = 64.dp)
+                .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -548,15 +665,18 @@ internal fun AdvancedSettingsPage(
             .verticalScroll(scroll),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        DataSourceGroup(
-            choice = sourceChoice,
-            onChoice = onSourceChoice,
-            ownServer = ownServer,
-            onOwnServer = onOwnServer,
-        )
-        LiftKeysGroup()
-        LiveAddressGroup()
-        DeveloperSection()
+        // The groups of this page sit on it without glass frames, like those in an open category (#133).
+        CompositionLocalProvider(LocalFlatSettingsGroups provides true) {
+            DataSourceGroup(
+                choice = sourceChoice,
+                onChoice = onSourceChoice,
+                ownServer = ownServer,
+                onOwnServer = onOwnServer,
+            )
+            LiftKeysGroup()
+            LiveAddressGroup()
+            DeveloperSection()
+        }
         Spacer(modifier = Modifier.height(LocalNavInset.current))
     }
 }
@@ -584,7 +704,7 @@ private fun LiveAddressGroup() {
                 textStyle = TextStyle(color = AppColors.Ink, fontSize = 14.sp, fontFamily = AppFont),
                 cursorBrush = SolidColor(AppColors.Blue),
                 modifier = Modifier
-                    .width(240.dp)
+                    .widthIn(max = 240.dp).fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(AppColors.Chip)
                     .padding(horizontal = 14.dp, vertical = 12.dp),

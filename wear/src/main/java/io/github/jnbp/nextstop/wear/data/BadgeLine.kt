@@ -102,3 +102,20 @@ fun modeHint(line: String?, product: String): TravelMode? {
         else -> null
     }
 }
+
+// The kinds of long-distance trains whose numbers never carry leading zeros on a badge.
+private val ZERO_FREE_KINDS = setOf("ICE", "IC", "EC", "ECE", "EN", "NJ", "RJ", "RJX", "TGV", "ES", "EST", "THA", "EUR", "D", "IR", "IRE")
+
+// A long-distance train name with leading zeros in its number: "RJ 000384", "ICE0601".
+private val ZEROED_TRAIN_NUMBER = Regex("^([A-Z]{1,5}) ?0+([1-9][0-9]*)$")
+
+/**
+ * [line] without the leading zeros a foreign feed puts in a train number: "RJ 000383" as
+ * "RJ 383" (#279). Twin of the phone's data/RideKinds.kt withoutTrainNumberZeros: change both
+ * together. FlixBus codes ("FLX 040") and every other name stay as they are.
+ */
+fun withoutTrainNumberZeros(line: String?): String? {
+    val match = line?.trim()?.let { ZEROED_TRAIN_NUMBER.matchEntire(it) } ?: return line
+    if (match.groupValues[1] !in ZERO_FREE_KINDS) return line
+    return "${match.groupValues[1]} ${match.groupValues[2]}"
+}

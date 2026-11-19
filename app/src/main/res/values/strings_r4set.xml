@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Round 4 (r4set): companion views, battery saver, check on the way, previews. -->
+    <string name="r4_companion_layout_no_map">Without map</string>
+    <string name="r4_companion_layout_no_map_text">Always calm, without a map. The map button shows it for a moment; the choice is not remembered.</string>
+    <string name="r4_companion_layout_saver">While the battery saver is on, the live trip stays without a map.</string>
+    <string name="r4_dwatch_period_text">Also check every few minutes in between. Off by default; uses more battery.</string>
+    <string name="r4_dwatch_period_paused">Paused while the battery saver is on.</string>
+    <string name="r4_sun_preview_ride">Potsdam Hbf → Brandenburg Hbf</string>
+    <string name="r4_sun_preview_time">10:12 – 10:38 · 26′</string>
+</resources>

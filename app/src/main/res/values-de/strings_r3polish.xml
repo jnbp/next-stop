@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Runde 3 Feinschliff: Sonnenseite (abschaltbar, nur bei Sonne), kompakter Chip für ausgelassene Verkehrsmittel. -->
+<resources>
+    <string name="sun_side_info_title">Sonnenseite</string>
+    <string name="sun_side_info_text">Next Stop berechnet aus dem Verlauf der Strecke und dem Sonnenstand, auf welcher Seite die Sonne während der Fahrt hereinscheint. Der Hinweis erscheint bei Fahrten ab 20 Minuten, tagsüber und nur, wenn es laut Wettervorhersage (Open-Meteo) wirklich sonnig ist. Nur oberirdische Abschnitte zählen: Fahrten fast nur im Tunnel, wie bei den meisten U-Bahn-Linien, bekommen keinen Hinweis. Dafür geht nur ein grob gerundeter Ort (etwa 10 km) an Open-Meteo.</string>
+    <string name="sun_side_switch">Sonnenseite anzeigen</string>
+    <string name="sun_side_setting_text">Bei längeren Fahrten tagsüber: auf welcher Seite die Sonne scheint – nur wenn es wirklich sonnig ist.</string>
+    <string name="sun_side_info_open">Sonnenseite erklären</string>
+    <string name="developer_sun_test">Sonnenseite testen</string>
+    <string name="developer_sun_test_text">Zeigt den Sonnenseiten-Hinweis bei jeder Fahrt, unabhängig von Sonnenstand und Wetter.</string>
+    <string name="sources_weather_use">Bewölkung für den Sonnenseiten-Hinweis</string>
+    <!-- Kompakter Chip bei mehreren ausgelassenen Verkehrsmitteln: „Fernbus +1“. -->
+    <string name="products_off_more">%1$s +%2$d</string>
+</resources>

@@ -16,9 +16,10 @@ class ChangeMapFit(val x: Double, val y: Double, val pixelsPerUnit: Double, val 
 /**
  * The view that shows the whole way of [map] (and the user at [own] when near) in a
  * [width] x [height] pixels map with [pad] pixels to spare at the edges; null before the
- * size is known.
+ * size is known. [bottomBand] pixels at the foot are kept free of the way and its ends (the
+ * caption of the full screen map lies there, #149): the way is fitted above them.
  */
-fun changeMapFit(map: ChangeMap, own: Pair<Double, Double>?, width: Int, height: Int, pad: Float): ChangeMapFit? {
+fun changeMapFit(map: ChangeMap, own: Pair<Double, Double>?, width: Int, height: Int, pad: Float, bottomBand: Float = 0f): ChangeMapFit? {
     if (width <= 0 || height <= 0) return null
     val from = map.fromLatitude to map.fromLongitude
     val to = map.toLatitude to map.toLongitude
@@ -43,13 +44,22 @@ fun changeMapFit(map: ChangeMap, own: Pair<Double, Double>?, width: Int, height:
     val minSpan = MIN_SPAN_METRES / metresPerUnit
     val spanX = maxOf(maxX - minX, minSpan)
     val spanY = maxOf(maxY - minY, minSpan)
-    val scale = minOf((width - 2 * pad) / spanX, (height - 2 * pad) / spanY).coerceAtLeast(1.0)
-    return ChangeMapFit((minX + maxX) / 2, (minY + maxY) / 2, scale, user)
+    val framed = frameAboveBand((minX + maxX) / 2, (minY + maxY) / 2, spanX, spanY, width, height, pad.toDouble(), bottomBand.toDouble())
+    return ChangeMapFit(framed.x, framed.y, framed.pixelsPerUnit, user)
 }
 
 /** The map picture to ask the phone for a change map of [map] in a [width] x [height] pixels view (see [changeMapFit]). */
-fun changeMapRequest(map: ChangeMap, own: Pair<Double, Double>?, width: Int, height: Int, pad: Float, pixelRatio: Double, dark: Boolean): MapImageRequest? {
-    val fit = changeMapFit(map, own, width, height, pad) ?: return null
+fun changeMapRequest(
+    map: ChangeMap,
+    own: Pair<Double, Double>?,
+    width: Int,
+    height: Int,
+    pad: Float,
+    pixelRatio: Double,
+    dark: Boolean,
+    bottomBand: Float = 0f,
+): MapImageRequest? {
+    val fit = changeMapFit(map, own, width, height, pad, bottomBand) ?: return null
     return MapImageRequest.ofView(fit.x, fit.y, fit.pixelsPerUnit, width, height, pixelRatio, dark)
 }
 
@@ -80,7 +90,7 @@ object TripMapPrefetch {
         val ratio = app.resources.displayMetrics.density.toDouble().coerceIn(1.0, 3.0)
         val requests = wanted.mapNotNull { (map, large) ->
             val size = WatchStore.changeMapSize(app, large) ?: return@mapNotNull null
-            changeMapRequest(map, null, size[0], size[1], size[2].toFloat(), ratio, dark)?.withMargin()
+            changeMapRequest(map, null, size[0], size[1], size[2].toFloat(), ratio, dark, bottomBand = size.getOrElse(3) { 0 }.toFloat())?.withMargin()
         }.filter { request ->
             val id = idOf(request)
             synchronized(asked) { (notBefore[id] ?: 0L) <= System.currentTimeMillis() && asked.add(id) }

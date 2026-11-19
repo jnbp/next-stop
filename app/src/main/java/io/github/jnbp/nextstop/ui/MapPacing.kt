@@ -45,6 +45,36 @@ fun offsetByDp(latitude: Double, longitude: Double, dx: Float, dy: Float, zoom: 
 fun dotDriftDp(reachDp: Float, fromZoom: Double, zoom: Double): Double =
     if (reachDp <= 0f || fromZoom.isNaN()) 0.0 else reachDp * abs(2.0.pow(zoom - fromZoom) - 1.0)
 
+// Far out, below the zoom the stop signs start at, the row of dots beside a station shrinks to
+// this share of the row of its badges over DOT_ROW_SHRINK_ZOOMS zoom levels: there is no sign
+// to keep clear of, and a dot a sign's width away would look like it stood beside the track.
+const val DOT_ROW_FAR_SCALE = 0.3f
+const val DOT_ROW_SHRINK_ZOOMS = 1.5
+
+/**
+ * How much of the offset of its badge the dot of a vehicle standing at a station keeps at
+ * [zoom], where the stop signs are drawn from [signsFrom] on: all of it there and closer (so the
+ * dot stays right of the sign and does not move when the badges come in), then less and less
+ * further out down to DOT_ROW_FAR_SCALE: the dots stay right next to their station, never jump
+ * onto its point.
+ */
+fun dotRowScale(zoom: Double, signsFrom: Double): Float {
+    if (zoom >= signsFrom) return 1f
+    val share = ((signsFrom - zoom) / DOT_ROW_SHRINK_ZOOMS).coerceIn(0.0, 1.0).toFloat()
+    return 1f - (1f - DOT_ROW_FAR_SCALE) * share
+}
+
+/**
+ * How far, in dp, a dot placed [reachDp] (at full scale) from its station at [fromZoom] is off
+ * at [zoom], with its row scaled by dotRowScale ([signsFrom]): the drift of the zoom and the
+ * change of the scale together.
+ */
+fun dotRowDriftDp(reachDp: Float, fromZoom: Double, zoom: Double, signsFrom: Double): Double {
+    if (reachDp <= 0f || fromZoom.isNaN()) return 0.0
+    val placed = dotRowScale(fromZoom, signsFrom) * 2.0.pow(zoom - fromZoom)
+    return reachDp * abs(placed - dotRowScale(zoom, signsFrom))
+}
+
 /** The smallest difference between two compass bearings, in degrees (0 to 180). */
 fun bearingApart(a: Double, b: Double): Double {
     val apart = abs(a - b) % 360.0

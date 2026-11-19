@@ -3,8 +3,6 @@ package io.github.jnbp.nextstop.data
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-private typealias Spot = Pair<Double, Double>
-
 /**
  * Changes between two rides of the U-Bahn, S-Bahn or trains that meet at one station complex
  * without a walk between them from the provider (BVG HAFAS at Karl-Bonhoeffer-Nervenklinik:
@@ -42,8 +40,8 @@ object PlatformChange {
      * The two nearest points of [from] and [to] (platform axes), the start and end of a walk
      * between them; null without platforms.
      */
-    fun closestPoints(from: List<OsmPlatform>, to: List<OsmPlatform>): Pair<Spot, Spot>? {
-        var best: Pair<Spot, Spot>? = null
+    fun closestPoints(from: List<OsmPlatform>, to: List<OsmPlatform>): Pair<Pair<Double, Double>, Pair<Double, Double>>? {
+        var best: Pair<Pair<Double, Double>, Pair<Double, Double>>? = null
         var bestMeters = Double.MAX_VALUE
         for (a in from) for (b in to) {
             // Each axis sampled, then the nearest point of the other axis to each sample.
@@ -71,12 +69,12 @@ object PlatformChange {
 
     private const val SAMPLES = 10
 
-    private fun along(platform: OsmPlatform, share: Double): Spot =
+    private fun along(platform: OsmPlatform, share: Double): Pair<Double, Double> =
         (platform.a.first + (platform.b.first - platform.a.first) * share) to
             (platform.a.second + (platform.b.second - platform.a.second) * share)
 
     /** The middle of [platform]. */
-    fun middle(platform: OsmPlatform): Spot = along(platform, 0.5)
+    fun middle(platform: OsmPlatform): Pair<Double, Double> = along(platform, 0.5)
 
     /**
      * [ride]'s way cut at its platforms: at the start where it is boarded ([boarding], the one

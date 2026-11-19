@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #208: headings of the sections of a search for places. -->
+    <string name="r7search_local_transport">Local transport</string>
+    <string name="r7search_places">Places</string>
+    <!-- #223: the departures header. -->
+    <string name="r7search_mode_long_distance">Long</string>
+    <string name="r7search_all_lines">All lines</string>
+    <string name="r7search_only_stop">Only %1$s</string>
+    <string name="r7search_nearby_all">All stops within %1$s</string>
+    <string name="r7search_radius_choice">Stops: %1$s</string>
+    <!-- #229: the setup step "Places". -->
+    <string name="r7search_setup_places_title">Places</string>
+    <string name="r7search_setup_places_short">Set Home, and Work or more places if you like. Next Stop warns you of disruptions at your places and on your routes, and offers quick routes there.</string>
+    <string name="r7search_setup_places_more">The places are your favourite and saved places of the start page: one tap there plans the route. The disruption alerts look at them, as far as the radius you set. They stay on your phone. You can change them on the start page at any time, or skip this step.</string>
+    <string name="r7search_setup_places_optional">optional</string>
+    <string name="r7search_setup_places_add">Add another place</string>
+    <string name="r7search_setup_places_remove">Remove %1$s</string>
+    <string name="r7search_setup_places_search">Search for a place</string>
+    <string name="r7search_setup_places_preview">Disruption on your way home</string>
+</resources>

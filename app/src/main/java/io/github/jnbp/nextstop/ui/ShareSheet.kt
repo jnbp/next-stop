@@ -125,10 +125,15 @@ fun ShareSheet(
         if (url != null) copyLink(context, url)
     }
     val sendLive: (String?) -> Unit = { liveName ->
-        val url = liveLink(base, journey, toName, now, liveName)
+        // A saved place goes by its label ("nach Hause"), not by its address.
+        val target = sharedDestination(context, journey, toName)
+        val url = liveLink(
+            base, journey, target.name, now, liveName,
+            destinationKind = target.kind, savedDestination = target.saved, language = shareLanguage(context),
+        )
         onDismiss()
         when {
-            url != null -> shareLiveLink(context, url, lead = context.getString(R.string.trip_share_heading, toName))
+            url != null -> shareLiveLink(context, url, lead = tripShareHeading(context, target))
             following -> shareTripText(context, journey, now)
             else -> shareConnectionText(context, journey, from, toName)
         }
@@ -306,9 +311,11 @@ private fun ColumnScope.ShareChoice(
  * One choice of the share sheet: a large rounded card with [glyph] in a round field, [title] and
  * one line of [text]. The [primary] card is tinted and marked "Recommended". A card that is not
  * [enabled] stays visible, faded, and does nothing. It settles in as item [index] of the sheet.
+ * The sheets of the Live-Fahrt bar (#217) use the same card, with a [trailing] switch where the
+ * entry is one, and its [role].
  */
 @Composable
-private fun ShareOptionCard(
+internal fun ShareOptionCard(
     glyph: Glyph,
     title: String,
     text: String,
@@ -316,6 +323,8 @@ private fun ShareOptionCard(
     enabled: Boolean,
     index: Int,
     onClick: () -> Unit,
+    role: Role = Role.Button,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val ink = if (primary) AppColors.OnBlueContainer else AppColors.Ink
@@ -331,7 +340,7 @@ private fun ShareOptionCard(
                 interactionSource = interactions,
                 indication = LocalIndication.current,
                 enabled = enabled,
-                role = Role.Button,
+                role = role,
                 onClick = onClick,
             )
             .defaultMinSize(minHeight = 72.dp)
@@ -383,6 +392,7 @@ private fun ShareOptionCard(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        trailing?.invoke()
     }
 }
 

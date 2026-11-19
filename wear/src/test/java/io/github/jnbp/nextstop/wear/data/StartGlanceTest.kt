@@ -58,15 +58,15 @@ class StartGlanceTest {
 
     @Test
     fun theCountdownRedrawsWhenItsMinutesChange() {
-        // 5 min 10 s away shows "5 min" until 4 min 30 s are left: 40 s from now.
+        // 5 min 10 s away shows "5 min" (full minutes, as on the phone) until less than 5 min are left: 10 s from now.
         val time = now + 5 * 60_000 + 10_000
         assertEquals(5L, minutesUntil(time, now))
         val wait = millisToNextMinuteChange(listOf(time), now)
-        assertEquals(40_001L, wait)
+        assertEquals(10_001L, wait)
         assertEquals(5L, minutesUntil(time, now + wait - 1))
         assertEquals(4L, minutesUntil(time, now + wait))
         // The soonest change of several wins; one at "now" changes no more.
-        assertEquals(10_001L, millisToNextMinuteChange(listOf(time, now + 2 * 60_000 - 20_000), now))
+        assertEquals(5_001L, millisToNextMinuteChange(listOf(time, now + 2 * 60_000 + 5_000), now))
         assertEquals(60_000L, millisToNextMinuteChange(listOf(now + 10_000), now))
         assertEquals(60_000L, millisToNextMinuteChange(emptyList(), now))
     }

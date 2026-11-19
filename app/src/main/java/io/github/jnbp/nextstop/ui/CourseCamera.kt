@@ -22,7 +22,6 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import kotlin.math.abs
 import kotlin.math.floor
-import kotlin.math.hypot
 
 /**
  * How the camera of a line course opened from a vehicle looks: at the vehicle and its next
@@ -55,15 +54,13 @@ private const val FOLLOW_MAX_ZOOM = 16.0
 // How often the free room and the vehicle are looked at.
 private const val FOLLOW_POLL_MILLIS = 250L
 
-// The frame follows the vehicle about once a second, gliding linearly in between.
-private const val FOLLOW_PAN_POLLS = 4
-private const val FOLLOW_PAN_MILLIS = 1_000
+// Where the vehicle left the inner part of the free room (see followPanDue), one ease follows it; then the camera rests.
+private const val FOLLOW_PAN_MILLIS = 600
 
 // A change of the frame (the sheet moved, a stop passed, back from the whole line) eases there.
 private const val FRAME_EASE_MILLIS = 600
 
-// Less than this (dp) off the middle is left alone; a smaller zoom change keeps the zoom.
-private const val FOLLOW_SLACK_DP = 6.0
+// A smaller zoom change keeps the zoom.
 private const val ZOOM_SLACK = 0.3
 
 // The room kept between the points and the cards around them (dp).
@@ -119,7 +116,9 @@ fun CourseFollow(
             .bearing(0.0)
             .tilt(0.0)
             .build()
-        map.easeCamera(CameraUpdateFactory.newCameraPosition(position), millis, smooth)
+        // A map released meanwhile (its view destroyed) is not moved any more (#284).
+        if (!MapAlive.alive(map)) return
+        map.easeCameraScaled(CameraUpdateFactory.newCameraPosition(position), millis, smooth)
     }
 
     val whole = camera.whole
@@ -142,8 +141,13 @@ fun CourseFollow(
         var framedRoom: List<Double>? = null
         var framedPassed = Int.MIN_VALUE
         var framedZoom = Double.NaN
-        var polls = 0
+        // Where the last frame or pan put the vehicle on the screen (dp); NaN until the camera rests there.
+        var anchorX = Double.NaN
+        var anchorY = Double.NaN
+        var settledAt = 0L
         while (true) {
+            // The loop ends with the map it frames (#284).
+            if (!MapAlive.alive(map)) break
             val free = room()?.toList()
             // The room has to stand still for one poll (the sheet slides in, the list grows).
             val steady = free != null && free == lastRoom
@@ -151,13 +155,13 @@ fun CourseFollow(
             if (steady && free != null && locate(spot)) {
                 val vehicle = spot[0] to spot[1]
                 val millis = System.currentTimeMillis()
-                val progress = shownTrack.progressAt(spot[0], spot[1])
+                // The timetable picks the lap where a ring line passes the place more than once.
+                val progress = shownTrack.progressAt(spot[0], spot[1], near = shownTrack.clock.progress(millis))
                     ?: if (shownTrack.clock.active(millis)) shownTrack.clock.progress(millis) else null
                 val passed = progress?.let { floor(it).toInt() } ?: -1
-                // The vehicle and its next stops in the direction of travel, never mirrored.
-                val ahead = aheadFrame(shownStops, progress, vehicle)
                 if (free != framedRoom || passed != framedPassed) {
                     // Frame anew: the vehicle near the edge it comes from, its next stops filling the free part.
+                    val ahead = aheadFrame(shownStops, progress, vehicle)
                     val view = courseView(ahead, free[4], free[5], free[0], free[1], free[2], free[3], FOLLOW_MAX_ZOOM)
                     if (view != null) {
                         // A small change of zoom (the next stop passed) keeps the zoom it has.
@@ -168,22 +172,37 @@ fun CourseFollow(
                     }
                     framedRoom = free
                     framedPassed = passed
-                    polls = 0
-                } else if (++polls >= FOLLOW_PAN_POLLS) {
-                    // Following: the frame moves with the vehicle, gliding over a second where it drifted off.
-                    polls = 0
-                    val view = courseView(ahead, free[4], free[5], free[0], free[1], free[2], free[3], FOLLOW_MAX_ZOOM, zoom = map.cameraPosition.zoom)
-                    if (view != null) {
-                        val point = map.projection.toScreenLocation(LatLng(view.latitude, view.longitude))
-                        val middleX = free[4] * density / 2.0
-                        val middleY = free[5] * density / 2.0
-                        if (hypot(point.x - middleX, point.y - middleY) > FOLLOW_SLACK_DP * density) {
-                            ease(view, FOLLOW_PAN_MILLIS, smooth = false)
+                    anchorX = Double.NaN
+                    settledAt = millis + SystemAnimation.millis(FRAME_EASE_MILLIS.toLong()) + FOLLOW_POLL_MILLIS
+                } else if (millis >= settledAt) {
+                    // Following: the camera rests while the vehicle stays in the inner part of the
+                    // free room around where the frame put it; one ease where it left it, then rest.
+                    val point = map.projection.toScreenLocation(LatLng(spot[0], spot[1]))
+                    val x = point.x / density
+                    val y = point.y / density
+                    if (anchorX.isNaN()) {
+                        anchorX = x
+                        anchorY = y
+                    } else if (followPanDue(x, y, anchorX, anchorY, free[0], free[1], free[4] - free[2], free[5] - free[3])) {
+                        val ahead = aheadFrame(shownStops, progress, vehicle)
+                        val view = courseView(ahead, free[4], free[5], free[0], free[1], free[2], free[3], FOLLOW_MAX_ZOOM, zoom = map.cameraPosition.zoom)
+                        if (view != null) {
+                            val position = CameraPosition.Builder()
+                                .target(LatLng(view.latitude, view.longitude))
+                                .zoom(view.zoom)
+                                .bearing(0.0)
+                                .tilt(0.0)
+                                .build()
+                            map.animateCameraScaled(CameraUpdateFactory.newCameraPosition(position), FOLLOW_PAN_MILLIS)
                         }
+                        anchorX = Double.NaN
+                        settledAt = millis + SystemAnimation.millis(FOLLOW_PAN_MILLIS.toLong()) + FOLLOW_POLL_MILLIS
                     }
                 }
             }
             delay(FOLLOW_POLL_MILLIS)
+            // Not while the app is in the background (battery rule).
+            AppVisibility.awaitVisible()
         }
     }
 }

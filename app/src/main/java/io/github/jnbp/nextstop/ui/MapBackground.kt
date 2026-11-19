@@ -119,6 +119,7 @@ private class BackdropCamera {
  * projection gives no point.
  */
 private fun readCorner(map: MapLibreMap, into: DoubleArray): Boolean {
+    if (!MapAlive.alive(map)) return false
     val corner = map.projection.fromScreenLocation(PointF(0f, 0f))
     if (corner.latitude.isNaN() || corner.longitude.isNaN()) return false
     val camera = map.cameraPosition
@@ -146,7 +147,7 @@ private fun BackdropCamera.use(values: DoubleArray) {
  * again.
  */
 private fun BackdropCamera.follow(map: MapLibreMap, backdrop: Backdrop): Boolean {
-    if (latitude.isNaN() || backdrop.image == null) return false
+    if (latitude.isNaN() || backdrop.image == null || !MapAlive.alive(map)) return false
     val camera = map.cameraPosition
     if (!backdropCanFollow(camera.tilt, camera.bearing, tilt, bearing)) return false
     val corner = map.projection.toScreenLocation(LatLng(latitude, longitude))
@@ -157,9 +158,6 @@ private fun BackdropCamera.follow(map: MapLibreMap, backdrop: Backdrop): Boolean
     return true
 }
 
-/** How far the map view was taken through its lifecycle: created only, started, or resumed. */
-private enum class MapRun { Idle, Started, Resumed }
-
 // A map that rested and comes back waits this long at most under the plain ground for its
 // complete picture, and then fades in this long (see MapBackground).
 private const val WAKE_MAX_MILLIS = 700L
@@ -168,10 +166,12 @@ private const val WAKE_FADE_MILLIS = 200
 /**
  * Full-size map used as the background of the app. With a [backdrop], the map also
  * delivers the blurred picture of itself that the glass surfaces show. While [visible]
- * is false the map is not shown and rests: it draws nothing and loads nothing. The map
+ * is false the map is not shown and rests: it draws nothing and loads nothing; before it was
+ * ever visible it is not even made. The map
  * moves to a new [latitude] and [longitude] only while [follow] is true: the first time it
- * is put there at [zoom], after that it glides there and keeps the zoom it has. The map
- * shows the style at [styleUrl] (see [mapStyleUrl]) and can change it while it runs; each
+ * is put there at [zoom], after that it glides there and keeps the zoom it has; a target
+ * nearer than [followSlackMetres] to the camera it leaves alone. The map shows the style at
+ * [styleUrl] (see [mapStyleUrl]) and can change it while it runs; each
  * time a style has loaded, [onStyleLoaded] gets it, so the app can add its own sources and
  * layers again (a new style drops them). The ground while the map loads shows the logo of
  * the app only while [logo] is true (the start page, where the splash screen hands over to
@@ -187,10 +187,50 @@ fun MapBackground(
     backdrop: Backdrop? = null,
     visible: Boolean = true,
     follow: Boolean = true,
+    followSlackMetres: Double = 0.0,
     styleUrl: String = STYLE_URL,
     logo: Boolean = true,
     onMapReady: (MapLibreMap) -> Unit = {},
     onStyleLoaded: (Style) -> Unit = {},
+) {
+    // The map is not even made before it is first to be seen (a start without the map, the
+    // battery saver, the calm companion): no view, no style, no tiles. Once made it stays and
+    // rests while hidden, so showing it again costs no new start.
+    val made = remember { booleanArrayOf(false) }
+    if (visible) made[0] = true
+    if (!made[0]) {
+        // A start without the map: nothing to wait for, the rest of the start begins once
+        // the splash screen is gone (as the resting map below does it).
+        LaunchedEffect(Unit) {
+            if (Startup.mapShownAt != 0L) return@LaunchedEffect
+            snapshotFlow { Startup.splashDone }.first { it }
+            if (Startup.mapShownAt == 0L) Startup.mapShownAt = SystemClock.uptimeMillis()
+            Startup.mapIn = true
+        }
+        return
+    }
+    MapBackgroundView(
+        latitude, longitude, interactive, modifier, zoom, backdrop, visible, follow, followSlackMetres,
+        styleUrl, logo, onMapReady, onStyleLoaded,
+    )
+}
+
+/** The map of [MapBackground] once it is made. */
+@Composable
+private fun MapBackgroundView(
+    latitude: Double,
+    longitude: Double,
+    interactive: Boolean,
+    modifier: Modifier,
+    zoom: Double,
+    backdrop: Backdrop?,
+    visible: Boolean,
+    follow: Boolean,
+    followSlackMetres: Double,
+    styleUrl: String,
+    logo: Boolean,
+    onMapReady: (MapLibreMap) -> Unit,
+    onStyleLoaded: (Style) -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -254,6 +294,8 @@ fun MapBackground(
                 addOnDidFinishRenderingFrameListener { fully, _, _ -> ResumeLog.once("map frame", if (fully) "fully true" else "fully false") }
             }
             if (!textureMode) keepSurfaceWhileAttached()
+            // The jank meter of the developer options counts the map's frames in rest (only while it is on).
+            JankMeter.attachMap(this)
         }
     }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -265,35 +307,49 @@ fun MapBackground(
     val wantedStyle by rememberUpdatedState(styleUrl)
 
     // The map runs as far as the screen does, and not at all while it is hidden. The view
-    // is told step by step, in the order its lifecycle asks for.
-    val run = remember { arrayOf(MapRun.Idle) }
+    // is told step by step, in the order its lifecycle asks for (see MapLife.kt).
+    val run = remember { arrayOf(MapRunLevel.Idle) }
+    // Once destroyed the view is never started again (#284).
+    val destroyed = remember { booleanArrayOf(false) }
     val wanted by rememberUpdatedState(visible)
+    val stepTo = remember(mapView) {
+        { level: MapRunLevel ->
+            while (true) {
+                val call = nextMapRunCall(run[0], level) ?: break
+                when (call) {
+                    MapRunCall.Start -> mapView.onStart()
+                    MapRunCall.Resume -> mapView.onResume()
+                    MapRunCall.Pause -> mapView.onPause()
+                    MapRunCall.Stop -> mapView.onStop()
+                }
+                run[0] = mapRunAfter(call)
+            }
+        }
+    }
+    // The view is destroyed only when the map leaves for good, after it was brought to rest.
+    // Declared before the effect that follows the lifecycle, so it is disposed after it; a new
+    // lifecycle owner only steps the view down and up again, it never destroys it (#284).
+    DisposableEffect(mapView) {
+        onDispose {
+            // Whatever still holds the map (an overlay drawn in this frame, a loop) lets it be.
+            map?.let { MapAlive.release(it) }
+            destroyed[0] = true
+            stepTo(MapRunLevel.Idle)
+            PerfLab.detach(mapView)
+            JankMeter.detachMap(mapView)
+            mapView.onDestroy()
+        }
+    }
     DisposableEffect(lifecycleOwner, mapView) {
         fun follow(state: Lifecycle.State) {
-            val target = when {
-                !wanted || !state.isAtLeast(Lifecycle.State.STARTED) -> MapRun.Idle
-                state.isAtLeast(Lifecycle.State.RESUMED) -> MapRun.Resumed
-                else -> MapRun.Started
-            }
-            while (run[0] != target) {
-                if (run[0] < target) {
-                    if (run[0] == MapRun.Idle) {
-                        mapView.onStart()
-                        run[0] = MapRun.Started
-                    } else {
-                        mapView.onResume()
-                        run[0] = MapRun.Resumed
-                    }
-                } else {
-                    if (run[0] == MapRun.Resumed) {
-                        mapView.onPause()
-                        run[0] = MapRun.Started
-                    } else {
-                        mapView.onStop()
-                        run[0] = MapRun.Idle
-                    }
-                }
-            }
+            stepTo(
+                wantedMapRun(
+                    shown = wanted,
+                    destroyed = destroyed[0],
+                    started = state.isAtLeast(Lifecycle.State.STARTED),
+                    resumed = state.isAtLeast(Lifecycle.State.RESUMED),
+                ),
+            )
         }
         val observer = LifecycleEventObserver { owner, _ -> follow(owner.lifecycle.currentState) }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -303,11 +359,13 @@ fun MapBackground(
         onDispose {
             job.cancel()
             lifecycleOwner.lifecycle.removeObserver(observer)
-            follow(Lifecycle.State.CREATED)
-            PerfLab.detach(mapView)
-            mapView.onDestroy()
+            stepTo(MapRunLevel.Idle)
         }
     }
+    // A map hidden in this frame rests in this frame, not a frame later through the flow above:
+    // a map that leaves the screen is hidden a frame before its view goes (see rememberMapKept),
+    // and its render thread must be paused before the view is detached (#284).
+    SideEffect { if (!visible) stepTo(MapRunLevel.Idle) }
 
     // The entrance of the map, 0 to 1: it settles from a slight zoom while the loading ground
     // over it (see MapLoading) fades out. The map itself is never made transparent: the
@@ -317,6 +375,7 @@ fun MapBackground(
     val animate = rememberAnimationsOn()
     val enter = remember { Animatable(0f) }
     val loading by remember { derivedStateOf { enter.value < 1f } }
+    val entering by remember { derivedStateOf { enter.value > 0f } }
     LaunchedEffect(mapView) {
         snapshotFlow { rendered.value && Startup.splashDone }.first { it }
         // The beat of the rest of the start (see awaitIntroStep): only the first map gives it.
@@ -350,6 +409,11 @@ fun MapBackground(
         mapView.addOnDidFinishRenderingMapListener(listener)
         onDispose { mapView.removeOnDidFinishRenderingMapListener(listener) }
     }
+
+    // Whether the map is still under its loading ground, for what floats over it (see MapCover).
+    val covered = mapStillCovered(visible, entering, resting[0], waking.value)
+    SideEffect { MapCover.covered = covered }
+    DisposableEffect(Unit) { onDispose { MapCover.covered = true } }
 
     Box(modifier = modifier) {
     AndroidView(
@@ -451,6 +515,10 @@ fun MapBackground(
         // Not a key: a map that shows something else is left alone, also after that is over.
         if (!follow) return@LaunchedEffect
         val readyMap = map ?: return@LaunchedEffect
+        // No place on the earth: LatLng itself would throw (#284).
+        if (!mapPointOk(latitude, longitude)) return@LaunchedEffect
+        // Never a zoom MapLibre must not be given (#284); the map is placed once one is fine.
+        if (!placed[0] && !cameraOk(latitude, longitude, zoom, 0.0, 0.0)) return@LaunchedEffect
         val target = LatLng(latitude, longitude)
         if (!placed[0]) {
             placed[0] = true
@@ -462,10 +530,18 @@ fun MapBackground(
             // A map whose picture is already complete there draws it again; that frame counts.
             readyMap.triggerRepaint()
         } else if (visible) {
-            readyMap.animateCamera(CameraUpdateFactory.newLatLng(target))
+            // Something else keeps the camera on the place frame by frame (see OwnFollow): a
+            // target this near is no step to take, which would only fight it.
+            val now = readyMap.cameraPosition.target
+            if (followSlackMetres > 0.0 && now != null &&
+                metresApart(now.latitude, now.longitude, latitude, longitude) < followSlackMetres
+            ) {
+                return@LaunchedEffect
+            }
+            readyMap.animateCameraScaled(CameraUpdateFactory.newLatLng(target))
         } else {
             // A map that rests does not animate.
-            readyMap.moveCamera(CameraUpdateFactory.newLatLng(target))
+            readyMap.moveCameraSafely(CameraUpdateFactory.newLatLng(target))
         }
     }
     LaunchedEffect(map, styleUrl) {
@@ -496,7 +572,8 @@ fun MapBackground(
     // Not before the map has come in: the picture would show the map before it is seen.
     // A map that is a surface (SurfaceView) is read only by snapshots, and only while the camera
     // rests (see snap below); while it moves, the last picture moves with it as above.
-    val glassOn = PerfLab.glass
+    // The battery saver shows the plain fallback: no picture of the map is read back.
+    val glassOn = PerfLab.glass && !BatterySaver.active
     val glassFollows = PerfLab.glassFollows
     val snapshotOn = PerfLab.glassSnapshot
     LaunchedEffect(mapView, backdrop, visible, loading, glassOn, glassFollows, snapshotOn) {
@@ -508,12 +585,13 @@ fun MapBackground(
             glassFollows && backdropCamera.inMotion(SystemClock.uptimeMillis()) &&
                 map?.let { backdropCamera.follow(it, backdrop) } == true
         val corner = DoubleArray(5)
-        suspend fun take() {
+        suspend fun takeTraced() {
             val texture = mapView.textureChild() ?: return
             val readyMap = map
             // Where the camera stands as the map is read: the picture belongs to that place.
             val placed = readyMap != null && readCorner(readyMap, corner)
             if (!capture.update(texture)) return
+            JankMeter.backdropTaken()
             if (placed) backdropCamera.use(corner) else backdropCamera.clear()
             // Taken where the camera stood a moment ago: moved on by what it did meanwhile.
             backdrop.settle()
@@ -522,7 +600,9 @@ fun MapBackground(
         // A snapshot of a map that is a surface: read on the render thread of the map, made
         // small and blurred off the main thread. A picture during which the camera moved is
         // dropped: it belongs to no place any more.
-        suspend fun snap() {
+        // In a system trace both take a section "NS glass backdrop" (see traceAsync).
+        suspend fun take() = traceAsync("NS glass backdrop") { takeTraced() }
+        suspend fun snapTraced() {
             val readyMap = map ?: return
             val width = mapView.width
             val height = mapView.height
@@ -541,10 +621,12 @@ fun MapBackground(
             } finally {
                 picture.recycle()
             }
+            JankMeter.backdropTaken()
             if (placed) backdropCamera.use(corner) else backdropCamera.clear()
             backdrop.settle()
             if (glassFollows) backdropCamera.follow(readyMap, backdrop)
         }
+        suspend fun snap() = traceAsync("NS glass backdrop") { snapTraced() }
         // A map that was drawn before gives its picture at once, also when nothing changes right now.
         if (drawn.get()) changed.trySend(Unit)
         try {
@@ -674,6 +756,15 @@ private suspend fun MapLibreMap.awaitSnapshot(): Bitmap = suspendCancellableCoro
     }
 }
 
+/**
+ * Whether the map is still under its loading ground (the grey logo at the start, the plain
+ * ground of a map that comes back from a rest), see mapStillCovered. Observable: the floating
+ * "centre on me" button shows only once the map does (#165). True before any map is made.
+ */
+internal object MapCover {
+    var covered: Boolean by mutableStateOf(true)
+}
+
 // The map fades in and settles from a slight zoom over this time once its first picture is
 // complete; it comes in at the latest after MAP_SHOW_LATEST (no network).
 private const val MAP_FADE_MILLIS = 520
@@ -712,7 +803,7 @@ private fun MapLoading(entered: () -> Float, animate: Boolean, logo: Boolean) {
         if (logoIn.value == target) return@LaunchedEffect
         if (animate) logoIn.animateTo(target, tween(MAP_LOGO_FADE_MILLIS)) else logoIn.snapTo(target)
     }
-    val breath = if (animate) {
+    val breath = if (animate && !BatterySaver.active) {
         rememberInfiniteTransition(label = "mapLogo").animateFloat(
             initialValue = 0f,
             targetValue = 1f,

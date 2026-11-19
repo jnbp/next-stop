@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r6s2_services_down">Services unreachable</string>
+    <string name="r6s2_check_internet">Check your internet connection</string>
+    <string name="r6s2_try_later">Please try again later</string>
+    <!-- #198: "Langsamer unterwegs" with an own factor. -->
+    <string name="r6s2_pace_off">Off</string>
+    <string name="r6s2_pace_slower">1.3 times</string>
+    <string name="r6s2_pace_own">Own factor</string>
+    <string name="r6s2_pace_own_value">%1$s× – %2$d min become %3$d min</string>
+    <!-- #201: "Anschluss unterwegs wählen" as one setting (off, or how the pickers show). -->
+    <string name="r6s2_off">Off</string>
+    <string name="r6s2_on">On</string>
+    <string name="r6s2_fold_folded">Folded</string>
+    <string name="r6s2_fold_next_picker">Only the next unfolded</string>
+    <string name="r6s2_fold_all">All unfolded</string>
+    <string name="r6s2_fold_next_short">Next only</string>
+    <string name="r6s2_fold_all_short">All</string>
+    <!-- #202: "Minikarte für Fußwege" in three ways. -->
+    <string name="r6s2_fold_next_map">Only the next unfolded</string>
+    <string name="r6s2_fold_next_map_short">Next only</string>
+    <string name="r6s2_walk_maps_title">Mini maps of walks</string>
+    <string name="r6s2_walk_maps_text">Which walks show their small map at once, in the Live-Fahrt and in the connection details.</string>
+    <string name="r6s2_walk_maps_folded_text">Every walk shows its map on a tap on “Show map”.</string>
+    <string name="r6s2_walk_maps_next_text">The map of the next walk unfolds by itself: in the connection details the first walk, in the Live-Fahrt the next walk or change. The others on a tap.</string>
+    <string name="r6s2_walk_maps_all_text">Every walk shows its map at once.</string>
+</resources>

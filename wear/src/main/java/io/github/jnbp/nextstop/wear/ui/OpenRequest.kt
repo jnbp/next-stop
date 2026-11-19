@@ -8,7 +8,7 @@ import io.github.jnbp.nextstop.wear.data.parsePlaceJson
 import io.github.jnbp.nextstop.wear.data.placeJson
 import org.json.JSONObject
 
-/** A page another part of the watch (the ongoing activity, a tile) asks the app to open. */
+/** A page another part of the watch (the ongoing activity, a tile, a complication) asks the app to open. */
 sealed interface OpenRequest {
     /** The followed trip. */
     data object Trip : OpenRequest
@@ -18,6 +18,15 @@ sealed interface OpenRequest {
 
     /** The page to choose the destination of the tile "To a favourite". */
     data object TileTarget : OpenRequest
+
+    /** The departures of [stop] (a complication of departures). */
+    data class Departures(val stop: Place) : OpenRequest
+
+    /** The list of stops nearby (a complication that found no stop yet). */
+    data object Nearby : OpenRequest
+
+    /** The route search, to type or say a destination (the quick start complication). */
+    data object Search : OpenRequest
 
     companion object {
         /** The request of the last intent, taken (set to null) by [WearApp] once it navigated. */
@@ -31,6 +40,9 @@ sealed interface OpenRequest {
             Trip -> mapOf(EXTRA_OPEN to "trip")
             TileTarget -> mapOf(EXTRA_OPEN to "tile-target")
             is Results -> mapOf(EXTRA_OPEN to "results", EXTRA_PLACE to placeJson(request.destination).toString())
+            is Departures -> mapOf(EXTRA_OPEN to "departures", EXTRA_PLACE to placeJson(request.stop).toString())
+            Nearby -> mapOf(EXTRA_OPEN to "nearby")
+            Search -> mapOf(EXTRA_OPEN to "search")
         }
 
         /** An intent of [MainActivity] that opens [request]. */
@@ -48,6 +60,11 @@ sealed interface OpenRequest {
                 "results" -> intent.getStringExtra(EXTRA_PLACE)
                     ?.let { runCatching { parsePlaceJson(JSONObject(it)) }.getOrNull() }
                     ?.let { Results(it) }
+                "departures" -> intent.getStringExtra(EXTRA_PLACE)
+                    ?.let { runCatching { parsePlaceJson(JSONObject(it)) }.getOrNull() }
+                    ?.let { Departures(it) }
+                "nearby" -> Nearby
+                "search" -> Search
                 else -> null
             } ?: return
             pending.value = request

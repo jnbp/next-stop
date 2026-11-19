@@ -11,7 +11,7 @@ import org.junit.Test
 /**
  * One ride over the seam of a journey put together from two: the S25 from S Lichterfelde Ost
  * at 22:12 to S Südkreuz at 22:21 (Gleis 2) as the end of the first part, and the same S25 from
- * S Südkreuz at 22:21 (Gleis 2) to S+U Yorckstr. at 22:24 as the start of the second, then the
+ * S Südkreuz at 22:21 (Gleis 2) to S Ostkreuz at 22:24 as the start of the second, then the
  * U7. The app showed "0 min · Sprint", "Umstiege: 2", the S25 twice in the chart and a picker
  * for connections at a change that is none.
  */
@@ -19,7 +19,7 @@ class ThroughRunSeamTest {
     private fun at(clock: String): OffsetDateTime = OffsetDateTime.parse("2026-11-16T$clock:00+01:00")
     private val lichterfelde = Stop("900068201", "S Lichterfelde Ost", 52.4297, 13.3283, null)
     private val suedkreuz = Stop("900058101", "S Südkreuz", 52.4757, 13.3654, null)
-    private val yorck = Stop("900057102", "S+U Yorckstr.", 52.4920, 13.3700, null)
+    private val ostkreuz = Stop("900120003", "S Ostkreuz", 52.5031, 13.4693, null)
     private val end = Stop("900078101", "U Ziel", 52.48, 13.42, null)
 
     private fun ride(
@@ -44,8 +44,8 @@ class ThroughRunSeamTest {
     )
 
     private val s25a = ride("S25", "suburban", lichterfelde, suedkreuz, "22:12", "22:21", "s25-1", "1", "2")
-    private val s25b = ride("S25", "suburban", suedkreuz, yorck, "22:21", "22:24", "s25-1", "2", "1")
-    private val u7 = ride("U7", "subway", yorck, end, "22:29", "22:37", "u7-1")
+    private val s25b = ride("S25", "suburban", suedkreuz, ostkreuz, "22:21", "22:24", "s25-1", "2", "1")
+    private val u7 = ride("U7", "subway", ostkreuz, end, "22:29", "22:37", "u7-1")
 
     @Test
     fun theSameS25OverThePlaceOnTheWayIsOneRide() {
@@ -56,12 +56,12 @@ class ThroughRunSeamTest {
         assertEquals(1, joined.transfers)
         val s25 = joined.legs[0]
         assertEquals(lichterfelde.name, s25.from)
-        assertEquals(yorck.name, s25.to)
+        assertEquals(ostkreuz.name, s25.to)
         assertEquals(at("22:12"), s25.departure)
         assertEquals(at("22:24"), s25.arrival)
         assertEquals("1", s25.departurePlatform)
         assertEquals("1", s25.arrivalPlatform)
-        assertEquals(listOf(lichterfelde.name, suedkreuz.name, yorck.name), s25.stopovers.map { it.name })
+        assertEquals(listOf(lichterfelde.name, suedkreuz.name, ostkreuz.name), s25.stopovers.map { it.name })
         assertEquals(3, s25.path.size)
         assertTrue(s25.realtime)
         // The seam lies inside the joined ride; the place on the way stays after it.
@@ -74,7 +74,7 @@ class ThroughRunSeamTest {
 
     @Test
     fun aSwappedRestThatGoesOnInTheSameS25IsOneRide() {
-        val followed = Journey(listOf(s25a, ride("S2", "suburban", suedkreuz, yorck, "22:25", "22:28", "s2-1")), refreshToken = "old")
+        val followed = Journey(listOf(s25a, ride("S2", "suburban", suedkreuz, ostkreuz, "22:25", "22:28", "s2-1")), refreshToken = "old")
         val option = Journey(listOf(s25b, u7), refreshToken = "new")
         val spliced = spliceJourney(followed, 1, option)
         assertEquals(listOf("S25", "U7"), spliced.legs.map { it.line })
@@ -85,7 +85,7 @@ class ThroughRunSeamTest {
     @Test
     fun aChangeToTheNextS25StaysAChange() {
         // Another run of the same line twenty minutes later, after a stop on the way.
-        val later = ride("S25", "suburban", suedkreuz, yorck, "22:41", "22:44", "s25-2", "2", "1")
+        val later = ride("S25", "suburban", suedkreuz, ostkreuz, "22:41", "22:44", "s25-2", "2", "1")
         val head = Journey(listOf(s25a), refreshToken = "head")
         val tail = Journey(listOf(later, u7.copy(departure = at("22:49"), arrival = at("22:57"))), refreshToken = "tail")
         val joined = joinedVia(head, tail, Via(suedkreuz, 20))
@@ -98,7 +98,7 @@ class ThroughRunSeamTest {
 
     @Test
     fun anotherRunOfTheLineOnAnotherPlatformStaysAChange() {
-        val other = ride("S25", "suburban", suedkreuz, yorck, "22:22", "22:25", "s25-3", "4", "1")
+        val other = ride("S25", "suburban", suedkreuz, ostkreuz, "22:22", "22:25", "s25-3", "4", "1")
         assertFalse(isThroughRun(s25a, other))
         assertEquals(3, mergeThroughRuns(Journey(listOf(s25a, other, u7))).legs.size)
     }
@@ -115,7 +115,7 @@ class ThroughRunSeamTest {
         assertEquals(listOf("S25", "U7"), again.legs.map { it.line })
         val s25 = again.legs[0]
         // The S25 once: no stop twice, the fresh arrival of the second part.
-        assertEquals(listOf(lichterfelde.name, suedkreuz.name, yorck.name), s25.stopovers.map { it.name })
+        assertEquals(listOf(lichterfelde.name, suedkreuz.name, ostkreuz.name), s25.stopovers.map { it.name })
         assertEquals(at("22:25"), s25.arrival)
         assertEquals(listOf("s25-1"), s25.tripIds)
         assertTrue(again.split!!.tailJoined)
@@ -136,7 +136,7 @@ class ThroughRunSeamTest {
     @Test
     fun aSwapOnBoardIsRefreshedWithTheSecondPartAlone() = runBlocking {
         // On board the S25, an option that goes on in the same vehicle: the kept part has no handle.
-        val followed = Journey(listOf(s25a, ride("S2", "suburban", suedkreuz, yorck, "22:25", "22:28", "s2-1")))
+        val followed = Journey(listOf(s25a, ride("S2", "suburban", suedkreuz, ostkreuz, "22:25", "22:28", "s2-1")))
         val swapped = spliceJourney(followed, 1, Journey(listOf(s25b, u7), refreshToken = "tail"))
         assertTrue(swapped.split!!.tailJoined)
         assertNull(swapped.split!!.headToken)
@@ -154,7 +154,7 @@ class ThroughRunSeamTest {
         assertEquals(listOf("S25", "U7"), again.legs.map { it.line })
         val s25 = again.legs[0]
         assertEquals(lichterfelde.name, s25.from)
-        assertEquals(listOf(lichterfelde.name, suedkreuz.name, yorck.name), s25.stopovers.map { it.name })
+        assertEquals(listOf(lichterfelde.name, suedkreuz.name, ostkreuz.name), s25.stopovers.map { it.name })
         assertEquals(at("22:25"), s25.arrival)
         assertEquals(at("22:39"), again.legs[1].arrival)
         assertTrue(again.split!!.tailJoined)

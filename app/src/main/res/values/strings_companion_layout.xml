@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The companion views of release 0.2: calm (no map), with map, classic (ui/companion). -->
+<resources>
+    <string name="companion_layout_title">Live trip view</string>
+    <string name="companion_layout_text">How the live trip looks during a ride.</string>
+    <string name="companion_layout_auto">Automatic</string>
+    <string name="companion_layout_map">With map</string>
+    <string name="companion_layout_classic">Classic</string>
+    <string name="companion_layout_auto_text">Calm on board and while waiting; on foot the map comes in by itself. The map button wins until the next leg.</string>
+    <string name="companion_layout_map_text">Always the map, the stops in a sheet at the bottom.</string>
+    <string name="companion_layout_classic_text">The view up to now: map with floating cards.</string>
+    <string name="setup_companion_title">During a ride</string>
+    <string name="setup_companion_short">How should the live trip look while you ride? You can change it any time in Settings › Appearance.</string>
+
+    <string name="companion_map_show">Show map</string>
+    <string name="companion_map_hide">Hide map</string>
+    <string name="companion_more">More</string>
+    <string name="companion_change_trip">Change trip</string>
+    <string name="companion_your_exit">Your exit · arr. %1$s</string>
+    <string name="companion_riding_now">You are riding</string>
+    <string name="companion_next_ride">Your next ride</string>
+    <string name="companion_after">After that</string>
+    <string name="companion_later">Later</string>
+    <string name="companion_stops_open">expanded</string>
+    <string name="companion_stops_folded">collapsed</string>
+    <string name="companion_departs_at">dep. %1$s</string>
+    <string name="companion_minutes">%1$d′</string>
+    <string name="companion_wake_at">Alarm %1$s</string>
+    <string name="companion_source_location">By location</string>
+    <string name="companion_source_location_speed">By location · %1$d km/h</string>
+    <string name="companion_source_live">By live data</string>
+    <string name="companion_source_timetable">By timetable</string>
+    <string name="companion_source_standing">Jam · standing for %1$d′</string>
+    <string name="companion_reach_safe">safe · %1$d′</string>
+    <string name="companion_reach_tight">tight · %1$d′</string>
+    <string name="companion_reach_late">too late</string>
+    <string name="companion_then">then %1$s %2$s</string>
+    <string name="companion_walk_show">%1$d′ walk · show</string>
+    <plurals name="companion_more_stops">
+        <item quantity="one">%d more stop</item>
+        <item quantity="other">%d more stops</item>
+    </plurals>
+    <plurals name="companion_stops_left">
+        <item quantity="one">%d stop to go</item>
+        <item quantity="other">%d stops to go</item>
+    </plurals>
+</resources>

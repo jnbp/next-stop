@@ -1,12 +1,12 @@
 package io.github.jnbp.nextstop.wear
 
+import io.github.jnbp.nextstop.data.DiagLog
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
-import android.util.Log
 import com.google.android.gms.wearable.Asset
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
@@ -14,6 +14,7 @@ import java.io.ByteArrayOutputStream
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import io.github.jnbp.nextstop.data.OsmStations
 import io.github.jnbp.nextstop.ui.SnapshotGate
 import io.github.jnbp.nextstop.ui.mapStyleUrl
+import io.github.jnbp.nextstop.ui.mapZoom
 import io.github.jnbp.nextstop.ui.theme.MapStyleChoice
 import org.json.JSONObject
 import org.maplibre.android.MapLibre
@@ -104,7 +106,7 @@ internal object WatchMapImages {
 
     private val release = Runnable {
         warm?.let {
-            Log.i(TAG, "phone: warm snapshotter released after ${WARM_MILLIS / 1000} s unused")
+            DiagLog.i(TAG) { "phone: warm snapshotter released after ${WARM_MILLIS / 1000} s unused" }
             drop(it)
         }
     }
@@ -132,13 +134,13 @@ internal object WatchMapImages {
         val app = context.applicationContext
         val request = Request.parse(String(data))
         if (request == null) {
-            Log.w(TAG, "phone: broken map request (${data.size} bytes)")
+            DiagLog.w(TAG) { "phone: broken map request (${data.size} bytes)" }
             return null
         }
-        Log.i(TAG, "phone: request received key=${request.key} slot=${request.slot} ${request.full.describe()} quick=${request.quick?.describe() ?: "no"} ${processNote()}")
+        DiagLog.i(TAG) { "phone: request received key=${request.key} slot=${request.slot} ${request.full.describe()} quick=${request.quick?.describe() ?: "no"} ${processNote()}" }
         warmUpJob?.let { warming ->
             if (warming.isActive) {
-                Log.i(TAG, "phone: warm-up given up for request key=${request.key}")
+                DiagLog.i(TAG) { "phone: warm-up given up for request key=${request.key}" }
                 warming.cancel()
             }
         }
@@ -157,25 +159,25 @@ internal object WatchMapImages {
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            Log.w(TAG, "phone: station data not loaded: $e")
+                            DiagLog.w(TAG) { "phone: station data not loaded: $e" }
                         }
                         val loaded = System.currentTimeMillis() - received
-                        if (loaded > SLOW_STEP_NOTE_MILLIS) Log.i(TAG, "phone: key=${request.key} station data took $loaded ms")
+                        if (loaded > SLOW_STEP_NOTE_MILLIS) DiagLog.i(TAG) { "phone: key=${request.key} station data took $loaded ms" }
                     }
                     val full = SnapshotGate.lock.withLock {
                         val waited = System.currentTimeMillis() - received
-                        if (waited > SLOW_STEP_NOTE_MILLIS) Log.i(TAG, "phone: key=${request.key} waited $waited ms for the station data and the picture before")
+                        if (waited > SLOW_STEP_NOTE_MILLIS) DiagLog.i(TAG) { "phone: key=${request.key} waited $waited ms for the station data and the picture before" }
                         request.quick?.let { quick ->
                             val cold = !isWarm(quick)
                             val limit = WatchMapBudget.quickMillis(cold, deadline - System.currentTimeMillis())
                             if (limit <= 0) {
-                                Log.i(TAG, "phone: quick picture skipped key=${request.key}: too little time left")
+                                DiagLog.i(TAG) { "phone: quick picture skipped key=${request.key}: too little time left" }
                                 return@let
                             }
                             // One try only: a quick picture that fails is given up for the full one.
                             val drawn = render(app, request.key, quick, System.currentTimeMillis() + limit, attempts = 1, firstTryCold = cold)
                             if (drawn != null) {
-                                Log.i(TAG, "phone: quick picture key=${request.key} ${System.currentTimeMillis() - received} ms after the request")
+                                DiagLog.i(TAG) { "phone: quick picture key=${request.key} ${System.currentTimeMillis() - received} ms after the request" }
                                 // Sent while the full one is drawn.
                                 scope.launch { write(app, request, quick, drawn, quick = true) }
                             }
@@ -184,16 +186,16 @@ internal object WatchMapImages {
                     }
                     val took = System.currentTimeMillis() - received
                     if (full == null) {
-                        Log.w(TAG, "phone: no picture key=${request.key} after $took ms (see the tries above); answering without one")
+                        DiagLog.w(TAG) { "phone: no picture key=${request.key} after $took ms (see the tries above); answering without one" }
                     } else {
-                        Log.i(TAG, "phone: full picture key=${request.key} $took ms after the request, ${full.size} bytes WebP")
+                        DiagLog.i(TAG) { "phone: full picture key=${request.key} $took ms after the request, ${full.size} bytes WebP" }
                     }
                     write(app, request, request.full, full, quick = false)
                 } catch (e: CancellationException) {
-                    Log.i(TAG, "phone: request cancelled key=${request.key} (a newer one of slot ${request.slot})")
+                    DiagLog.i(TAG) { "phone: request cancelled key=${request.key} (a newer one of slot ${request.slot})" }
                     throw e
                 } catch (e: Exception) {
-                    Log.e(TAG, "phone: map image failed key=${request.key}", e)
+                    DiagLog.e(TAG, e) { "phone: map image failed key=${request.key}" }
                 }
             }
             running[request.slot] = job
@@ -232,11 +234,11 @@ internal object WatchMapImages {
         val now = SystemClock.elapsedRealtime()
         val warmNow = view != null && isWarm(view)
         if (!WatchMapBudget.warmUpDue(now, lastWarmUp, warmNow)) {
-            Log.i(TAG, "phone: warm-up skipped (${if (warmNow) "snapshotter warm" else "one ran ${(now - lastWarmUp) / 1000} s ago"})")
+            DiagLog.i(TAG) { "phone: warm-up skipped (${if (warmNow) "snapshotter warm" else "one ran ${(now - lastWarmUp) / 1000} s ago"})" }
             return null
         }
         lastWarmUp = now
-        Log.i(TAG, "phone: warm-up start dark=$dark ratio=$ratio position=${if (view != null) "given" else "none"} ${processNote()}")
+        DiagLog.i(TAG) { "phone: warm-up start dark=$dark ratio=$ratio position=${if (view != null) "given" else "none"} ${processNote()}" }
         val job = scope.launch {
             val started = System.currentTimeMillis()
             try {
@@ -246,7 +248,7 @@ internal object WatchMapImages {
                         if (!mapLibreReady) {
                             MapLibre.getInstance(app)
                             mapLibreReady = true
-                            Log.i(TAG, "phone: warm-up set up MapLibre in ${System.currentTimeMillis() - started} ms")
+                            DiagLog.i(TAG) { "phone: warm-up set up MapLibre in ${System.currentTimeMillis() - started} ms" }
                         }
                     }
                     return@launch
@@ -254,17 +256,17 @@ internal object WatchMapImages {
                 SnapshotGate.lock.withLock {
                     // A request of the watch may have warmed it meanwhile.
                     if (isWarm(view)) {
-                        Log.i(TAG, "phone: warm-up not needed any more")
+                        DiagLog.i(TAG) { "phone: warm-up not needed any more" }
                         return@withLock
                     }
                     val drawn = render(app, WARM_UP_KEY, view, System.currentTimeMillis() + WARM_UP_MILLIS, attempts = 1, firstTryCold = true)
-                    Log.i(TAG, "phone: warm-up ${if (drawn != null) "done" else "failed"} in ${System.currentTimeMillis() - started} ms")
+                    DiagLog.i(TAG) { "phone: warm-up ${if (drawn != null) "done" else "failed"} in ${System.currentTimeMillis() - started} ms" }
                 }
             } catch (e: CancellationException) {
-                Log.i(TAG, "phone: warm-up cancelled after ${System.currentTimeMillis() - started} ms")
+                DiagLog.i(TAG) { "phone: warm-up cancelled after ${System.currentTimeMillis() - started} ms" }
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "phone: warm-up failed: $e")
+                DiagLog.w(TAG) { "phone: warm-up failed: $e" }
             }
         }
         warmUpJob = job
@@ -290,7 +292,8 @@ internal object WatchMapImages {
             fun of(latitude: Double, longitude: Double, zoom: Double, width: Int, height: Int, ratio: Float, dark: Boolean) = View(
                 latitude,
                 longitude,
-                zoom.coerceIn(0.0, 20.0),
+                // NaN passes coerceIn: the zoom of streets instead (#284, see mapZoom).
+                mapZoom(zoom, WATCH_FALLBACK_ZOOM).coerceIn(0.0, 20.0),
                 (width.coerceIn(MIN_SIDE, MAX_SIDE) / ratio).roundToInt().coerceAtLeast(1),
                 (height.coerceIn(MIN_SIDE, MAX_SIDE) / ratio).roundToInt().coerceAtLeast(1),
                 ratio,
@@ -350,7 +353,7 @@ internal object WatchMapImages {
             val cold = firstTryCold || attempt > 1
             val limit = WatchMapBudget.tryMillis(cold, attempt, attempts, until - System.currentTimeMillis())
             if (limit <= 0) {
-                Log.w(TAG, "phone: no time left for try $attempt of $attempts key=$key")
+                DiagLog.w(TAG) { "phone: no time left for try $attempt of $attempts key=$key" }
                 break
             }
             val reason = when (val result = withTimeoutOrNull(limit) { renderOnce(context, key, view) }) {
@@ -358,7 +361,7 @@ internal object WatchMapImages {
                 is Attempt.Failed -> result.reason
                 null -> "no answer from MapLibre within $limit ms (${if (cold) "cold" else "warm"} limit)"
             }
-            Log.w(TAG, "phone: try $attempt of $attempts failed key=$key: $reason")
+            DiagLog.w(TAG) { "phone: try $attempt of $attempts failed key=$key: $reason" }
         }
         return null
     }
@@ -385,21 +388,23 @@ internal object WatchMapImages {
         val bitmap = try {
             WatchMapDetails.drawOnto(base, view.latitude, view.longitude, view.zoom, view.ratio)
         } catch (e: RuntimeException) {
-            Log.w(TAG, "phone: station details not drawn key=$key: $e")
+            DiagLog.w(TAG) { "phone: station details not drawn key=$key: $e" }
             base
         }
         val expectedWidth = (view.logicalWidth * view.ratio).roundToInt()
         val expectedHeight = (view.logicalHeight * view.ratio).roundToInt()
         if (abs(bitmap.width - expectedWidth) > 1 || abs(bitmap.height - expectedHeight) > 1) {
             // The watch stretches it over the area drawn anyway; worth a note when a picture looks odd.
-            Log.w(TAG, "phone: snapshot key=$key is ${bitmap.width}x${bitmap.height}, expected ${expectedWidth}x$expectedHeight")
+            DiagLog.w(TAG) { "phone: snapshot key=$key is ${bitmap.width}x${bitmap.height}, expected ${expectedWidth}x$expectedHeight" }
         }
         ByteArrayOutputStream().use { out ->
-            bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, WEBP_QUALITY, out)
+            // The full picture sharp (streets and labels are fine lines, #149); the quick one stays small.
+            val quick = max(expectedWidth, expectedHeight) <= QUICK_MAX_PIXELS
+            bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, if (quick) WEBP_QUALITY_QUICK else WEBP_QUALITY, out)
             out.toByteArray()
         }
     } catch (e: Exception) {
-        Log.e(TAG, "phone: encoding the snapshot failed key=$key", e)
+        DiagLog.e(TAG, e) { "phone: encoding the snapshot failed key=$key" }
         null
     }
 
@@ -430,7 +435,7 @@ internal object WatchMapImages {
                     val setUp = System.currentTimeMillis()
                     MapLibre.getInstance(context)
                     mapLibreReady = true
-                    Log.i(TAG, "phone: MapLibre set up for key=$key in ${System.currentTimeMillis() - setUp} ms")
+                    DiagLog.i(TAG) { "phone: MapLibre set up for key=$key in ${System.currentTimeMillis() - setUp} ms" }
                 }
                 main.removeCallbacks(release)
                 // The file source (network and tile cache) is shared with the live map of the app,
@@ -466,7 +471,7 @@ internal object WatchMapImages {
                     // Says when the style is in, so a try that times out tells whether it waited for the style or the tiles.
                     created.setObserver(object : MapSnapshotter.Observer {
                         override fun onDidFinishLoadingStyle() {
-                            Log.i(TAG, "phone: style loaded key=$key after ${System.currentTimeMillis() - started} ms")
+                            DiagLog.i(TAG) { "phone: style loaded key=$key after ${System.currentTimeMillis() - started} ms" }
                         }
 
                         override fun onStyleImageMissing(imageName: String) = Unit
@@ -479,7 +484,7 @@ internal object WatchMapImages {
                 used = current
                 val how = if (kept != null) "warm" else "cold"
                 val queued = started - posted
-                Log.i(TAG, "phone: render start key=$key ${view.describe()} ($how) file source ${if (filesActive == false) "was paused" else "active"}, connected=${MapLibre.isConnected()}${if (queued > MAIN_QUEUE_NOTE_MILLIS) ", main thread busy $queued ms before" else ""}")
+                DiagLog.i(TAG) { "phone: render start key=$key ${view.describe()} ($how) file source ${if (filesActive == false) "was paused" else "active"}, connected=${MapLibre.isConnected()}${if (queued > MAIN_QUEUE_NOTE_MILLIS) ", main thread busy $queued ms before" else ""}" }
                 current.snapshotter.start(
                     { snapshot ->
                         // A copy of its own (mutable, for the details drawn on it): encoded off the main thread.
@@ -488,7 +493,7 @@ internal object WatchMapImages {
                         } catch (e: RuntimeException) {
                             null
                         }
-                        Log.i(TAG, "phone: render end key=$key in ${System.currentTimeMillis() - started} ms ($how)")
+                        DiagLog.i(TAG) { "phone: render end key=$key in ${System.currentTimeMillis() - started} ms ($how)" }
                         letGo()
                         main.removeCallbacks(release)
                         main.postDelayed(release, WARM_MILLIS)
@@ -497,7 +502,7 @@ internal object WatchMapImages {
                         }
                     },
                     { error ->
-                        Log.w(TAG, "phone: snapshot failed key=$key ($how) after ${System.currentTimeMillis() - started} ms: $error")
+                        DiagLog.w(TAG) { "phone: snapshot failed key=$key ($how) after ${System.currentTimeMillis() - started} ms: $error" }
                         // A style that did not load is not kept: the next picture starts afresh.
                         drop(current)
                         letGo()
@@ -506,7 +511,7 @@ internal object WatchMapImages {
                 )
             } catch (e: Exception) {
                 // MapLibre not set up in this process, no GL context, a broken style URL, ...
-                Log.e(TAG, "phone: snapshotter failed key=$key", e)
+                DiagLog.e(TAG, e) { "phone: snapshotter failed key=$key" }
                 used?.let { drop(it) }
                 letGo()
                 if (continuation.isActive) continuation.resume(Attempt.Failed(e.toString()))
@@ -518,7 +523,7 @@ internal object WatchMapImages {
                 used?.let {
                     // MapLibre may log "call to OpenGL ES API with no current context" on the
                     // snapshotter's own thread now: it frees its GL objects as it is torn down.
-                    Log.i(TAG, "phone: snapshotter of key=$key given up after ${System.currentTimeMillis() - posted} ms")
+                    DiagLog.i(TAG) { "phone: snapshotter of key=$key given up after ${System.currentTimeMillis() - posted} ms" }
                     drop(it)
                 }
                 letGo()
@@ -541,12 +546,12 @@ internal object WatchMapImages {
         }.asPutDataRequest().setUrgent()
         try {
             val written = Wearable.getDataClient(context).putDataItem(item).await()
-            Log.i(TAG, "phone: answer sent key=${request.key}${if (quick) " (quick)" else ""} uri=${written.uri} picture=${bytes?.size ?: "none"}")
+            DiagLog.i(TAG) { "phone: answer sent key=${request.key}${if (quick) " (quick)" else ""} uri=${written.uri} picture=${bytes?.size ?: "none"}" }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // No Google Play services or no watch: nothing to answer.
-            Log.w(TAG, "phone: sending the answer failed key=${request.key}: $e")
+            DiagLog.w(TAG) { "phone: sending the answer failed key=${request.key}: $e" }
         }
     }
 
@@ -557,6 +562,9 @@ internal object WatchMapImages {
     private const val KEY_LATITUDE = "lat"
     private const val KEY_LONGITUDE = "lon"
     private const val KEY_ZOOM = "zoom"
+
+    // The zoom of a picture whose request has none that is a number (see View.of).
+    private const val WATCH_FALLBACK_ZOOM = 15.0
     private const val KEY_LOGICAL_WIDTH = "lw"
     private const val KEY_LOGICAL_HEIGHT = "lh"
     private const val QUICK_SUFFIX = "-q"
@@ -580,7 +588,11 @@ internal object WatchMapImages {
 
     // The snapshotter stays warm this long after its last picture (a few MB of memory).
     private const val WARM_MILLIS = 3 * 60_000L
-    private const val WEBP_QUALITY = 70
+    // WebP quality of a full picture and of the small quick one (at most QUICK_MAX_PIXELS a side;
+    // the watch asks for 240). 70 smeared the streets and labels of the full picture (#149).
+    private const val WEBP_QUALITY = 90
+    private const val WEBP_QUALITY_QUICK = 70
+    private const val QUICK_MAX_PIXELS = 320
     private const val MIN_SIDE = 16
     private const val MAX_SIDE = 800
     private val SLOT_PATTERN = Regex("[a-z0-9-]{1,24}")

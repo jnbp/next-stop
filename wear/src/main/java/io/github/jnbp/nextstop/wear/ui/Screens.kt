@@ -39,11 +39,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.ScalingLazyListScope
 import androidx.wear.compose.foundation.lazy.items
@@ -51,6 +53,7 @@ import androidx.wear.compose.foundation.lazy.itemsIndexed
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.CompactButton
 import androidx.wear.compose.material3.Card
 import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.ListHeader
@@ -66,6 +69,7 @@ import io.github.jnbp.nextstop.wear.data.BvgClient
 import io.github.jnbp.nextstop.wear.data.BvgException
 import io.github.jnbp.nextstop.wear.data.BvgFailure
 import io.github.jnbp.nextstop.wear.data.CachedDepartures
+import io.github.jnbp.nextstop.wear.data.LoadFailure
 import io.github.jnbp.nextstop.wear.data.ContactUsage
 import io.github.jnbp.nextstop.wear.data.DepartureCache
 import io.github.jnbp.nextstop.wear.data.Journey
@@ -86,7 +90,10 @@ import io.github.jnbp.nextstop.wear.data.currentPosition
 import io.github.jnbp.nextstop.wear.data.hasLocationPermission
 import io.github.jnbp.nextstop.wear.data.locationGrants
 import io.github.jnbp.nextstop.wear.data.listedStopName
+import io.github.jnbp.nextstop.wear.data.shownPlaceName
 import io.github.jnbp.nextstop.wear.data.platformWithoutLine
+import io.github.jnbp.nextstop.wear.data.plausibleWatchPlatform
+import io.github.jnbp.nextstop.wear.data.isBayProduct
 
 private val client = BvgClient()
 
@@ -209,6 +216,8 @@ internal enum class Problem(val text: Int) {
     NoRoutePhoneAway(R.string.problem_no_route_phone),
     NoDepartures(R.string.problem_no_departures_loaded),
     NoDeparturesPhoneAway(R.string.problem_no_departures_phone),
+    ServicesOffline(R.string.r6s2w_services_offline),
+    ServicesDown(R.string.r6s2w_services_down),
 }
 
 /**
@@ -218,6 +227,9 @@ internal enum class Problem(val text: Int) {
 internal fun problemOf(e: Exception, departures: Boolean = false): Problem {
     if (e is RouteUnavailableException) {
         return when {
+            // Nothing reached at all is not "nothing found" (#196).
+            e.failure == LoadFailure.NoNetwork -> Problem.ServicesOffline
+            e.failure == LoadFailure.ServicesDown -> Problem.ServicesDown
             departures && e.phoneReached -> Problem.NoDepartures
             departures -> Problem.NoDeparturesPhoneAway
             e.phoneReached -> Problem.NoRoute
@@ -363,7 +375,7 @@ private fun StopButton(stop: Place, nearest: Boolean, onClick: () -> Unit) {
         interactionSource = press.source,
         colors = if (nearest) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
         // As the start page's header names it: without the town the watch is used in (see stopNameParts).
-        label = { Text(listedStopName(stop.name), maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        label = { WordSafeLabel(listedStopName(stop.name)) },
         secondaryLabel = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 stop.distanceMeters?.let { meters ->
@@ -508,18 +520,24 @@ private fun BoardAction(label: Int, icon: Int, onClick: () -> Unit) {
         interactionSource = press.source,
         colors = brandTonalButtonColors(),
         icon = { Icon(painterResource(icon), contentDescription = null) },
-        label = { Text(stringResource(label), maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        label = { WordSafeLabel(stringResource(label)) },
     )
 }
 
 /**
- * "Gl. 2" for plain numbers; texts such as "Pos. 11" already say what they are. Without the
- * [line] in brackets that some providers add ("1 (U7)"): its badge beside it says it.
+ * "Gl. 2" for plain numbers, "Stg. 13" for a tram or bus of [product]; texts such as "Pos. 11"
+ * already say what they are. Without the [line] in brackets that some providers add ("1 (U7)"):
+ * its badge beside it says it. Null where it is no plausible platform (see plausibleWatchPlatform).
  */
 @Composable
-internal fun platformText(platform: String?, line: String? = null): String? {
-    val shown = platformWithoutLine(platform, line) ?: return null
-    return if (shown.first().isDigit()) stringResource(R.string.platform, shown) else shown
+internal fun platformText(platform: String?, line: String? = null, product: String? = null): String? {
+    val (shown, numbered) = plausibleWatchPlatform(platformWithoutLine(platform, line), product) ?: return null
+    return when {
+        !numbered -> shown
+        isBayProduct(product) -> stringResource(R.string.platform_bay, shown)
+        shown.first().isDigit() -> stringResource(R.string.platform, shown)
+        else -> shown
+    }
 }
 
 /**
@@ -573,7 +591,7 @@ fun RouteScreen(
     ScreenScaffold(scrollState = listState) { contentPadding ->
         ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
             item { ListHeader { Text(stringResource(R.string.destination)) } }
-            if (origin != null) item { Note(stringResource(R.string.from_place, origin.name)) }
+            if (origin != null) item { Note(stringResource(R.string.from_place, shownPlaceName(origin))) }
             // Shown whenever the phone does not answer, even with places cached from earlier.
             phoneNoteItems(
                 phone,
@@ -603,7 +621,7 @@ fun RouteScreen(
                             onClick = { onDestination(place) },
                             modifier = Modifier.fillMaxWidth().then(press3.modifier),
                             interactionSource = press3.source,
-                            label = { Text(if (place.kind == PlaceKind.Stop) listedStopName(place.name) else place.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                            label = { WordSafeLabel(shownPlaceName(place)) },
                         )
                     }
                 }
@@ -804,7 +822,7 @@ private fun upcoming(list: List<SyncedAppointment>): List<SyncedAppointment> =
  * case until the phone takes it over ([LocalFollow.startEverywhere]); [onStarted] opens it.
  */
 @Composable
-fun ResultsScreen(origin: Place? = null, destination: Place?, onStarted: () -> Unit) {
+fun ResultsScreen(origin: Place? = null, destination: Place?, onStarted: () -> Unit, onDetails: (Journey) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<Load<List<Journey>>>(Load.Loading) }
@@ -856,10 +874,10 @@ fun ResultsScreen(origin: Place? = null, destination: Place?, onStarted: () -> U
         ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize().fadeUnderTimeText(contentPadding.calculateTopPadding()).crownFocus()) {
             item {
                 ListHeader {
-                    Text(destination?.name ?: stringResource(R.string.results), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(destination?.let { shownPlaceName(it) } ?: stringResource(R.string.results), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (origin != null) item { Note(stringResource(R.string.from_place, origin.name)) }
+            if (origin != null) item { Note(stringResource(R.string.from_place, shownPlaceName(origin))) }
             item { ComfortChip(comfort, onClick = { WatchStore.chooseComfort(context, comfort.next()) }) }
             when (val current = state) {
                 Load.Loading -> item { LoadingNote(stringResource(R.string.loading)) }
@@ -883,11 +901,10 @@ fun ResultsScreen(origin: Place? = null, destination: Place?, onStarted: () -> U
                         JourneyCard(
                             journey = journey,
                             onStart = {
-                                LocalFollow.startEverywhere(context, journey, destination)
-                                // The lines of this connection become the usual way there (the start page shows them).
-                                destination?.let { UsualLines.record(context, it, journey) }
+                                startJourney(context, journey, destination)
                                 onStarted()
                             },
+                            onDetails = { onDetails(journey) },
                         )
                     }
                 }
@@ -896,10 +913,52 @@ fun ResultsScreen(origin: Place? = null, destination: Place?, onStarted: () -> U
     }
 }
 
-/** The change time of the search as a small chip; a tap switches to the next level and searches again. */
+/**
+ * Follows [journey] to [destination]: on the phone when it is reachable and on the watch in any
+ * case until the phone takes it over ([LocalFollow.startEverywhere]). The lines of the journey
+ * become the usual way there (the start page shows them).
+ */
+fun startJourney(context: Context, journey: Journey, destination: Place?) {
+    LocalFollow.startEverywhere(context, journey, destination)
+    destination?.let { UsualLines.record(context, it, journey) }
+}
+
+/**
+ * The change time of the search as a small chip of one line in the colour of its level (#178:
+ * not a full-width button, it is a setting, not the action of the page); a tap switches to the
+ * next level and searches again. The pill is slim, its touch target the 48 dp of a Wear button.
+ */
 @Composable
 private fun ComfortChip(comfort: TransferComfort, onClick: () -> Unit) {
-    SmallAction(stringResource(R.string.comfort_chip, stringResource(comfortLabel(comfort))), onClick = onClick)
+    val press = rememberWatchPress()
+    val tone = comfortColor(comfort) ?: MaterialTheme.colorScheme.onSurface
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        CompactButton(
+            onClick = onClick,
+            modifier = press.modifier,
+            interactionSource = press.source,
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = tone,
+            ),
+            label = {
+                Text(
+                    stringResource(R.string.comfort_chip, stringResource(comfortLabel(comfort))),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+        )
+    }
+}
+
+// The colours of the levels as the rating of a change on the trip pages; null for the neutral "normal".
+private fun comfortColor(comfort: TransferComfort): Color? = when (comfort) {
+    TransferComfort.Relaxed -> Color(0xFF81C784)
+    TransferComfort.Normal -> null
+    TransferComfort.Risky -> Color(0xFFFFB300)
+    TransferComfort.VeryRisky -> Color(0xFFE57373)
 }
 
 private fun comfortLabel(comfort: TransferComfort): Int = when (comfort) {
@@ -909,24 +968,31 @@ private fun comfortLabel(comfort: TransferComfort): Int = when (comfort) {
     TransferComfort.VeryRisky -> R.string.comfort_very_risky
 }
 
-/** One journey, compact: departure in minutes and by the clock, the lines, changes, and one "Start". */
+/**
+ * One journey, compact: departure in minutes and by the clock, the lines, changes, and two
+ * small buttons side by side (#174): "Details" (outlined) opens its overview, start (filled,
+ * the brand blue, the play icon only) follows it. A tap anywhere else on the card opens the overview too; it never
+ * starts the trip. The pills are slim, their touch targets the 48 dp of Wear.
+ */
 @Composable
-private fun JourneyCard(journey: Journey, onStart: () -> Unit) {
+private fun JourneyCard(journey: Journey, onStart: () -> Unit, onDetails: () -> Unit) {
     val cardPress = rememberWatchPress()
-    Card(onClick = onStart, modifier = Modifier.fillMaxWidth().then(cardPress.modifier), interactionSource = cardPress.source) {
+    Card(onClick = onDetails, modifier = Modifier.fillMaxWidth().then(cardPress.modifier), interactionSource = cardPress.source) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(minutesLabel(journey.departure), style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.width(6.dp))
+            // The times as the phone's delay setting says (#227b).
+            val muted = MaterialTheme.colorScheme.onSurfaceVariant
             Text(
-                "${clock(journey.departure)}–${clock(journey.arrival)}",
+                shownTimesText("\u0000–\u0001", rememberDelayDisplay(), journeyTimes(journey), muted, muted),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = muted,
             )
         }
         Spacer(Modifier.height(2.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             journey.rides.take(4).forEach { ride ->
-                LineBadge(ride.line, ride.product)
+                LineBadge(ride.line, ride.product, color = ride.color)
                 Spacer(Modifier.width(3.dp))
             }
         }
@@ -935,13 +1001,29 @@ private fun JourneyCard(journey: Journey, onStart: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(4.dp))
-        SmallAction(
-            text = stringResource(R.string.start),
-            onClick = onStart,
-            icon = R.drawable.ic_play,
-            primary = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            val detailsPress = rememberWatchPress()
+            CompactButton(
+                onClick = onDetails,
+                modifier = Modifier.weight(1f).then(detailsPress.modifier),
+                interactionSource = detailsPress.source,
+                colors = ButtonDefaults.outlinedButtonColors(),
+                border = ButtonDefaults.outlinedButtonBorder(enabled = true),
+                // 12 sp: half the row still holds "Details" on the smallest round screen (#283).
+                label = { Text(stringResource(R.string.r6w2_details), fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
+            )
+            // Only the play icon (its label did not fit beside "Details" on a small round screen and
+            // showed as an ellipsis), read out as "Start". Both buttons share the row half and
+            // half (#283).
+            val startPress = rememberWatchPress()
+            val startLabel = stringResource(R.string.start)
+            CompactButton(
+                onClick = onStart,
+                modifier = Modifier.weight(1f).then(startPress.modifier),
+                interactionSource = startPress.source,
+                colors = brandButtonColors(),
+                icon = { Icon(painterResource(R.drawable.ic_play), contentDescription = startLabel) },
+            )
+        }
     }
 }

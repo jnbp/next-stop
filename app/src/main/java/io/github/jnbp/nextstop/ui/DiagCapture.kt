@@ -18,6 +18,7 @@ import io.github.jnbp.nextstop.data.AppLanguage
 import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.data.BuiltInKeys
 import io.github.jnbp.nextstop.data.DiagLog
+import io.github.jnbp.nextstop.data.DiagRing
 import io.github.jnbp.nextstop.data.DiagRedaction
 import io.github.jnbp.nextstop.data.DiagReportInput
 import io.github.jnbp.nextstop.data.DiagSink
@@ -205,7 +206,8 @@ object DiagCapture {
     // The log of earlier processes followed by this one, at most DiagLog.CAPACITY lines; under persistLock.
     private fun allLines(context: Context): List<String> {
         val before = carried ?: try {
-            File(context.cacheDir, RING_FILE).takeIf { it.isFile }?.readLines()?.takeLast(DiagLog.CAPACITY).orEmpty()
+            File(context.cacheDir, RING_FILE).takeIf { it.isFile }?.readLines()
+                ?.let { lines -> DiagRing.entriesOf(lines) }?.takeLast(DiagLog.CAPACITY).orEmpty()
         } catch (e: IOException) {
             emptyList()
         }.also { carried = it }

@@ -22,13 +22,12 @@
     <string name="settings_live_page">Live page</string>
     <string name="setup_restart_short">Colours, view, changes and notifications, step by step with previews.</string>
     <!-- The setup: sprint note, vehicles on the track, the two "faster" features. -->
-    <string name="setup_sprint_note">Sprint (0–1 min): only by running or with luck – often unrealistic.</string>
+    <string name="setup_sprint_note">Sprint (0–1′): only by running or with luck – often unrealistic.</string>
     <string name="setup_tag_remembered">Setting, for every trip</string>
     <string name="setup_tag_per_trip">Per trip, switched on in a connection</string>
     <string name="setup_shortcut_short">While you follow a trip, the app alerts you when something changed since your choice, for example a faster way.</string>
     <string name="setup_shortcut_when">When</string>
     <string name="setup_shortcut_when_text">Only when needed: when you switch it on for a trip, or with “Every minute counts”. Always on: for every trip.</string>
-    <string name="setup_every_minute_short">Switch it on for one trip in a connection: it turns on sprint changes and the shortcut alert for that trip.</string>
     <string name="setup_level_relaxed">Relaxed: plenty of buffer, stroll.</string>
     <string name="setup_level_normal">Normal: normal walking pace.</string>
     <string name="setup_level_risky">Tight: brisk walking.</string>

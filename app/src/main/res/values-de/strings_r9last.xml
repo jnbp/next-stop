@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #277b: die Farblegende unter einer Verbindung, jedes Wort nach einer Beispielzeit in ihrer Farbe. -->
+    <string name="r9last_legend_planned">Fahrplan</string>
+    <string name="r9last_legend_on_time">pünktlich</string>
+    <string name="r9last_legend_late">verspätet</string>
+    <string name="r9last_legend_estimated">geschätzt, z. B. aus deinem Standort</string>
+    <!-- #277b: woher die Echtzeit der Verbindung kommt, nach „Daten: …“. -->
+    <string name="r9last_live_from">Echtzeit: %1$s</string>
+    <string name="r9last_live_estimate">Schätzung der App</string>
+</resources>

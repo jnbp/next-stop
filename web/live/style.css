@@ -53,11 +53,12 @@ h1 { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.25; letter-spa
   display: flex; flex-direction: column; gap: 10px;
 }
 .sheet.open .sheet-body { overflow-y: auto; }
-.grabber { display: flex; justify-content: center; padding: 10px 0 8px; flex: none; touch-action: none; cursor: grab; }
+.grabber { display: flex; justify-content: center; align-items: center; min-height: 44px; padding: 14px 0 12px; width: 100%; flex: none; touch-action: none; cursor: grab; }
 .grabber i { width: 44px; height: 5px; border-radius: 3px; background: var(--faint); }
 .grabber:focus-visible { outline: 2px solid var(--blue); outline-offset: -4px; border-radius: 12px; }
-.hero { touch-action: none; }
-.sheet.open .hero { touch-action: pan-y; }
+/* The hero is part of the sheet's head (#262): the page, not the browser, handles a drag on it, also on the
+   open sheet, so a pull down there always moves the sheet (a push up scrolls its content, see sheetDragMode). */
+.hero { touch-action: none; cursor: grab; }
 
 @media (min-width: 900px) {
   .panel { inset: 16px 16px 16px auto; width: 420px; display: flex; flex-direction: column; gap: 12px; }
@@ -69,7 +70,7 @@ h1 { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.25; letter-spa
   }
   .grabber { display: none; }
   .sheet-body { overflow-y: auto; padding: 0 2px 8px; scrollbar-width: thin; }
-  .hero { touch-action: auto; }
+  .hero { touch-action: auto; cursor: auto; }
   .maplibregl-ctrl-bottom-right { bottom: 0; right: 452px; }
 }
 

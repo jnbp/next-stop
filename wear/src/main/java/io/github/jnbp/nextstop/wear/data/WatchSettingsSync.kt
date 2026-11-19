@@ -38,6 +38,24 @@ object WatchSettingKeys {
 
     /** The destination of the tile "To a favourite": a place as JSON (placeJson), "" for none chosen. */
     const val TILE_TARGET = "tileTarget"
+
+    /**
+     * "true"/"false": the watch opens the trip companion by itself when a trip is started on the
+     * phone while the watch app is closed (default off; see CompanionAutoOpen).
+     */
+    const val OPEN_COMPANION = "openCompanion"
+
+    /**
+     * "true"/"false": the complications show the icon of the trip's state (waiting, vehicle,
+     * walking ...) in place of the app's icon during a trip (default off, #253).
+     */
+    const val STATE_ICONS = "complicationStateIcons"
+
+    /**
+     * "true"/"false": the crown on the overview of the live trip shows the pill of the time
+     * travel (the time and buffer of the row in the middle; default off, #254).
+     */
+    const val CROWN_TIME_TRAVEL = "crownTimeTravel"
 }
 
 /** The version of the settings item; a reader takes every version and keeps what it does not know. */

@@ -95,7 +95,11 @@ fun parseJourneysJson(list: JSONArray?): List<Journey> {
  * of the phone, or missing) and "legs", each with "line", "product", "walk", "from", "to",
  * "dep" and "arr" (epoch ms), "depDelay" and "arrDelay" (minutes), "platform", "arrPlatform",
  * "dir", "cancelled", "stops" (arrival times in epoch ms after boarding) and the positions
- * "fromLat", "fromLon", "toLat", "toLon". Null without a leg that can be read.
+ * "fromLat", "fromLon", "toLat", "toLon", and on a ride after a change "rating" (a name of
+ * [ChangeRating], the phone's rating of that change); on a ride where to board it, "boardHint",
+ * "boardPart" and "boardEstimated" (see [Leg.boardHint]); on a ride "color" (see [Leg.color]);
+ * "fromShown", "toShown", "dirShown" where the phone names them otherwise (see [Leg.fromShown]).
+ * Null without a leg that can be read.
  */
 fun parseJourneyJson(item: JSONObject): Journey? {
     val list = item.optJSONArray("legs") ?: return null
@@ -123,6 +127,7 @@ private fun parseLegJson(item: JSONObject): Leg? {
         arrival = arrival,
         departureDelayMinutes = item.optInt("depDelay", 0),
         arrivalDelayMinutes = item.optInt("arrDelay", 0),
+        realtime = item.optBoolean("realtime", false),
         platform = item.textOrNull("platform"),
         direction = item.textOrNull("dir"),
         cancelled = item.optBoolean("cancelled", false),
@@ -131,12 +136,22 @@ private fun parseLegJson(item: JSONObject): Leg? {
         fromPosition = item.position("fromLat", "fromLon"),
         toPosition = item.position("toLat", "toLon"),
         inStation = item.optBoolean("inStation", false),
+        changeRating = ChangeRating.parse(item.textOrNull("rating")),
+        boardHint = item.textOrNull("boardHint"),
+        boardPart = item.optInt("boardPart", -1).takeIf { it in 0..2 } ?: -1,
+        boardEstimated = item.optBoolean("boardEstimated", false),
+        color = lineColorOf(item),
+        fromShown = item.textOrNull("fromShown"),
+        toShown = item.textOrNull("toShown"),
+        directionShown = item.textOrNull("dirShown"),
+        changeWalkMinutes = if (item.has("changeWalk")) item.optInt("changeWalk").coerceAtLeast(0) else null,
     )
 }
 
 /**
  * The departures of an answer of the phone ("departures"): "line", "product", "dir", "time"
- * and "planned" (epoch ms), "delay" (minutes), "platform", "cancelled", "additional", "replaces".
+ * and "planned" (epoch ms), "delay" (minutes), "platform", "cancelled", "additional", "replaces",
+ * "color" (the line's colour as the phone works it out, ARGB).
  */
 fun parseDeparturesJson(list: JSONArray?): List<Departure> {
     if (list == null) return emptyList()
@@ -146,7 +161,8 @@ fun parseDeparturesJson(list: JSONArray?): List<Departure> {
         Departure(
             line = rapidLineName(item.textOrNull("line"), product) ?: "?",
             product = product,
-            direction = item.optString("dir", ""),
+            // The direction as the phone's board names it ("dirShown"), else as the provider sent it.
+            direction = item.textOrNull("dirShown") ?: item.optString("dir", ""),
             time = item.millisOrNull("time"),
             delayMinutes = if (item.has("delay") && !item.isNull("delay")) item.optInt("delay") else null,
             platform = item.textOrNull("platform"),
@@ -154,6 +170,7 @@ fun parseDeparturesJson(list: JSONArray?): List<Departure> {
             plannedTime = item.millisOrNull("planned"),
             additional = item.optBoolean("additional", false),
             replaces = item.textOrNull("replaces"),
+            color = lineColorOf(item),
         )
     }
 }

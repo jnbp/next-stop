@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #243: the two toggle chips under a change and the mark of another way in the shared row -->
+    <string name="r8ui_chip_connection">Anschluss</string>
+    <string name="r8ui_chip_ways">Andere Wege</string>
+    <string name="r8ui_way_tile">Anderer Weg</string>
+</resources>

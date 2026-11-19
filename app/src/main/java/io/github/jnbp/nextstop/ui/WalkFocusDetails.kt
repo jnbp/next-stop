@@ -23,13 +23,17 @@ import org.maplibre.android.maps.MapLibreMap
  * placed anew whenever the camera moved.
  */
 
-/** The details of a walk ([details], see walkDetails) over [map]; [brokenLifts] in red. */
+/**
+ * The details of a walk ([details], see walkDetails) over [map]; [brokenLifts] in red. A walk
+ * that ends at the destination's badge ([badgeAt]) moves its signs off the badge (#181c).
+ */
 @Composable
 fun WalkDetailsOverlay(
     map: MapLibreMap,
     cameraTick: () -> Int,
     details: WalkDetails,
     brokenLifts: List<Pair<Double, Double>> = emptyList(),
+    badgeAt: Pair<Double, Double>? = null,
 ) {
     if (details.isEmpty) return
     val accent = AppColors.Blue.toArgb()
@@ -41,6 +45,7 @@ fun WalkDetailsOverlay(
     Canvas(modifier = Modifier.fillMaxSize()) {
         // Read so the marks are placed anew when the camera moved.
         cameraTick()
+        if (!MapAlive.alive(map)) return@Canvas
         val pixel: (Pair<Double, Double>) -> Pair<Float, Float> = { point ->
             val at = map.projection.toScreenLocation(LatLng(point.first, point.second))
             at.x to at.y
@@ -48,7 +53,7 @@ fun WalkDetailsOverlay(
         drawIntoCanvas { canvas ->
             val native = canvas.nativeCanvas
             drawWalkUnder(native, details, density, skip = pins.map { it.point }, pixel = pixel)
-            drawWalkOver(native, details, brokenLifts, density, pins, pixel = pixel)
+            drawWalkOver(native, details, brokenLifts, density, pins, badge = badgeAt, badgeRadiusDp = DESTINATION_BADGE_RADIUS_DP, pixel = pixel)
         }
     }
 }

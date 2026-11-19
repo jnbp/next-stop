@@ -37,8 +37,9 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 
 // One run of the little train across its track, in milliseconds, as on the phone (Delight.kt
-// there): a calm pass, slower than a quick dash (2.0 s at an even speed went by too fast).
-private const val TRAIN_RUN_MILLIS = 3_400
+// there): a calm pass, slower than a quick dash (2.0 s at an even speed went by too fast,
+// 3.4 s a little slow).
+private const val TRAIN_RUN_MILLIS = 2_700
 
 // As on the phone: quick while hidden, slowing as it comes in so its front is in sight for a
 // good moment, a calm steady middle, then speeding up as it leaves. A cubic around the middle:

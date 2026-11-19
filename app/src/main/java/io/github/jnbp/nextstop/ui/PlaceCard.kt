@@ -50,6 +50,7 @@ import kotlin.math.ceil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.github.jnbp.nextstop.R
+import io.github.jnbp.nextstop.data.WALK_DETOUR
 import io.github.jnbp.nextstop.data.Stop
 import io.github.jnbp.nextstop.data.germanStreetOrder
 import io.github.jnbp.nextstop.data.shortStopName
@@ -91,9 +92,8 @@ suspend fun reverseGeocode(context: Context, latitude: Double, longitude: Double
         }
     }
 
-// The pace of a walk, in metres per minute, and how much longer the way on the streets is than the straight line.
+// The pace of a walk, in metres per minute; how much longer the way on the streets is than the straight line is WALK_DETOUR.
 private const val WALK_METERS_PER_MINUTE = 80.0
-private const val WALK_DETOUR = 1.25
 
 /**
  * The card of a place marked on the map, at the bottom like the card of a stop: its name, its
@@ -431,8 +431,7 @@ fun openInMaps(context: Context, position: Pair<Double, Double>) {
 }
 
 /**
- * A duration for people (a journey, a ride): "48 min" below an hour, "2 h 23 min" ("2 Std 23 min")
- * and "2 h" from it, never one big number of minutes (see [durationSpan]).
+ * A duration for people (a journey, a ride): "48′" below an hour, "2:23 h" and "2:00 h" from it, never one big number of minutes (see [durationSpan]).
  */
 @Composable
 fun durationLabel(minutes: Long): String {
@@ -454,7 +453,7 @@ fun durationText(context: Context, minutes: Long): String {
     }
 }
 
-/** A time on foot for people: "12 min" below an hour, "1 h 10 min" ("1 Std 10 min") from it (see walkSpan). */
+/** A time on foot for people: "12′" below an hour, "1:10 h" from it (see walkSpan). */
 @Composable
 fun walkDurationLabel(minutes: Long): String {
     val (hours, rest) = walkSpan(minutes)

@@ -11,6 +11,9 @@
     <!-- TripService: keeps a trip the watch follows itself alive, shown as an ongoing activity. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Over the watch face: the wake-up alarm of the phone (WakeRing) and, where used, the
+         companion opened when the phone starts a trip. Declared once for both. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- The input of Wear OS (keyboard and voice) and speech recognition for a typed or spoken destination. -->
     <queries>
@@ -48,6 +51,16 @@
             </intent-filter>
         </activity>
 
+        <!-- The wake-up alarm of the phone: "Ich bin wach" (see data/WakeRing.kt). -->
+        <activity
+            android:name="io.github.jnbp.nextstop.wear.ui.WakeAlarmActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:turnScreenOn="true" />
+
         <!-- What the phone writes over the Data Layer: favourites and the followed trip. -->
         <service
             android:name="io.github.jnbp.nextstop.wear.data.WatchDataService"
@@ -57,6 +70,23 @@
                 <data
                     android:host="*"
                     android:pathPrefix="/nextstop"
+                    android:scheme="wear" />
+            </intent-filter>
+            <!-- The test of the phone's developer options: open the companion (Protocol.MSG_COMPANION_TEST).
+                 Only this path: the answers to the app's own requests go to its listeners while it is open. -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:path="/nextstop/companion-test"
+                    android:scheme="wear" />
+            </intent-filter>
+            <!-- The phone with Next Stop came back in reach: a trip shown is asked for again (only then). -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CAPABILITY_CHANGED" />
+                <data
+                    android:host="*"
+                    android:pathPrefix="/nextstop_phone"
                     android:scheme="wear" />
             </intent-filter>
         </service>
@@ -100,6 +130,12 @@
                 android:resource="@drawable/tile_preview" />
         </service>
 
+        <!--
+            Complications (complication/Complications.kt). None polls: each shows a timeline that
+            moves on by itself and is pushed by the trip, the places and the nearest stop; the
+            periods below are the system's safety net (0: never). ICON is MONOCHROMATIC_IMAGE.
+        -->
+        <!-- Automatic: departures nearby, the companion while a trip runs (the class name of 0.1). -->
         <service
             android:name="io.github.jnbp.nextstop.wear.complication.NextComplicationService"
             android:exported="true"
@@ -111,10 +147,118 @@
             </intent-filter>
             <meta-data
                 android:name="android.support.wearable.complications.SUPPORTED_TYPES"
-                android:value="SHORT_TEXT" />
+                android:value="SHORT_TEXT,RANGED_VALUE,LONG_TEXT" />
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
-                android:value="300" />
+                android:value="600" />
+        </service>
+
+        <!-- The next departures at the favourite stop. -->
+        <service
+            android:name="io.github.jnbp.nextstop.wear.complication.FavoriteStopComplicationService"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher_monochrome"
+            android:label="@string/complication_favorite_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT,LONG_TEXT" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="600" />
+        </service>
+
+        <!-- The next departures at the nearest stop. -->
+        <service
+            android:name="io.github.jnbp.nextstop.wear.complication.NearbyComplicationService"
+            android:exported="true"
+            android:icon="@drawable/ic_place"
+            android:label="@string/nearby_departures"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT,LONG_TEXT" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="600" />
+        </service>
+
+        <!-- The ring of the running trip; pushed with every state of the trip. -->
+        <service
+            android:name="io.github.jnbp.nextstop.wear.complication.CompanionComplicationService"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher_monochrome"
+            android:label="@string/complication_companion_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="RANGED_VALUE,SHORT_TEXT,LONG_TEXT" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="900" />
+        </service>
+
+        <!-- The next connection home (a journey search: rarer). -->
+        <service
+            android:name="io.github.jnbp.nextstop.wear.complication.HomeComplicationService"
+            android:exported="true"
+            android:icon="@drawable/ic_home"
+            android:label="@string/complication_home_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT,LONG_TEXT" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="900" />
+        </service>
+
+        <!-- Disruptions at the favourite (else the nearest) stop. -->
+        <service
+            android:name="io.github.jnbp.nextstop.wear.complication.DisruptionsComplicationService"
+            android:exported="true"
+            android:icon="@drawable/ic_warning"
+            android:label="@string/complication_disruptions_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT,LONG_TEXT,ICON" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="900" />
+        </service>
+
+        <!-- Opens the route search; nothing to update. -->
+        <service
+            android:name="io.github.jnbp.nextstop.wear.complication.QuickStartComplicationService"
+            android:exported="true"
+            android:icon="@drawable/ic_route"
+            android:label="@string/complication_quick_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SMALL_IMAGE,ICON,SHORT_TEXT" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="0" />
         </service>
     </application>
 

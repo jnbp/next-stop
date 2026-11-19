@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings › On the way: reset the travel statistics of "My ways" (#135). -->
+    <string name="r6_stats_group">Statistics</string>
+    <string name="r6_stats_reset_title">Reset statistics</string>
+    <string name="r6_stats_reset_text">Forgets the recorded trips behind the statistics in My ways.</string>
+    <string name="r6_stats_reset_confirm">Forget all recorded trips? The statistics start again from zero. This cannot be undone.</string>
+    <string name="r6_stats_reset_yes">Reset</string>
+    <!-- The menu of a stop (#139): keep it as a favourite stop, or let it go. -->
+    <string name="r6_stop_favorite_add">Favourite stop</string>
+    <string name="r6_stop_favorite_remove">No longer a favourite stop</string>
+    <!-- The first row of the list of connections: loads earlier ones (#150). -->
+    <string name="r6_list_earlier">Earlier connections</string>
+    <!-- Google Maps on the last way of a trip (#143). -->
+    <string name="r6_handoff_title">Google Maps takes over</string>
+    <string name="r6_handoff_text">Google Maps guides you the rest of the way. The live trip can end now or keep running until you arrive.</string>
+    <string name="r6_handoff_open">Open Google Maps</string>
+    <string name="r6_handoff_open_end">Open Google Maps and end the trip</string>
+    <string name="r6_handoff_remember">Remember my choice</string>
+    <string name="r6_handoff_setting_title">Google Maps at the end of a trip</string>
+    <string name="r6_handoff_setting_text">What the Google Maps button does on the last way of a trip. On the other ways it opens Google Maps directly.</string>
+    <string name="r6_handoff_ask">Ask every time</string>
+</resources>

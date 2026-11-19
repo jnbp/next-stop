@@ -17,6 +17,7 @@ import androidx.glance.LocalContext
 import androidx.glance.action.Action
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.LinearProgressIndicator
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.appWidgetBackground
 import androidx.glance.appwidget.cornerRadius
@@ -63,6 +64,7 @@ import io.github.jnbp.nextstop.ui.rideAfter
 import io.github.jnbp.nextstop.ui.shortLine
 import io.github.jnbp.nextstop.ui.badgeLine
 import io.github.jnbp.nextstop.ui.stepDelay
+import io.github.jnbp.nextstop.ui.stepPlannedTime
 import io.github.jnbp.nextstop.ui.tripStep
 import io.github.jnbp.nextstop.ui.theme.AppPalette
 import io.github.jnbp.nextstop.ui.theme.ColorChoice
@@ -314,6 +316,21 @@ internal fun favoriteTitle(context: Context, label: String?, icon: PlaceIcon?): 
     else -> context.getString(R.string.widget_to_favorite)
 }
 
+/** The sign of "load anew" on a widget. */
+internal const val REFRESH_MARK = "\u21BB"
+
+/** A tappable ↻ that loads all widgets anew (see WidgetRefreshAction); plain in the picker's preview. */
+@Composable
+internal fun RefreshMark(colors: WidgetColors) {
+    val tappable = !LocalWidgetPreview.current
+    Label(
+        REFRESH_MARK,
+        colors.muted,
+        size = 13.sp,
+        modifier = if (tappable) GlanceModifier.clickable(actionRunCallback<WidgetRefreshAction>()).padding(horizontal = 6.dp) else GlanceModifier,
+    )
+}
+
 /** Opens the departures of a stop in the app. */
 internal fun openStopAction(context: Context, board: StopBoard?): Action {
     val intent = Intent(context, MainActivity::class.java)
@@ -421,7 +438,16 @@ internal fun DeparturesBody(
                     bold = true,
                     modifier = GlanceModifier.defaultWeight(),
                 )
-                Label(positionNote(context, positionAt, now) ?: clockOf(now), colors.muted, size = 11.sp)
+                // A tap on the time (with ↻) loads all widgets anew: the way to fresh data
+                // without opening the app (and the only one at "Extrem", see WidgetUpdates).
+                val stamp = REFRESH_MARK + " " + (positionNote(context, positionAt, now) ?: clockOf(now))
+                val tappable = !LocalWidgetPreview.current
+                Label(
+                    stamp,
+                    colors.muted,
+                    size = 11.sp,
+                    modifier = if (tappable) GlanceModifier.clickable(actionRunCallback<WidgetRefreshAction>()).padding(start = 6.dp) else GlanceModifier,
+                )
             }
         }
         val shown = board?.departures
@@ -455,13 +481,24 @@ internal fun DeparturesBody(
                 } else {
                     // As the delay setting says (see DelayDisplay): "+2" or not, expected or timetable time.
                     val display = AppPrefs(context).delayDisplay
-                    if (departure.delayMinutes > 0 && display != DelayDisplay.RealtimeOnly) {
+                    val struck = display == DelayDisplay.StruckPlanned
+                    val planned = departure.plannedTime
+                    if (struck && departure.delayMinutes > 0 && planned != null) {
+                        // Takt style: the timetable time struck through, the new one beside it (below, when wide).
+                        Label(clockOf(planned), colors.muted, size = 11.sp, strike = true)
+                        Gap(width = 4.dp)
+                        if (!wide) departure.leaves?.let {
+                            Label(clockOf(it), colors.delay, size = 11.sp, bold = true)
+                            Gap(width = 6.dp)
+                        }
+                    } else if (departure.delayMinutes > 0 && display != DelayDisplay.RealtimeOnly && !struck) {
                         Label("+${departure.delayMinutes}", colors.delay, size = 12.sp, bold = true)
                         Gap(width = 6.dp)
                     }
                     if (wide) {
                         val shownTime = if (display == DelayDisplay.PlannedAndDelay) departure.plannedTime ?: departure.leaves else departure.leaves
-                        shownTime?.let { Label(clockOf(it), if (departure.delayMinutes > 0 && display == DelayDisplay.RealtimeOnly) colors.delay else colors.muted, size = 11.sp) }
+                        val lateAlone = departure.delayMinutes > 0 && (display == DelayDisplay.RealtimeOnly || struck)
+                        shownTime?.let { Label(clockOf(it), if (lateAlone) colors.delay else colors.muted, size = 11.sp) }
                         Gap(width = 6.dp)
                     }
                     Label(departure.leaves?.let { minutesText(context, it, now) } ?: "–", colors.ink, size = 13.sp, bold = true)
@@ -529,9 +566,15 @@ internal fun ConnectionBody(snapshot: WidgetSnapshot?, colors: WidgetColors, now
             val delay = (connection.departure - connection.plannedDeparture) / 60_000
             // The timetable time with "+2", or the expected time (red when late and alone), as the delay setting says.
             val start = if (display == DelayDisplay.PlannedAndDelay) connection.plannedDeparture else connection.departure
-            val late = delay > 0 && display == DelayDisplay.RealtimeOnly
+            val struck = display == DelayDisplay.StruckPlanned
+            val late = delay > 0 && (display == DelayDisplay.RealtimeOnly || struck)
+            // Takt style: the timetable time struck through before the new one.
+            if (struck && delay > 0) {
+                Label(clockOf(connection.plannedDeparture), colors.muted, size = 12.sp, strike = true)
+                Gap(width = 4.dp)
+            }
             Label("${clockOf(start)} – ${clockOf(connection.arrival)}", if (late) colors.delay else colors.ink, size = 13.sp)
-            if (delay > 0 && display != DelayDisplay.RealtimeOnly) {
+            if (delay > 0 && display != DelayDisplay.RealtimeOnly && !struck) {
                 Gap(width = 4.dp)
                 Label("+$delay", colors.delay, size = 12.sp, bold = true)
             }
@@ -621,7 +664,15 @@ internal fun TripBody(journey: Journey, colors: WidgetColors, now: OffsetDateTim
                 bold = true,
                 modifier = GlanceModifier.defaultWeight(),
             )
-            val delay = if (AppPrefs(context).delayDisplay == DelayDisplay.RealtimeOnly) 0L else stepDelay(step)
+            val display = AppPrefs(context).delayDisplay
+            val planned = if (display == DelayDisplay.StruckPlanned) stepPlannedTime(step) else null
+            val delay = if (display == DelayDisplay.RealtimeOnly || display == DelayDisplay.StruckPlanned) 0L else stepDelay(step)
+            if (planned != null) {
+                // Takt style: the timetable time struck through, the new one in the colour of delay.
+                Label(planned.clock(), colors.muted, size = 12.sp, strike = true)
+                Gap(width = 4.dp)
+                Label(step.time.clock(), colors.delay, size = 13.sp, bold = true)
+            }
             if (delay > 0) Label("+$delay", colors.delay, size = 13.sp, bold = true)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -767,7 +818,12 @@ private fun MiniDeparture(departure: WidgetDeparture, colors: WidgetColors, now:
             size = if (roomy) 15.sp else 12.sp,
             bold = true,
         )
-        if (late && roomy && AppPrefs(context).delayDisplay != DelayDisplay.RealtimeOnly) {
+        val display = AppPrefs(context).delayDisplay
+        val planned = departure.plannedTime
+        if (late && roomy && display == DelayDisplay.StruckPlanned && planned != null) {
+            // Takt style: the timetable time struck through (the minutes above are the new time).
+            Label(clockOf(planned), colors.muted, size = 10.sp, strike = true)
+        } else if (late && roomy && display != DelayDisplay.RealtimeOnly && display != DelayDisplay.StruckPlanned) {
             Label("+${departure.delayMinutes}", colors.delay, size = 10.sp, bold = true)
         }
     }

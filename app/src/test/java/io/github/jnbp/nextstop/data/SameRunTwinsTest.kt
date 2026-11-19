@@ -104,4 +104,31 @@ class SameRunTwinsTest {
         val b = Journey(listOf(ride("174", 10, 40, product = "")))
         assertFalse(sameRunTwins(a, b))
     }
+
+    /**
+     * #280: Transitous found the Railjet Berlin - Hamburg twice, as DELFI's "ICE 384" and as
+     * Rejseplanen's "RJ 384" (no way of its own, foreign names), each after the same U-Bahn. The
+     * journeys are one, and the German feed's copy stays.
+     */
+    @Test
+    fun aForeignFeedsCopyOfAGermanTrainGivesWayToTheGermanOne() {
+        fun trip(line: String, leaves: Long, arrives: Long, tripId: String, product: String = "express", from: String = "Berlin Hbf", to: String = "Hamburg Hbf") =
+            ride(line, leaves, arrives, product = product, from = from, to = to).copy(tripId = tripId)
+        val subway = trip("U5", -20, -8, "tr:20261203_16:36_de-VBB_5", product = "subway", from = "Alexanderplatz", to = "Berlin Hbf")
+        val onward = trip("ICE 201", 120, 200, "tr:20261203_18:56_de-DELFI_201", from = "Hamburg Hbf", to = "Bremen Hbf")
+        val danish = Journey(listOf(subway, trip("RJ 384", 0, 110, "tr:20261203_16:56_dk-rejseplanen_384"), onward))
+        val german = Journey(listOf(subway, trip("ICE 384", 0, 110, "tr:20261203_16:56_de-DELFI_384"), onward))
+        assertTrue(isForeignFeedRide(danish.rides[1]))
+        assertFalse(isForeignFeedRide(german.rides[1]))
+        assertFalse(isForeignFeedRide(ride("RJ 384", 0, 110)))
+        assertTrue(sameRunTwins(danish, german))
+        assertEquals(listOf(german), withoutSameRunTwins(listOf(danish, german)))
+        assertEquals(listOf(german), withoutSameRunTwins(listOf(german, danish)))
+        // Another planned minute: other trains, as two kinds of one number elsewhere.
+        val later = Journey(listOf(subway, trip("RJ 384", 1, 110, "tr:20261203_16:57_dk-rejseplanen_384"), onward))
+        assertFalse(sameRunTwins(later, german))
+        // Another U-Bahn trip: another journey.
+        val otherSubway = Journey(listOf(subway.copy(tripId = "tr:20261203_16:26_de-VBB_5"), german.rides[1], onward))
+        assertFalse(sameRunTwins(otherSubway, danish))
+    }
 }

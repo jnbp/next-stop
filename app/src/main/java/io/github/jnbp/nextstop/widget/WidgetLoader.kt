@@ -1,5 +1,6 @@
 package io.github.jnbp.nextstop.widget
 
+import io.github.jnbp.nextstop.data.DiagLog
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -64,7 +65,7 @@ private val resolvedPlaces = ConcurrentHashMap<String, Stop>()
  */
 internal class WidgetLoader(private val context: Context) {
     private val prefs = AppPrefs(context)
-    private val source = RoutingSource(choice = { prefs.sourceChoice }, userAgent = TransitousSource.userAgent(context), bvgUrl = { ownServerUrl(prefs.ownServer) })
+    private val source = RoutingSource(choice = { prefs.sourceChoice }, userAgent = TransitousSource.userAgent(context), bvgUrl = { ownServerUrl(prefs.ownServer) }, kindLookups = false)
     private var nearestLoaded = false
     private var nearest: Stop? = null
 
@@ -75,16 +76,12 @@ internal class WidgetLoader(private val context: Context) {
 
     /**
      * Where the user is, once per round: the newer of the position the app stored and the one
-     * Android still knows, and where both are older than two minutes one balanced request of
-     * the fused provider, which answers only when Android lets the app locate right now. See
-     * WidgetPosition.kt for why no ACCESS_BACKGROUND_LOCATION is asked for.
+     * Android still knows. Never a request of its own: a widget wakes no location provider
+     * (battery rule, see WidgetPosition.kt); an old position is named on the widget instead.
      */
     suspend fun position(): TimedPosition? {
         if (positionLoaded) return known
-        var best = newerPosition(storedWidgetPosition(prefs), lastKnownLocation(context)?.timed())
-        if (needsFreshPosition(best, System.currentTimeMillis())) {
-            best = newerPosition(best, balancedWidgetLocation(context)?.timed())
-        }
+        val best = newerPosition(storedWidgetPosition(prefs), lastKnownLocation(context)?.timed())
         best?.let { recordWidgetPosition(prefs, it) }
         known = best
         positionLoaded = true
@@ -298,6 +295,7 @@ internal class WidgetLoader(private val context: Context) {
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
+        DiagLog.w(WIDGET_LOG_TAG) { "widget: a part failed to load: ${e.javaClass.simpleName}" }
         WidgetSnapshot(problem = WidgetProblem.Offline)
     }
 

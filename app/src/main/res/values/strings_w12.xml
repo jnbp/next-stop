@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Battery: the category of the battery saver, its levels, and the refresh of the widgets by tap. -->
+<resources>
+    <string name="settings_group_battery">Battery</string>
+    <string name="battery_saver_level_save">Save</string>
+    <string name="battery_saver_level_extreme">Extreme</string>
+    <string name="battery_saver_level_save_text">Everything above; refreshes a little slower, no idle animations, plain surfaces instead of glass.</string>
+    <string name="battery_saver_level_extreme_text">On top of that: no animations, the location only when you ask (e.g. the locate button), widgets only when you tap ↻, rare refreshes.</string>
+</resources>

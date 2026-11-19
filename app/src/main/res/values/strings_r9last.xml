@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #277b: the colour legend below a journey, each word after an example time in its colour. -->
+    <string name="r9last_legend_planned">timetable</string>
+    <string name="r9last_legend_on_time">on time</string>
+    <string name="r9last_legend_late">late</string>
+    <string name="r9last_legend_estimated">estimated, e.g. from your location</string>
+    <!-- #277b: where the live times of the journey come from, after "Data: …". -->
+    <string name="r9last_live_from">Live: %1$s</string>
+    <string name="r9last_live_estimate">the app\'s estimate</string>
+</resources>

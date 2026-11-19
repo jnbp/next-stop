@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="wear_channel">Uhr</string>
     <string name="wear_trip_started">Fahrt auf der Uhr gestartet</string>
     <string name="wear_trip_started_text">Tippen, um sie hier zu verfolgen.</string>
     <!-- Einstellungen › Uhr: die Einstellungen der Uhr-App, am Handy bearbeitet. -->
@@ -9,6 +8,8 @@
     <string name="watch_live_departures_text">Die nächsten Abfahrten der nächsten Haltestelle direkt auf der Startseite der Uhr. Aus: der Knopf „Abfahrten in der Nähe“ wie bisher.</string>
     <string name="watch_animations_title">Animationen auf der Uhr</string>
     <string name="watch_animations_text">Zeilen, die hereingleiten, rollende Minuten, der wandernde Ring. Aus für eine ältere oder langsamere Uhr: alles ist einfach da.</string>
+    <string name="watch_open_companion_title">Live-Fahrt auf der Uhr öffnen</string>
+    <string name="watch_open_companion_text">Startest du hier eine Fahrt, öffnet die Uhr ihre Live-Fahrt von selbst. Aus: Die Fahrt steht nur in der laufenden Aktivität.</string>
     <string name="watch_map_style_title">Kartenstil der Uhr</string>
     <string name="watch_map_style_text">Wie die Kartenbilder auf der Uhr aussehen. Automatisch ist auf dem schwarzen Uhr-Bildschirm dunkel.</string>
     <string name="watch_tile_title">Ziel der Kachel</string>

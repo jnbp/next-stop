@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r6par_wait_any_moment">%1$s kommt jeden Moment</string>
+    <string name="r6par_wait_overdue">%1$s überfällig · +%2$d′</string>
+    <!-- A rail replacement service (SEV) on a line badge, read out with the line it stands in for. -->
+    <string name="r6par_rail_replacement">Ersatzverkehr</string>
+</resources>

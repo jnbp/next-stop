@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r8m_every_minute_mark_click">explain or switch off</string>
+    <string name="r8m_setup_shortcut_looks">This is what the shortcut alert looks like</string>
+    <string name="r8m_setup_shortcut_try_hint">“Try it” also sends you such an offer as a notification.</string>
+    <string name="r8m_setup_every_minute_part">For one trip: allows sprint changes and switches the shortcut alert on from 1 minute. You switch it on with the chip “Every minute counts” at a connection or in the live trip – mainly useful when the alert is not always on.</string>
+    <string name="r9_sun_chip_legend">This mark on a ride shows the sunny side. Tap it to open this explanation again.</string>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Notification channels by importance (r6chan) -->
+    <string name="r6chan_live">Live-Fahrt</string>
+    <string name="r6chan_live_text">Die Fahrt, der du folgst, live aktualisiert: still, ohne Ton und Vibration. Auch der Hinweis, wenn eine auf der Uhr gestartete Fahrt hier übernommen werden kann.</string>
+    <string name="r6chan_important">Live-Fahrt: Wichtig</string>
+    <string name="r6chan_important_text">Wenn du handeln musst: Aussteigen, Gleiswechsel, Anschluss klappt nicht mehr und Losgehen bei geplanten Fahrten. Mit Ton und Vibration.</string>
+    <string name="r6chan_suggestions">Live-Fahrt: Vorschläge</string>
+    <string name="r6chan_suggestions_text">Abkürzungen während einer Fahrt. Wird still angezeigt, ohne Ton.</string>
+    <string name="r6chan_alarm">Wecker</string>
+    <string name="r6chan_alarm_text">Der Aufwach-Alarm vor dem Aussteigen nach einer langen Fahrt: klingelt wie ein Wecker, im Vollbild.</string>
+    <string name="r6chan_disruptions">Störungen</string>
+    <string name="r6chan_disruptions_text">Neue Störungen auf den Strecken, die du beobachtest.</string>
+</resources>

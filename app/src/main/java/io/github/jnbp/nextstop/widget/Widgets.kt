@@ -1,5 +1,6 @@
 package io.github.jnbp.nextstop.widget
 
+import io.github.jnbp.nextstop.data.DiagLog
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import androidx.compose.runtime.Composable
@@ -35,6 +36,7 @@ import io.github.jnbp.nextstop.data.Journey
 import io.github.jnbp.nextstop.data.Leg
 import io.github.jnbp.nextstop.data.PlaceIcon
 import io.github.jnbp.nextstop.data.Stop
+import io.github.jnbp.nextstop.ui.BatterySaver
 import io.github.jnbp.nextstop.ui.TripState
 
 // Data older than this is loaded again when a widget is drawn by the system.
@@ -55,8 +57,10 @@ abstract class NextStopWidget(private val kind: WidgetKind) : GlanceAppWidget() 
         if (kind == WidgetKind.Trip || kind == WidgetKind.Auto) loadBoardingData(context)
         val state: Preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
         val fetched = state[WidgetKeys.FETCHED_AT] ?: 0L
-        if (System.currentTimeMillis() - fetched > STALE_MILLIS) {
-            WidgetUpdates.schedulePeriodic(context)
+        // Drawn by the system with old data (after a restart, an update of the app, a new
+        // launcher): loaded again, but only where it can be seen and not while the battery saver
+        // is active (then only a tap or the app opening loads; battery rule).
+        if (System.currentTimeMillis() - fetched > STALE_MILLIS && WidgetUpdates.screenOn(context) && !BatterySaver.active) {
             WidgetUpdates.requestRefresh(context, STALE_MILLIS)
         }
         provideContent {
@@ -202,6 +206,10 @@ private fun AutoContent(snapshot: WidgetSnapshot?, colors: WidgetColors, now: Lo
                     if (startable != null) {
                         Spacer(modifier = GlanceModifier.defaultWeight())
                         StartButton(startable, colors, small = true)
+                    } else if (trip == null) {
+                        // Load anew by a tap, without opening the app (see WidgetRefreshAction).
+                        Spacer(modifier = GlanceModifier.defaultWeight())
+                        RefreshMark(colors)
                     }
                 }
                 Spacer(modifier = GlanceModifier.height(6.dp))
@@ -235,13 +243,12 @@ class MiniWidget : NextStopWidget(WidgetKind.Mini)
 class AppointmentWidget : NextStopWidget(WidgetKind.Appointment)
 class AutoWidget : NextStopWidget(WidgetKind.Auto)
 
-/** The common part of the receivers: the regular loading starts with the first widget. */
+/** The common part of the receivers: the first widget loads at once (no regular loading, see WidgetUpdates). */
 abstract class NextStopWidgetReceiver(kind: WidgetKind) : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = WidgetUpdates.widgetOf(kind)
 
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
-        WidgetUpdates.schedulePeriodic(context)
         WidgetUpdates.requestRefresh(context)
     }
 }
@@ -279,7 +286,7 @@ internal object WidgetPreviews {
                 throw e
             } catch (e: Exception) {
                 // This preview cannot be drawn: the picker keeps the static one, and it is not tried again.
-                android.util.Log.w("NextStopWidgets", "Generated preview of $kind failed", e)
+                DiagLog.w("NextStopWidgets", e) { "Generated preview of $kind failed" }
                 done.add(kind.name)
                 continue
             }

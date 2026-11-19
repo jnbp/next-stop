@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Notification channels by importance (r6chan) -->
+    <string name="r6chan_live">Live trip</string>
+    <string name="r6chan_live_text">The trip you follow, updated live: quiet, without sound or vibration. Also when a trip started on the watch can be followed here.</string>
+    <string name="r6chan_important">Live trip: Important</string>
+    <string name="r6chan_important_text">When you have to act: getting off, a changed platform, a connection that no longer works and the time to leave for a planned trip. With sound and vibration.</string>
+    <string name="r6chan_suggestions">Live trip: Suggestions</string>
+    <string name="r6chan_suggestions_text">Faster ways during a followed trip. Shown quietly, without sound.</string>
+    <string name="r6chan_alarm">Alarm</string>
+    <string name="r6chan_alarm_text">The wake-up alarm before getting off a long ride: rings like an alarm clock, full screen.</string>
+    <string name="r6chan_disruptions">Disruptions</string>
+    <string name="r6chan_disruptions_text">New disruptions on the routes you watch.</string>
+</resources>

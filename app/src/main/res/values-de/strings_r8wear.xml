@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Watch setting (#253): the watch complications show the trip state icon instead of the app icon. -->
+    <string name="r8wear_state_icons_title">Eigene Symbole in Komplikationen</string>
+    <string name="r8wear_state_icons_text">Standardmäßig zeigen alle Komplikationen und der Fahrt-Chip unten auf dem Zifferblatt das App-Logo. Damit zeigen die Komplikationen stattdessen eigene Symbole (Zustand der Fahrt wie Warten, Fahrzeug oder Gehen, Zuhause, Störungen, Standort); der Chip behält das App-Logo.</string>
+    <!-- Watch setting (#254): the crown on the watch trip overview shows the time travel pill. -->
+    <string name="r8wear_time_travel_title">Zeitreise mit der Krone</string>
+    <string name="r8wear_time_travel_text">Beim Scrollen der Übersicht der Live-Fahrt auf der Uhr steht oben, wann du bei der mittleren Zeile bist und wie viel Zeit zum Umsteigen bleibt. Aus: Die Krone scrollt nur.</string>
+</resources>

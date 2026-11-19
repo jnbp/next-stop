@@ -19,15 +19,18 @@ import io.github.jnbp.nextstop.MainActivity
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.AlightEvent
 import io.github.jnbp.nextstop.data.AppPrefs
+import io.github.jnbp.nextstop.data.CompanionPosition
+import io.github.jnbp.nextstop.data.alightEventsByPosition
 import io.github.jnbp.nextstop.data.Journey
+import io.github.jnbp.nextstop.data.TripNotice
 import io.github.jnbp.nextstop.data.alightEvents
+import io.github.jnbp.nextstop.data.noticeJourneyHash
 import io.github.jnbp.nextstop.data.dueAlight
 import io.github.jnbp.nextstop.data.nextAlight
 import io.github.jnbp.nextstop.data.plainStopName
-import io.github.jnbp.nextstop.data.plausible
 import io.github.jnbp.nextstop.ui.theme.storedPalette
 
-private val ALIGHT_CHANNEL = AppChannel.Alight.id
+private val ALIGHT_CHANNEL = AppChannel.of(NotifyFeature.Alight).id
 private const val ALIGHT_NOTIFICATION = 3
 private const val ALIGHT_ALARM_REQUEST = 20
 private const val ACTION_ALIGHT = "io.github.jnbp.nextstop.ALIGHT"
@@ -74,7 +77,10 @@ object AlightReminders {
             return
         }
         val now = OffsetDateTime.now()
-        val events = alightEvents(journey)
+        // Timed by the position as well, while the companion follows it (see alightEventsByPosition).
+        val fix = CompanionPosition.fixFor(journey, now.toInstant().toEpochMilli())
+        // The times by the ride state (see rideJourney): on board by position the reminders move with the blended arrival.
+        val events = alightEventsByPosition(alightEvents(rideJourney(journey, now), timesShown = true), journey, fix, now)
         val due = synchronized(sent) {
             dueAlight(events, sent, now)?.also { chosen ->
                 // The ones before it are over with it: never sent late after a later one.
@@ -82,6 +88,8 @@ object AlightReminders {
             }
         }
         if (due != null) notify(context, journey, due)
+        // Takes back what no longer applies, on the look the service makes anyway (see TripNoticeSweep).
+        TripNoticeSweep.sweep(context)
         val next = synchronized(sent) { nextAlight(events, sent, now) }
         if (next == null) cancelAlarm(context) else setAlarm(context, next.at.toInstant().toEpochMilli())
     }
@@ -114,12 +122,14 @@ object AlightReminders {
     @SuppressLint("MissingPermission")
     private fun notify(context: Context, journey: Journey, event: AlightEvent) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        ensureChannel(context, AppChannel.Alight)
+        ensureChannel(context, AppChannel.of(NotifyFeature.Alight))
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         // The plausible times, as the reminders were timed by them (see alightEvents).
-        val shown = journey.plausible()
+        // By the ride state, so an arrival estimated from the position is the one it names.
+        val shown = rideJourney(journey, OffsetDateTime.now())
         val leg = shown.legs.getOrNull(event.legIndex) ?: return
-        val exit = leg.to.plainStopName()
+        // As the companion names it (#157).
+        val exit = io.github.jnbp.nextstop.data.journeyStopName(shown, leg.to)
         val title = context.getString(if (event.early) R.string.alight_next_stop else R.string.alight_approach, exit)
         val next = rideAfter(shown, leg)
         val body = if (next == null) {
@@ -144,6 +154,12 @@ object AlightReminders {
             null
         }
         val text = listOfNotNull(estimate, body).joinToString(" · ")
+        // While the live notification of the trip is up, the reminder is that notification: it
+        // alerts once with sound and vibration and says it in its title; no second one beside it.
+        if (TripState.serviceRunning.value && tripNotificationsAllowed(context)) {
+            postTripNotification(context, tripNotification(context, journey, OffsetDateTime.now(), alert = title))
+            return
+        }
         val open = PendingIntent.getActivity(
             context,
             21,
@@ -167,7 +183,7 @@ object AlightReminders {
             .setContentIntent(open)
             .build()
         try {
-            NotificationManagerCompat.from(context).notify(ALIGHT_NOTIFICATION, notification)
+            NotificationManagerCompat.from(context).notify(TripNotice.Alight(noticeJourneyHash(journey), event.legIndex).tag, ALIGHT_NOTIFICATION, notification)
         } catch (e: SecurityException) {
             // The permission was taken away in the meantime.
         }

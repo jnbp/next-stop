@@ -26,13 +26,16 @@ object TransitousClient {
     private val language: String
         get() = if (Locale.getDefault().language == "de") "de" else "en"
 
-    /** Journeys from [from] to [to] leaving now, with at least the minutes of [comfort] between rides. */
-    suspend fun journeys(from: Place, to: Place, results: Int, comfort: TransferComfort): List<Journey> {
+    /**
+     * Journeys from [from] to [to] leaving now, with at least the minutes of [comfort] between rides
+     * and the walking pace, step-free ways and products of the phone's searches ([options]).
+     */
+    suspend fun journeys(from: Place, to: Place, results: Int, comfort: TransferComfort, options: PhoneSearchOptions = PhoneSearchOptions()): List<Journey> {
         val fromParam = placeParam(from) ?: throw BvgException(BvgFailure.BadAnswer, "origin without position")
         val toParam = placeParam(to) ?: throw BvgException(BvgFailure.BadAnswer, "destination without position")
         val text = get(
             "/api/v6/plan?fromPlace=${encode(fromParam)}&toPlace=${encode(toParam)}&numItineraries=$results" +
-                "&detailedTransfers=true&minTransferTime=${comfort.minutes}&language=$language",
+                "&detailedTransfers=true&minTransferTime=${comfort.minutes}&language=$language" + options.motisQuery(),
         )
         return parse("plan") {
             val list = JSONObject(text).optJSONArray("itineraries") ?: JSONArray()
@@ -53,7 +56,8 @@ object TransitousClient {
         }
         val text = get("/api/v6/stoptimes?$where&n=$results&language=$language")
         return parse("stoptimes") {
-            val list = JSONObject(text).optJSONArray("stopTimes") ?: JSONArray()
+            // An answer without its list is a failure, never an empty board (#235).
+            val list = departuresOfAnswer(JSONObject(text), "stopTimes")
             departureBoard(
                 (0 until list.length()).mapNotNull { index ->
                     val item = list.optJSONObject(index) ?: return@mapNotNull null
@@ -155,6 +159,7 @@ object TransitousClient {
             arrival = arrival,
             departureDelayMinutes = if (realtime && plannedDeparture != null) ((departure - plannedDeparture) / 60_000).toInt() else 0,
             arrivalDelayMinutes = if (realtime && plannedArrival != null) ((arrival - plannedArrival) / 60_000).toInt() else 0,
+            realtime = realtime && !walking,
             platform = fromJson.text("track"),
             direction = item.text("headsign")?.let { localStopTerms(it) },
             cancelled = item.optBoolean("cancelled", false),
@@ -196,7 +201,7 @@ object TransitousClient {
             route != null -> route
             else -> item.text("displayName") ?: item.text("tripShortName")
         }
-        return rapidLineName(name, product)
+        return withoutTrainNumberZeros(rapidLineName(name, product))
     }
 
     /** GET [path] on the IO threads, within [TRANSITOUS_TIMEOUT_MILLIS]. */

@@ -64,6 +64,9 @@ fun EntranceModeRow(shape: Shape, modifier: Modifier = Modifier) {
             twoLines = true,
         )
         // The three choices as small maps, the chosen one with a ring (see SettingsPreviews).
-        PreviewExpander(key = "entrance_mode") { EntranceModePreview(EntranceSetting.mode) }
+        // A tap on one of the small maps picks its mode.
+        PreviewExpander(key = "entrance_mode", onPick = { index -> EntranceSetting.update(context, modes[index]) }) {
+            EntranceModePreview(EntranceSetting.mode)
+        }
     }
 }

@@ -1,0 +1,8 @@
+• Live trip uses your location to tell whether you are already on board, with wake-up alarm and platform change alerts
+• Pick your connection on the way, "other ways", shortcut alert and "every minute counts"
+• Plan a trip with a reminder
+• Redesigned My routes with disruptions and statistics
+• Transfer levels Relaxed, Normal, Tight and Sprint
+• Sunny side of the train, bike, step-free and occupancy hints
+• Long-distance trains with correct names and delays
+• Bug fixes

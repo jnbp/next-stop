@@ -119,7 +119,13 @@ internal fun ProvidePreviewStates(content: @Composable () -> Unit) {
  * [content], folded by default. [key] names the setting, for the state kept per row.
  */
 @Composable
-internal fun PreviewExpander(key: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun PreviewExpander(
+    key: String,
+    modifier: Modifier = Modifier,
+    onTap: (() -> Unit)? = null,
+    onPick: ((Int) -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
     val states = LocalPreviewStates.current
     var own by remember { mutableStateOf(false) }
     val open = states?.get(key) ?: own
@@ -156,13 +162,16 @@ internal fun PreviewExpander(key: String, modifier: Modifier = Modifier, content
             },
             exit = if (animate) shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut() else ExitTransition.None,
         ) {
+            // A tap on the preview changes the value ([onTap]); a tap on one of its options picks it ([onPick], see SketchOptions).
+            val actions = remember(onTap, onPick) { if (onTap == null && onPick == null) null else PreviewActions(onTap, onPick) }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 2.dp, bottom = 2.dp)
-                    .clearAndSetSemantics { },
+                    .clearAndSetSemantics { }
+                    .then(if (onTap != null) Modifier.previewPress(onTap) else Modifier),
             ) {
-                content()
+                CompositionLocalProvider(LocalPreviewActions provides actions, content = content)
             }
         }
     }
@@ -232,6 +241,8 @@ internal fun SketchOptions(
     height: Dp = OPTION_SKETCH_HEIGHT,
     sketch: DrawScope.(index: Int, reveal: Float) -> Unit,
 ) {
+    // Inside a row that offers it, a tap on a sketch picks its value.
+    val pick = LocalPreviewActions.current?.pick
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -249,6 +260,7 @@ internal fun SketchOptions(
             Column(
                 modifier = Modifier
                     .weight(1f)
+                    .then(if (pick != null) Modifier.previewPress { pick(index) } else Modifier)
                     .clip(shape)
                     .border(2.dp, ring, shape)
                     .padding(4.dp),
@@ -372,6 +384,12 @@ internal fun VehicleHintPreview(on: Boolean) {
 @Composable
 internal fun FitLinePreview(on: Boolean) {
     SketchPane(key = on) { reveal -> fitLineSketch(on, reveal) }
+}
+
+/** A followed trip: the own way in colour, and when on the grey dashed way the next vehicle still comes to the change. */
+@Composable
+internal fun ApproachPreview(on: Boolean) {
+    SketchPane(key = on) { reveal -> approachSketch(on, reveal) }
 }
 
 /** The notification of a trip: Live Update with its chip, or the blue box of the app. */
@@ -1045,6 +1063,56 @@ private fun DrawScope.vehicleHintSketch(on: Boolean, reveal: Float) {
     textBar(left + 22.dp.toPx(), top + height / 2 - 1.5.dp.toPx(), width - 32.dp.toPx(), alpha = 0.55f * alpha)
 }
 
+private fun DrawScope.approachSketch(on: Boolean, reveal: Float) {
+    previewMap()
+    // The own way: one ride to the change, then the next one on.
+    val first = SketchLines[0]
+    val second = SketchLines[2]
+    val start = Offset(size.width * 0.08f, size.height * 0.8f)
+    val change = Offset(size.width * 0.46f, size.height * 0.56f)
+    val end = Offset(size.width * 0.92f, size.height * 0.72f)
+    val wide = 3.5.dp.toPx()
+    if (on) {
+        // The way the vehicle of the next ride still has to come to the change: grey, dashed, with its stops.
+        val alpha = reveal.coerceIn(0f, 1f)
+        val grey = Color(0xFF8A93A3).copy(alpha = 0.6f * alpha)
+        val approach = listOf(
+            Offset(size.width * 0.84f, size.height * 0.12f),
+            Offset(size.width * 0.7f, size.height * 0.22f),
+            Offset(size.width * 0.58f, size.height * 0.34f),
+            change,
+        )
+        val path = Path().apply {
+            moveTo(approach[0].x, approach[0].y)
+            approach.drop(1).forEach { lineTo(it.x, it.y) }
+        }
+        drawPath(
+            path,
+            grey,
+            style = Stroke(
+                width = 3.dp.toPx(),
+                cap = StrokeCap.Round,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())),
+            ),
+        )
+        approach.dropLast(1).drop(1).forEach { stop ->
+            drawCircle(Color.White.copy(alpha = alpha), radius = 2.5.dp.toPx(), center = stop)
+            drawCircle(grey, radius = 2.5.dp.toPx(), center = stop, style = Stroke(width = 1.2.dp.toPx()))
+        }
+        vehicleMark(approach[0], second, scale = 0.9f, alpha = alpha)
+    }
+    drawLine(first, start, change, strokeWidth = wide, cap = StrokeCap.Round)
+    drawLine(second, change, end, strokeWidth = wide, cap = StrokeCap.Round)
+    listOf(start, change, end).forEach { stop ->
+        drawCircle(Color.White, radius = 3.5.dp.toPx(), center = stop)
+        drawCircle(Color(0xFF14161B), radius = 3.5.dp.toPx(), center = stop, style = Stroke(width = 1.8.dp.toPx()))
+    }
+    // The traveller's own vehicle is always on the map; the later one only with the setting (#160).
+    val own = Offset((start.x + change.x) / 2, (start.y + change.y) / 2)
+    vehicleMark(own, first, scale = 0.9f, alpha = 1f)
+    ownPosition(own)
+}
+
 private fun DrawScope.fitLineSketch(on: Boolean, reveal: Float) {
     previewMap()
     val points = listOf(
@@ -1573,4 +1641,140 @@ private fun DrawScope.chartShortLegsSketch(combine: Boolean, reveal: Float) {
     val second = gap * 2 + columnWidth
     block(SketchLines[0], second, top + height * 0.16f, columnWidth, height * 0.40f, radius = radius)
     block(SketchLines[3], second, top + height * 0.62f, columnWidth, height * 0.30f, radius = radius)
+}
+
+// ---------------------------------------------------------------------------------------
+// The previews of the settings of release 0.2: battery saver, haptics, pace by bicycle and
+// appointments after their start.
+// ---------------------------------------------------------------------------------------
+
+/** The battery saver: a map full of moving vehicles under glass, or a calm one under a plain card. */
+@Composable
+internal fun BatterySaverPreview(saving: Boolean) {
+    SketchPane(key = saving) { reveal -> batterySaverSketch(saving, reveal) }
+}
+
+/** Haptics: a chip that is tapped, with a light buzz around it, or none. */
+@Composable
+internal fun HapticsPreview(on: Boolean) {
+    SketchPane(key = on) { reveal -> hapticsSketch(on, reveal) }
+}
+
+/** The pace by bicycle: how far a rider gets along the same way in the same time. */
+@Composable
+internal fun BikeSpeedPreview(kmh: Int) {
+    val label = remember(kmh) { "4 km · ${io.github.jnbp.nextstop.data.BikePace.minutesFor(BIKE_SKETCH_METRES, kmh)}′" }
+    SketchPane(key = kmh) { reveal -> bikeSpeedSketch(kmh, label, reveal) }
+}
+
+/** Appointments after their start: the window on a time line in which one is still offered. */
+@Composable
+internal fun AppointmentsAfterPreview(minutes: Int) {
+    SketchPane(key = minutes) { reveal -> appointmentsAfterSketch(minutes, reveal) }
+}
+
+private fun DrawScope.batterySaverSketch(saving: Boolean, reveal: Float) {
+    previewMap()
+    // While saving there is no map behind the page: the plain ground comes over it.
+    if (saving) block(AppColors.PlainGround, 0f, 0f, size.width, size.height, radius = 0f, alpha = reveal.coerceIn(0f, 1f))
+    // Vehicles: four without the saver; with it none, they fade away with the map.
+    val spots = listOf(
+        Offset(size.width * 0.22f, size.height * 0.3f) to SketchLines[0],
+        Offset(size.width * 0.72f, size.height * 0.26f) to SketchLines[2],
+        Offset(size.width * 0.48f, size.height * 0.46f) to SketchLines[1],
+        Offset(size.width * 0.86f, size.height * 0.5f) to SketchLines[3],
+    )
+    spots.forEachIndexed { index, (spot, color) ->
+        val alpha = if (!saving) 1f else (1f - reveal).coerceIn(0f, 1f)
+        vehicleMark(spot, color, alpha = alpha)
+    }
+    // The card at the bottom: frosted glass, or plain and opaque while saving.
+    val cardTop = size.height * 0.64f
+    val cardLeft = 10.dp.toPx()
+    val cardWidth = size.width - cardLeft * 2
+    val cardHeight = size.height - cardTop - 8.dp.toPx()
+    val glass = if (saving) 1f - reveal.coerceIn(0f, 1f) else 1f
+    block(AppColors.Card, cardLeft, cardTop, cardWidth, cardHeight, radius = 12.dp.toPx(), alpha = 0.97f - 0.3f * glass)
+    if (glass > 0f) block(Color.White, cardLeft, cardTop, cardWidth, cardHeight * 0.35f, radius = 12.dp.toPx(), alpha = 0.25f * glass)
+    textBar(cardLeft + 12.dp.toPx(), cardTop + cardHeight * 0.45f, cardWidth * 0.5f, color = AppColors.Ink, alpha = 0.6f)
+    // A battery in the corner: green with a leaf of charge while saving.
+    val bw = 22.dp.toPx()
+    val bh = 11.dp.toPx()
+    val bx = size.width - bw - 12.dp.toPx()
+    val by = 8.dp.toPx()
+    block(AppColors.Ink, bx, by, bw, bh, radius = 3.dp.toPx(), alpha = 0.75f)
+    block(AppColors.Ink, bx + bw, by + bh * 0.3f, 2.dp.toPx(), bh * 0.4f, radius = 1.dp.toPx(), alpha = 0.75f)
+    val inner = 1.5.dp.toPx()
+    val level = if (saving) 0.35f + 0.5f * reveal.coerceIn(0f, 1f) else 0.35f
+    block(
+        if (saving) AppColors.Early else AppColors.DelayRed,
+        bx + inner, by + inner, (bw - inner * 2) * level, bh - inner * 2, radius = 2.dp.toPx(),
+    )
+}
+
+private fun DrawScope.hapticsSketch(on: Boolean, reveal: Float) {
+    val center = Offset(size.width * 0.5f, size.height * 0.5f)
+    val chipWidth = 64.dp.toPx()
+    val chipHeight = 26.dp.toPx()
+    // The chip dips a little as it is tapped, then springs back (see PRESS_SCALE).
+    val press = if (reveal < 0.3f) 1f - (1f - PRESS_SCALE) * (reveal / 0.3f) else PRESS_SCALE + (1f - PRESS_SCALE) * ((reveal - 0.3f) / 0.7f).coerceIn(0f, 1f)
+    val w = chipWidth * press
+    val h = chipHeight * press
+    block(AppColors.Blue, center.x - w / 2, center.y - h / 2, w, h, radius = h / 2)
+    textBar(center.x - w * 0.3f, center.y - 1.5.dp.toPx(), w * 0.6f, color = AppColors.OnBlue, alpha = 0.9f)
+    // A fingertip on it.
+    drawCircle(AppColors.Ink.copy(alpha = 0.18f), radius = 9.dp.toPx(), center = Offset(center.x + w * 0.2f, center.y + h * 0.35f))
+    if (!on) return
+    val spread = reveal.coerceIn(0f, 1f)
+    for (wave in 1..2) {
+        val gap = (6.dp.toPx() + wave * 6.dp.toPx()) * (0.6f + 0.4f * spread)
+        val alpha = spread * (if (wave == 1) 0.85f else 0.45f)
+        listOf(-1f, 1f).forEach { side ->
+            val x = center.x + side * (chipWidth / 2 + gap)
+            drawLine(
+                color = AppColors.Blue.copy(alpha = alpha),
+                start = Offset(x, center.y - chipHeight * 0.45f),
+                end = Offset(x, center.y + chipHeight * 0.45f),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+}
+
+// The way of the sketch of the pace by bicycle, in metres, and the green of bicycle ways on the map.
+private const val BIKE_SKETCH_METRES = 4_000.0
+private val SKETCH_BIKE_COLOR = Color(0xFF2E9E5B)
+
+private fun DrawScope.bikeSpeedSketch(kmh: Int, label: String, reveal: Float) {
+    previewMap()
+    val left = 18.dp.toPx()
+    val right = size.width - 18.dp.toPx()
+    val y = size.height * 0.56f
+    // The way by bike, in the green of bicycle ways on the map.
+    drawLine(SKETCH_BIKE_COLOR.copy(alpha = 0.35f), Offset(left, y), Offset(right, y), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
+    // Where a rider is after the same ten minutes: faster gets further.
+    val share = (kmh / io.github.jnbp.nextstop.data.BikePace.MAX_KMH.toFloat()).coerceIn(0.1f, 1f)
+    val x = left + (right - left) * share * reveal.coerceIn(0f, 1f)
+    drawLine(SKETCH_BIKE_COLOR, Offset(left, y), Offset(x, y), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
+    drawCircle(Color.White, radius = 8.dp.toPx(), center = Offset(x, y))
+    drawCircle(SKETCH_BIKE_COLOR, radius = 6.dp.toPx(), center = Offset(x, y))
+    mapText(label, Offset(size.width * 0.5f, size.height * 0.24f), 12.sp.toPx(), AppColors.Ink.toArgb(), halo = AppColors.Card.toArgb())
+}
+
+private fun DrawScope.appointmentsAfterSketch(minutes: Int, reveal: Float) {
+    drawRect(AppColors.Chip)
+    val left = 16.dp.toPx()
+    val right = size.width - 16.dp.toPx()
+    val y = size.height * 0.6f
+    // Three hours on a line; the appointment starts after the first.
+    val hour = (right - left) / 4f
+    val start = left + hour
+    drawLine(AppColors.Muted.copy(alpha = 0.5f), Offset(left, y), Offset(right, y), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+    val window = hour * (minutes / 60f) * reveal.coerceIn(0f, 1f)
+    block(AppColors.Blue, start, y - 6.dp.toPx(), window, 12.dp.toPx(), radius = 6.dp.toPx(), alpha = 0.35f)
+    drawCircle(AppColors.Blue, radius = 6.dp.toPx(), center = Offset(start, y))
+    // The appointment as a card above its start.
+    block(AppColors.Card, start - 30.dp.toPx(), y - 40.dp.toPx(), 60.dp.toPx(), 22.dp.toPx(), radius = 8.dp.toPx())
+    textBar(start - 22.dp.toPx(), y - 30.dp.toPx(), 44.dp.toPx(), color = AppColors.Ink, alpha = 0.6f)
 }

@@ -57,14 +57,14 @@ fun nextCatchable(departures: List<Departure>?, now: Long): Departure? =
 
 /**
  * Milliseconds from [now] until the minutes of any of [times] change (see [minutesUntil], which
- * rounds to the nearest minute): the countdown is redrawn then instead of on a fixed tick.
+ * counts the full minutes left): the countdown is redrawn then instead of on a fixed tick.
  * Times already at "now" do not change any more and are left out. At least [MIN_TICK_MILLIS],
  * at most a minute (also when nothing counts down).
  */
 fun millisToNextMinuteChange(times: List<Long>, now: Long): Long {
     var soonest = MINUTE_MILLIS
     for (time in times) {
-        val shifted = time - now + 30_000
+        val shifted = time - now
         if (shifted < MINUTE_MILLIS) continue
         // minutesUntil is shifted / 60 s; it drops by one once shifted falls below its full minutes.
         val wait = shifted % MINUTE_MILLIS + 1

@@ -51,6 +51,10 @@ private val NAME_NOT_A_TOWN = setOf(
     "tief", "oben", "unten",
 )
 
+// #278: a street or a square in brackets tells two nearby stops apart ("Bf Neustadt (Hansastr.)"
+// beside "Bahnhof Neustadt"): never a town, so it stays in the name (the phone's STREET_QUALIFIER).
+private val NAME_STREET_QUALIFIER = Regex("""(?:str\.?|straße|strasse|weg|allee|platz|gasse|ufer|chaussee|damm)$""")
+
 /** "Stop (Town)" at the end of [whole] as stop and town; null where the brackets name no town. */
 private fun nameTownInBrackets(whole: String): Pair<String, String>? {
     val bracket = NAME_TOWN_IN_BRACKETS.matchEntire(whole) ?: return null
@@ -61,7 +65,7 @@ private fun nameTownInBrackets(whole: String): Pair<String, String>? {
     val qualifier = plain in NAME_NOT_A_TOWN || plain.startsWith("b ") || plain.startsWith("b. ") ||
         plain.startsWith("bei ") || plain.startsWith("kr ") || plain.startsWith("kr. ") || town.any { it.isDigit() } ||
         letters < 3 || districtCode || plain.startsWith("richtung ") || plain.startsWith("ri. ") || plain.startsWith("fr ") ||
-        '&' in plain
+        '&' in plain || NAME_STREET_QUALIFIER.containsMatchIn(plain)
     return if (!qualifier && town.isNotEmpty()) bracket.groupValues[1].trim() to town else null
 }
 
@@ -115,7 +119,8 @@ fun stopNameParts(name: String, home: String? = WatchTown.reference): StopNamePa
     rest = withoutRedundantStationWord(rest)
     val town = nameTownInBrackets(rest)
     val title = when {
-        town != null && sameTown(town.second, home) -> town.first
+        // A stop that is only a generic word ("Hauptbahnhof (Musterstadt)") keeps its town (#255).
+        town != null && sameTown(town.second, home) -> nameStationWithTownIfBare(town.first, town.second)
         else -> withoutTownAfterComma(rest, home)
     }
     return StopNameParts(title.ifEmpty { name.trim() }, parts.filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { null })
@@ -127,7 +132,25 @@ private val NAME_TOWN_AFTER_COMMA = Regex("""^(.*\S),\s*([^,()\[\]]+)$""")
 /** [name] without ", Town" at its end where that town is [home] ("Rathaus, Springfield" in Springfield); else as it is. */
 private fun withoutTownAfterComma(name: String, home: String?): String {
     val match = NAME_TOWN_AFTER_COMMA.matchEntire(name) ?: return name
-    return if (sameTown(match.groupValues[2].trim(), home)) match.groupValues[1].trim() else name
+    val town = match.groupValues[2].trim()
+    return if (sameTown(town, home)) nameStationWithTownIfBare(match.groupValues[1].trim(), town) else name
+}
+
+// A name that is only a generic word for a station, which every town has (#255), and those for the main and a plain station.
+private val NAME_BARE_STATION_WORD = Regex("^(?:hauptbahnhof|hbf\\.?|bahnhof|bf\\.?|bhf\\.?|busbahnhof|zob)$", RegexOption.IGNORE_CASE)
+private val NAME_MAIN_STATION_WORD = Regex("^(?:hauptbahnhof|hbf\\.?)$", RegexOption.IGNORE_CASE)
+private val NAME_STATION_ONLY_WORD = Regex("^(?:bahnhof|bf\\.?|bhf\\.?)$", RegexOption.IGNORE_CASE)
+
+/**
+ * [stop] without its [town] where that town goes unsaid, but a stop that is only a generic word
+ * never stands alone (#255: "München Hbf" read "Hauptbahnhof"): "Musterstadt Hbf",
+ * "Musterstadt" for a plain "Bahnhof", "Musterstadt ZOB". Twin of the phone's stationWithTown.
+ */
+private fun nameStationWithTownIfBare(stop: String, town: String): String = when {
+    !NAME_BARE_STATION_WORD.matches(stop) -> stop
+    NAME_MAIN_STATION_WORD.matches(stop) -> "$town Hbf"
+    NAME_STATION_ONLY_WORD.matches(stop) -> town
+    else -> "$town $stop"
 }
 
 /** The stop [name] in one line for a list: its title as shown (see [stopNameParts]), then the part of the station. */
@@ -181,4 +204,37 @@ object WatchTown {
     fun noteStops(names: List<String>) {
         dominantTown(names)?.let { current = it }
     }
+}
+
+/**
+ * The name of [place] as the watch shows it (#177): a stop without the town the watch is used in
+ * (see [listedStopName]), an address or a point of interest as it came. The raw name stays what
+ * searches and requests use.
+ */
+fun shownPlaceName(place: Place, home: String? = WatchTown.reference): String =
+    if (place.kind == PlaceKind.Stop) listedStopName(place.name, home) else place.name
+
+/** The name of [place] for a small second line under [label]: null where it would only repeat the label. */
+fun placeSubline(label: String, place: Place, home: String? = WatchTown.reference): String? =
+    shownPlaceName(place, home).takeIf { it != label }
+
+/**
+ * [trip] with its stop names as the watch shows them (#177), for a trip the watch follows itself:
+ * the phone already sends the names short (plainStopName, rideStopName), the providers the watch
+ * asks on its own write "S+U Westhafen (Berlin)". Only the shown names change; [TripSnapshot.alertKey]
+ * and [TripSnapshot.target] stay as they were.
+ */
+fun tripWithShownNames(trip: TripSnapshot, home: String? = WatchTown.reference): TripSnapshot {
+    if (trip.fromPhone) return trip
+    fun shown(name: String): String = if (name.isBlank()) name else stopNameParts(name, home).title
+    return trip.copy(
+        place = shown(trip.place),
+        destination = shown(trip.destination),
+        direction = trip.direction?.let(::shown),
+        rideTo = trip.rideTo?.let(::shown),
+        next = trip.next?.let { it.copy(stop = shown(it.stop), direction = it.direction?.let(::shown)) },
+        walk = trip.walk?.let { it.copy(from = shown(it.from), to = shown(it.to)) },
+        stops = trip.stops.map { it.copy(name = shown(it.name)) },
+        plan = trip.plan.map { it.copy(from = shown(it.from), to = shown(it.to), direction = it.direction?.let(::shown)) },
+    )
 }

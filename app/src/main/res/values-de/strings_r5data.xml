@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Runde 5 (dbgdata): die Wahl des Anschlusses an einem Umstieg der begleiteten Fahrt. -->
+<resources>
+    <string name="r5_choice_earliest">Frühester erreichbarer: %1$s um %2$s</string>
+    <string name="r5_choice_sprint">Mit Sprint: eine frühere um %1$s</string>
+    <string name="r5_rescue">Anschluss klappt nicht mehr – nimm %1$s um %2$s?</string>
+    <string name="r5_rescue_take">Wechseln</string>
+    <string name="r5_rescue_title">Anschluss in %1$s klappt nicht mehr</string>
+</resources>

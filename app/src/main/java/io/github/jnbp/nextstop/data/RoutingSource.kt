@@ -16,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -117,6 +118,8 @@ class RoutingSource(
     userAgent: String,
     private val bvgUrl: () -> String = { BvgRestSource.DEFAULT_URL },
     private val health: SourceHealth = SourceHealth.shared,
+    /** False for work in the background (widgets, the disruption check): no HAFAS lookups of names there (#271). */
+    private val kindLookups: Boolean = true,
 ) : TransitSource {
     // The client of the Berlin server, made anew when its address changes.
     @Volatile
@@ -159,6 +162,13 @@ class RoutingSource(
         current.inUse.filter { it.family == DataSource.Bvg }.map { it to backendClient(it, current) }
     }, SourceChain(health), standIn = { choice().active.size > 1 })
 
+    // The names of long-distance trains of Transitous checked against the regional HAFAS (#271, see RideKinds).
+    private val kindCheck = RideKindCheck(vbbFamily) { kindLookups && DataSource.Bvg in choice().active }
+
+    /** [page] with the kinds of its long-distance trains as HAFAS knows them, where it came from Transitous (see RideKindCheck). */
+    private fun withKinds(source: DataSource, page: JourneyPage): JourneyPage =
+        if (source != DataSource.Transitous) page else page.copy(journeys = kindCheck.journeys(page.journeys))
+
     /**
      * Where the user is, or the middle of the map: the search for places puts those nearby
      * first. Set by the interface; null while it is not known.
@@ -177,6 +187,29 @@ class RoutingSource(
     // The other stops of a station complex found by a search, by the id of the stop shown for
     // it: the tram and bus stops beside a rail station, or the same station of another provider.
     private val complexes = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+
+    // Stops the search found, by id: where a board opened from the search stands (see foreignTwinMembers).
+    private val seenStops = java.util.concurrent.ConcurrentHashMap<String, Stop>()
+
+    // Stops already looked at for a foreign feed's twin, each once.
+    private val twinChecked = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * The stops of other feeds that are the station [stopId] (see foreignTwinsOf), for a board
+     * opened from the search before the map grouped them (#96: the SNCF's "Francfort sur le
+     * Main" beside Frankfurt Hbf, with the trains to France). Only for a long-distance station
+     * of Transitous, looked up once from the stops around it (a request kept for a while).
+     */
+    private suspend fun foreignTwinMembers(stopId: String): List<String> {
+        val stop = seenStops[stopId] ?: return emptyList()
+        if (sourceOf(stopId) != DataSource.Transitous || "express" !in stop.products) return emptyList()
+        if (!twinChecked.add(stopId)) return emptyList()
+        val at = stop.position ?: return emptyList()
+        val around = attempt { nearbyStops(at.first, at.second, TWIN_NEARBY_STOPS) }.getOrDefault(emptyList())
+        val twins = foreignTwinsOf(stop, around).map { it.id }
+        if (twins.isNotEmpty()) joinComplex(stopId, twins)
+        return twins
+    }
 
     // The answer of a provider other than Transitous to the latest query, by provider and query: the
     // search and the search for far stations, asked at once, share one request (see sharedHits).
@@ -273,16 +306,22 @@ class RoutingSource(
         if (found.all { it.second.isFailure } && osm.isFailure) {
             throw found.firstNotNullOfOrNull { it.second.exceptionOrNull() } ?: IOException("search failed")
         }
-        val joined = mutableMapOf<String, List<String>>()
-        val providers = mergeStops(found.map { (source, answer) -> source to answer.getOrDefault(emptyList()) }, results, joined)
-        // The stops of one station complex are remembered, so its departures come from all of them.
-        joined.forEach { (host, members) -> complexes[host] = members }
-        // A place of OpenStreetMap that a provider has too is shown once, as the provider has it.
-        val extra = osm.getOrDefault(emptyList())
-            .filter { place -> choice().covers(place.latitude ?: 0.0, place.longitude ?: 0.0) }
-            .filter { place -> providers.none { known -> known.kind != PlaceKind.Stop && sameSpot(known, place) } }
-        // One town found by two sources ("Stuttgart", "Stuttgart") shows once.
-        withoutTwinTowns(rankPlaces(query, providers + extra, near, region)).take(results)
+        // Every stop found, for the board of one opened from here (see foreignTwinMembers).
+        found.forEach { (_, answer) -> answer.getOrNull()?.forEach { if (it.kind == PlaceKind.Stop) seenStops[it.id] = it } }
+        val chosen = choice()
+        // Merging and ranking off the main thread, which the search field asks from (#109).
+        withContext(Dispatchers.Default) {
+            val joined = mutableMapOf<String, List<String>>()
+            val providers = mergeStops(found.map { (source, answer) -> source to answer.getOrDefault(emptyList()) }, results, joined)
+            // The stops of one station complex are remembered, so its departures come from all of them.
+            joined.forEach { (host, members) -> complexes[host] = members }
+            // A place of OpenStreetMap that a provider has too is shown once, as the provider has it.
+            val extra = osm.getOrDefault(emptyList())
+                .filter { place -> chosen.covers(place.latitude ?: 0.0, place.longitude ?: 0.0) }
+                .filter { place -> providers.none { known -> known.kind != PlaceKind.Stop && sameSpot(known, place) } }
+            // One town found by two sources ("Stuttgart", "Stuttgart") shows once.
+            withoutTwinTowns(rankPlaces(query, providers + extra, near, region)).take(results)
+        }
     }
 
     override val searchCenter: Pair<Double, Double>? get() = searchNear ?: searchRegion
@@ -304,7 +343,8 @@ class RoutingSource(
             }
         }
         val found = asked.flatMap { (_, answer) -> answer.await().getOrDefault(emptyList()) }
-        longDistanceStations(query, found, local = emptyList(), region = searchNear ?: searchRegion)
+        val region = searchNear ?: searchRegion
+        withContext(Dispatchers.Default) { longDistanceStations(query, found, local = emptyList(), region = region) }
     }
 
     /** Vehicles of the provider for the middle of the box; Transitous has them only for small boxes. */
@@ -317,13 +357,15 @@ class RoutingSource(
         products: Set<String>?,
     ): List<Vehicle> {
         val source = sourceAt((north + south) / 2, (west + east) / 2)
-        return client(source).vehicles(north, west, south, east, results, products).map { vehicle ->
+        val found = client(source).vehicles(north, west, south, east, results, products).map { vehicle ->
             vehicle.copy(
                 tripId = source.prefix + vehicle.tripId,
                 direction = localStopTerms(vehicle.direction),
                 nextStop = vehicle.nextStop?.let { localStopTerms(it) },
             )
         }
+        // Long-distance trains under the names HAFAS gave them (#271); no request.
+        return if (source == DataSource.Transitous) kindCheck.vehicles(found) else found
     }
 
     override suspend fun tripPath(tripId: String): List<Pair<Double, Double>> {
@@ -338,9 +380,16 @@ class RoutingSource(
 
     override suspend fun tripCourse(tripId: String): TripCourse {
         val source = sourceOf(tripId)
-        val course = withTrack(source, marked(source, client(source).tripCourse(plain(source, tripId))))
+        val course = withTrack(source, withKind(marked(source, client(source).tripCourse(plain(source, tripId)))))
         // The hops still without a way: its vehicle stands at their stations (see TripTrack).
         return course.copy(airHops = airHops(course.path, course.stops.map { it.place?.position }))
+    }
+
+    /** [course] under the name HAFAS gave its run, where one is known (#271, see RideKinds); no request. */
+    private fun withKind(course: TripCourse): TripCourse {
+        val fix = RideKindFixes.get(course.tripId) ?: return course
+        if (course.line == fix.line || !hafasNameWins(course.line, fix.line)) return course
+        return course.copy(line = fix.line, product = fix.product, providerColor = fix.color, providerTextColor = fix.textColor)
     }
 
     /**
@@ -359,13 +408,40 @@ class RoutingSource(
             val planned = stop.plannedDeparture ?: stop.departure ?: return@mapNotNull null
             position to planned
         }
-        val track = foregroundTrack(course.tripId, course.line, course.direction, boards) ?: return course
+        // A Transitous trip without its own way (a foreign feed's copy of a German train, #280)
+        // never waits: the known track or none, and a lookup for the next load. Its vehicle
+        // stands at the stations meanwhile (see TripCourse.airHops).
+        val track = if (source == DataSource.Transitous) {
+            knownTrackOrPrefetch(course.tripId, course.line, course.direction, boards)
+        } else {
+            foregroundTrack(course.tripId, course.line, course.direction, boards)
+        } ?: return course
         return course.copy(path = spliceTrack(course.path, stops, track))
     }
 
-    /** True when a trip of [product] from [source] may get its tracks from Transitous (see withTrack). */
+    /** The track known for [tripId]; where none is known yet it is looked up in the background (no wait). */
+    private fun knownTrackOrPrefetch(
+        tripId: String,
+        line: String?,
+        direction: String?,
+        boards: List<Pair<Pair<Double, Double>, OffsetDateTime>>,
+    ): List<Pair<Double, Double>>? {
+        TrackCache.get(tripId)?.let { return it.takeIf { track -> track.size >= 2 } }
+        if (TrackCache.claim(tripId)) {
+            val job = trackScope.launch { boundedTrack(tripId, line, direction, boards) }
+            job.invokeOnCompletion { TrackCache.release(tripId) }
+        }
+        return null
+    }
+
+    /**
+     * True when a trip of [product] from [source] may get its tracks from Transitous (see
+     * withTrack): a train of the regional HAFAS, and a train of Transitous itself whose feed
+     * sends only air lines (#280: Rejseplanen's copy of a Railjet Berlin - Hamburg), which takes
+     * the way of another copy of the run.
+     */
     private fun wantsTrack(source: DataSource, product: String, line: String?): Boolean =
-        source != DataSource.Transitous && runsOnRails(product, line) && Backend.Transitous in choice().inUse
+        runsOnRails(product, line) && Backend.Transitous in choice().inUse
 
     /**
      * [boundedTrack] for someone waiting for it (a course, a journey with its ways). A trip that
@@ -432,6 +508,8 @@ class RoutingSource(
     ): List<Pair<Double, Double>>? {
         TrackCache.get(tripId)?.let { return it.takeIf { track -> track.size >= 2 } }
         if (line == null || boards.isEmpty()) return null
+        // A Transitous trip never lends its own (missing) way to itself.
+        val own = if (sourceOf(tripId) == DataSource.Transitous) plain(DataSource.Transitous, tripId) else null
         for ((position, planned) in boards.take(TRACK_LOOKUP_STOPS)) {
             val found = transitous.departures(
                 positionStopId(position.first, position.second),
@@ -439,35 +517,30 @@ class RoutingSource(
                 TRACK_PRODUCTS,
                 planned.minusMinutes(TRACK_LOOKUP_LEAD_MINUTES),
             )
-            // The best fitting run: by its name, else by kind, minute and direction (see runScore).
-            val runId = found.filter { !it.cancelled && it.tripId != null }
-                .map { it to runScore(it, line, planned, direction) }
-                .filter { it.second > 0 }
-                .maxByOrNull { it.second }?.first?.tripId ?: continue
-            val track = transitous.tripPath(runId).takeIf { it.size >= 2 } ?: continue
-            TrackCache.put(tripId, track)
-            return track
+            // The best fitting runs: by name or long-distance number, else by kind, minute and
+            // direction, DELFI's copy first (see trackLenders); the first with a real way lends it.
+            // Another feed's copy drawn station to station (#280: the Dutch one of the RJ 382) is
+            // passed over, so the ride is not left with straight lines for good.
+            for (runId in trackLenders(found, own, line, planned, direction).take(TRACK_LENDER_TRIES)) {
+                val track = transitous.tripPath(runId)
+                if (!lendsWay(track)) continue
+                TrackCache.put(tripId, track)
+                // The track of an ICE or IC also goes into the long-distance network of the map far out.
+                LongDistanceNetwork.noteTrack(line, track)
+                return track
+            }
         }
         // Answered, but no such run: not asked again for a while.
         TrackCache.put(tripId, emptyList())
         return null
     }
 
-    /** The positions of the stops of the ride [leg] in order (null where one has none): where it is boarded, the stops between, where it is left. */
-    private fun rideStops(leg: Leg): List<Pair<Double, Double>?> =
-        listOf(leg.fromPlace?.position ?: leg.path.firstOrNull()) + leg.stopovers.map { it.place?.position } +
-            listOf(leg.toPlace?.position ?: leg.path.lastOrNull())
-
     /** True when [leg] is a train of [source] whose way has air lines that Transitous may fill (see withTrack). */
     private fun needsTrack(source: DataSource, leg: Leg): Boolean =
-        !leg.walking && leg.tripId != null && wantsTrack(source, leg.product, leg.line) && airHops(leg.path, rideStops(leg)).isNotEmpty()
+        !leg.walking && leg.tripId != null && wantsTrack(source, leg.product, leg.line) && airHops(leg.path, rideStopPositions(leg)).isNotEmpty()
 
     /** [leg] with the tracks Transitous lent its trip (see [trackOf]); as it is without them. */
-    private fun splicedLeg(leg: Leg, track: List<Pair<Double, Double>>?): Leg {
-        if (track == null || track.size < 2) return leg
-        val path = spliceTrack(leg.path, rideStops(leg), track)
-        return if (path === leg.path) leg else leg.copy(path = path)
-    }
+    private fun splicedLeg(leg: Leg, track: List<Pair<Double, Double>>?): Leg = withLentTrack(leg, track)
 
     private fun boardsOf(leg: Leg): List<Pair<Pair<Double, Double>, OffsetDateTime>> {
         val position = leg.fromPlace?.position ?: leg.path.firstOrNull() ?: return emptyList()
@@ -507,6 +580,8 @@ class RoutingSource(
      * the prefetch of the page before, see [pagePrefetch]); the page itself uses cache hits only.
      */
     private fun withTracks(source: DataSource, page: JourneyPage): JourneyPage {
+        // Outside the Berlin overview their notices fill the region's (see AlertHarvest); off this thread.
+        if (source == DataSource.Transitous) AlertHarvest.noteJourneys(page.journeys)
         val wanting = page.journeys.associateWith { journey -> journey.legs.filter { needsTrack(source, it) } }
         val all = wanting.values.flatten()
         synchronized(pagePrefetchLock) {
@@ -517,12 +592,15 @@ class RoutingSource(
             stale.forEach { it.value.cancel() }
             pagePrefetch = kept.associate { it.key to it.value } + prefetchTracks(all)
         }
-        if (all.isEmpty()) return page
-        return page.copy(
-            journeys = page.journeys.map { journey ->
-                val legs = wanting[journey].orEmpty()
-                if (legs.isEmpty()) journey else withKnownTracks(journey, legs)
-            },
+        if (all.isEmpty()) return withKinds(source, page)
+        return withKinds(
+            source,
+            page.copy(
+                journeys = page.journeys.map { journey ->
+                    val legs = wanting[journey].orEmpty()
+                    if (legs.isEmpty()) journey else withKnownTracks(journey, legs)
+                },
+            ),
         )
     }
 
@@ -561,14 +639,15 @@ class RoutingSource(
         products: Set<String>,
         time: OffsetDateTime?,
     ): List<Departure> {
-        val members = complexes[stopId].orEmpty()
+        val station = StationIdentity.resolveId(stopId)
+        val members = complexes[station] ?: foreignTwinMembers(station)
         // In the order they leave, cancelled runs at their planned time (see departureOrderTime),
         // each ride once (an S1 and an extra "1" at the same minute, see withoutDoubleRides).
-        if (members.isEmpty()) return inDepartureOrder(withoutDoubleRides(departuresAt(stopId, results, products, time)))
+        if (members.isEmpty()) return inDepartureOrder(withoutDoubleRides(departuresAt(station, results, products, time)))
         // A station complex: the departures of all its stops at once, in one list by time. One
         // stop that fails leaves the others; the same ride from two providers shows once.
         return coroutineScope {
-            val asked = (listOf(stopId) + members).map { id ->
+            val asked = (listOf(station) + members).map { id ->
                 async { attempt { departuresAt(id, results, products, time) } }
             }.map { it.await() }
             if (asked.all { it.isFailure }) throw asked.first().exceptionOrNull() ?: IOException("departures failed")
@@ -583,8 +662,9 @@ class RoutingSource(
 
     override suspend fun lineDepartures(stopId: String, line: String, product: String): List<Departure> {
         val source = sourceOf(stopId)
-        return reached(source) { client(source).lineDepartures(plain(source, stopId), line, product) }
+        val found = reached(source) { client(source).lineDepartures(plain(source, stopId), line, product) }
             .map { marked(source, it) }
+        return if (source == DataSource.Transitous) kindCheck.departures(found) else found
     }
 
     private suspend fun departuresAt(
@@ -596,6 +676,25 @@ class RoutingSource(
         val source = sourceOf(stopId)
         return reached(source) { client(source).departures(plain(source, stopId), results, products, time) }
             .map { marked(source, it) }
+            // Outside the Berlin overview their notices fill the region's (see AlertHarvest).
+            .also { if (source == DataSource.Transitous) AlertHarvest.noteDepartures(it) }
+            // Long-distance trains under the names HAFAS gives them (#271, see RideKindCheck).
+            .let { if (source == DataSource.Transitous) kindCheck.departures(it) else it }
+    }
+
+    /**
+     * The large stations around a place away from Berlin, for the notices of its region (see
+     * regionDisruptions): of Transitous, the stops nearest to it and the main stations its
+     * search finds near it, rail first (see bigStopsIn). Two requests, both kept for a while
+     * by TransitousSource. Empty when Transitous is not in use.
+     */
+    suspend fun regionHubs(latitude: Double, longitude: Double): List<Stop> = coroutineScope {
+        if (DataSource.Transitous !in choice().active) return@coroutineScope emptyList()
+        val center = latitude to longitude
+        val near = async { attempt { transitous.nearbyStops(latitude, longitude, REGION_NEARBY_STOPS) } }
+        val main = async { attempt { transitous.searchStopsNear(REGION_MAIN_QUERY, REGION_MAIN_RESULTS, center) } }
+        val found = near.await().getOrDefault(emptyList()) + main.await().getOrDefault(emptyList())
+        bigStopsIn(found, regionBox(center), center, REGION_HUBS).map { marked(DataSource.Transitous, it) }
     }
 
     override suspend fun arrivals(
@@ -634,7 +733,24 @@ class RoutingSource(
                     placeFor(source, from), placeFor(source, to), plainVia(source, options), results, departure, arrival,
                 )
             }
-            return withTracks(source, withVia(marked(source, page), via))
+            val single = withTracks(source, withVia(marked(source, page), via))
+            // Nothing soon (#35a: only the next morning, although trains passed the place all
+            // evening): the same put together from a search to the place and one from there,
+            // which keep to the time asked; the earlier of the two answers is shown.
+            if (arrival == null) {
+                val asked = departure ?: OffsetDateTime.now()
+                if (viaFoundTooLate(asked, single.journeys)) {
+                    val composed = try {
+                        viaJourneys(from, to, via, options.copy(via = null), results, departure, null)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (composed != null && earlierVia(asked, single.journeys, composed.journeys)) return composed
+                }
+            }
+            return single
         }
         val start = placeFor(source, from)
         val end = placeFor(source, to)
@@ -651,16 +767,54 @@ class RoutingSource(
                 client(standIn).journeys(placeFor(standIn, from), placeFor(standIn, to), options, results, departure, arrival)
             }
             noteStandIn(standIn)
-            marked(standIn, page)
+            withKinds(standIn, marked(standIn, page))
         }
+    }
+
+    /**
+     * True when the followed [journey] runs on a stand-in (#185): its handle is of another
+     * provider than the one that would be asked first for its two ends (Transitous for a trip
+     * in Berlin, after the VBB family failed once).
+     */
+    fun onStandIn(journey: Journey): Boolean {
+        val token = journey.refreshToken ?: return false
+        if (journey.split != null) return false
+        val from = journey.legs.firstOrNull()?.fromPlace ?: return false
+        val to = journey.legs.lastOrNull()?.toPlace ?: return false
+        return sourceOf(token) != journeySource(from, to)
+    }
+
+    /**
+     * The followed [journey], which runs on a stand-in (see [onStandIn]), found again with the
+     * provider that would be asked first (#185): one search from its start at its departure,
+     * the same rides picked by [preferredTwin] (its walks may differ and are taken), with the
+     * names and planned times of the rides kept (its id stays). Null where it does not answer or has no such journey. Only for a followed trip,
+     * with the backoff of [ReturnProbe]: the battery rule allows nothing else.
+     */
+    suspend fun preferredAgain(journey: Journey): Journey? {
+        if (!onStandIn(journey)) return null
+        val from = journey.legs.first().fromPlace ?: return null
+        val to = journey.legs.last().toPlace ?: return null
+        val preferred = journeySource(from, to)
+        val page = reached(preferred) {
+            client(preferred).journeys(placeFor(preferred, from), placeFor(preferred, to), SearchOptions(), RETURN_SEARCH_RESULTS, journey.departure.minusMinutes(1), null)
+        }
+        val twin = preferredTwin(journey, marked(preferred, page).journeys) ?: return null
+        // Back on the first choice: the hint "Daten: Transitous" goes.
+        noteStandIn(preferred)
+        return withTracks(preferred, twin, wait = false)
     }
 
     override suspend fun refreshJourney(refreshToken: String, stopovers: Boolean, polylines: Boolean): Journey? {
         val source = sourceOf(refreshToken)
         val fresh = client(source).refreshJourney(plain(source, refreshToken), stopovers, polylines)?.let { marked(source, it) }
             ?: return null
+        if (source == DataSource.Transitous) AlertHarvest.noteJourneys(listOf(fresh))
         // Loaded with its ways (the detail, a followed trip): the tracks of its trains are waited for.
-        return withTracks(source, fresh, wait = polylines)
+        // A Transitous trip does not wait for the track of another copy of its run (#280).
+        val tracked = withTracks(source, fresh, wait = polylines && source != DataSource.Transitous)
+        // A long-distance train under the name HAFAS gives it (#271): known at once, else looked up for the next load.
+        return if (source == DataSource.Transitous) kindCheck.journey(tracked) else tracked
     }
 
     // A further page goes to the provider of the page it follows.
@@ -767,7 +921,26 @@ class RoutingSource(
     }
 
     /** A place for a request to [source]: its own id when it came from there, otherwise its position. */
-    private fun placeFor(source: DataSource, place: Stop): Stop {
+    /**
+     * The stop a search starts or ends at for [place] (#96): where [place] is a foreign feed's
+     * stop of a station whose stop of the local feed is known (a member of its complex, see
+     * StationIdentity.preferredIndex), that one: it has all the station's services, and MOTIS
+     * reaches the twin's trains from it by the short footpath between them. Else [place].
+     */
+    private fun stationEndpoint(place: Stop): Stop {
+        if (place.kind != PlaceKind.Stop) return place
+        for ((hostId, members) in complexes) {
+            if (place.id !in members) continue
+            val host = seenStops[hostId] ?: continue
+            if (StationIdentity.otherFeedTwins(place, host) && StationIdentity.preferredIndex(listOf(place, host)) == 1) return host
+        }
+        return place
+    }
+
+    private fun placeFor(source: DataSource, asked: Stop): Stop {
+        // A stored stop of a feed that no longer answers goes by its station key (see StationIdentity.resolveId).
+        val current = StationIdentity.resolveId(asked.id)
+        val place = stationEndpoint(if (current == asked.id) asked else asked.copy(id = current))
         // A place of OpenStreetMap belongs to no provider: it is passed on by its position.
         if (isOsmPlace(place)) {
             if (place.position == null) throw IOException("place without position")
@@ -811,6 +984,8 @@ internal fun sameRide(a: Departure, b: Departure): Boolean {
     if (a.tripId != null && a.tripId == b.tripId) return first == null || second == null || first == second
     // A cancelled run and the extra run in its place are two runs (see mergeReplacements).
     if (a.cancelled != b.cancelled && (a.additional || b.additional)) return false
+    // One long-distance train from two feeds (#96): its number, its minute, its way.
+    if (sameTrainRun(a, b)) return true
     if (normalLine(a.line) != normalLine(b.line)) return false
     if (first == null || second == null || first != second) return false
     // The same line at the same minute from the same platform: one ride, however two
@@ -875,13 +1050,16 @@ private fun marked(source: DataSource, stop: Stop): Stop =
 // A stop of a list of stops (nearby, found by name) with its sign where its platforms are in
 // OpenStreetMap, not where the provider's point lies (see stopSignPoint): the map draws the
 // sign, the marked stop and the vehicles lined up beside it there.
-private fun signed(source: DataSource, stop: Stop): Stop = OsmStations.signPlace(marked(source, stop))
+private fun signed(source: DataSource, stop: Stop): Stop =
+    OsmStations.signPlace(marked(source, stop)).also { if (it.kind == PlaceKind.Stop) StationIdentity.noteSeen(it) }
 
 private fun marked(source: DataSource, stopover: Stopover): Stopover =
     stopover.copy(name = localStopTerms(stopover.name, latitude = stopover.place?.latitude, longitude = stopover.place?.longitude), place = stopover.place?.let { marked(source, it) })
 
 private fun marked(source: DataSource, departure: Departure): Departure = departure.copy(
     tripId = departure.tripId?.let { source.prefix + it },
+    // Only a plausible platform: ids of stop points are no tracks (see shownPlatform).
+    platform = plausiblePlatform(departure.platform, departure.product),
     direction = localStopTerms(departure.direction),
     destination = departure.destination?.let { marked(source, it) },
     // The stop a notice was found at can be shown on the map and asked for again.
@@ -901,6 +1079,13 @@ private fun marked(source: DataSource, leg: Leg): Leg = clippedRide(leg).copy(
     toPlace = leg.toPlace?.let { marked(source, it) },
     stopovers = leg.stopovers.map { marked(source, it) },
     tripId = leg.tripId?.let { source.prefix + it },
+    // Only plausible platforms: ids of stop points are no tracks (see shownPlatform).
+    departurePlatform = plausiblePlatform(leg.departurePlatform, leg.product),
+    arrivalPlatform = plausiblePlatform(leg.arrivalPlatform, leg.product),
+    plannedDeparturePlatform = plausiblePlatform(leg.plannedDeparturePlatform, leg.product),
+    plannedArrivalPlatform = plausiblePlatform(leg.plannedArrivalPlatform, leg.product),
+    // The stop a notice of a station was found at can be shown on the map and asked for again.
+    warnings = leg.warnings.map { warning -> if (warning.stop == null) warning else warning.copy(stop = marked(source, warning.stop)) },
 )
 
 // In this order: each ride's way clipped at its stops (in marked of the leg, see clippedRide);
@@ -942,6 +1127,12 @@ private fun mergeStops(
         val at = kept.indexOfFirst { samePlace(it, stop) }
         if (at < 0) return false
         val host = kept[at]
+        if (host.kind == PlaceKind.Stop && stop.kind == PlaceKind.Stop && host.id != stop.id && localStationFirst(host, stop)) {
+            // A foreign feed's stop came first ("Francfort sur le Main", #96): the local one stands for the station.
+            kept[at] = stop.copy(products = host.products + stop.products)
+            complexes[stop.id] = (complexes.remove(host.id).orEmpty() + host.id).distinct()
+            return true
+        }
         if (host.kind == PlaceKind.Stop && stop.kind == PlaceKind.Stop && host.id != stop.id) {
             kept[at] = host.copy(products = host.products + stop.products)
             // The same station of another provider only adds what the first one lacks
@@ -964,6 +1155,9 @@ private fun mergeStops(
     val localRows = if (rest.isEmpty()) results else maxOf(results - rest.size, (results + 1) / 2)
     return (local.take(localRows) + rest).take(results)
 }
+
+// The stops around a long-distance station looked at for a twin of another feed.
+private const val TWIN_NEARBY_STOPS = 8
 
 // Two stops this close are one station, whatever each provider calls it.
 private const val SAME_STATION_METERS = 300
@@ -1044,6 +1238,10 @@ fun ownServerUrl(text: String): String {
     return if (web && url.length > "https://".length) url else BvgRestSource.DEFAULT_URL
 }
 
+// Looking up the tracks of a train at Transitous (see RoutingSource.trackOf): at most this many
+// runs that fit are asked for their way at one station before the next station is tried.
+private const val TRACK_LENDER_TRIES = 3
+
 // Looking up the tracks of a train at Transitous (see RoutingSource.withTrack): at most this many
 // of its first stations, this many departures from a few minutes before it leaves, of these
 // products, and no longer than this in all, so the course is not kept waiting.
@@ -1057,3 +1255,12 @@ private const val TRACK_LOOKUP_MILLIS = 6000L
 private const val TRACK_CLAIM_WAIT_MILLIS = 2500L
 private const val TRACK_CLAIM_POLL_MILLIS = 100L
 private val TRACK_PRODUCTS = setOf("express", "regional", "suburban")
+
+// The stops near a place asked for its large stations, and the search for the main stations
+// near it ("Hbf" finds "Bonn Hbf", "Köln Hbf"), with how many of its answers are taken.
+private const val REGION_NEARBY_STOPS = 40
+private const val REGION_MAIN_QUERY = "Hbf"
+private const val REGION_MAIN_RESULTS = 6
+
+// A search for the followed journey on the preferred provider (#185) asks for this many journeys.
+private const val RETURN_SEARCH_RESULTS = 4

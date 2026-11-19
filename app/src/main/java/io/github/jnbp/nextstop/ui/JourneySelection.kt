@@ -4,7 +4,13 @@ import io.github.jnbp.nextstop.data.Journey
 import io.github.jnbp.nextstop.data.TransferComfort
 import io.github.jnbp.nextstop.data.journeyChangesOf
 import io.github.jnbp.nextstop.data.journeyComfort
+import io.github.jnbp.nextstop.data.TIGHTER_EXTRA_CAP
+import io.github.jnbp.nextstop.data.groupFeederAlternatives
+import io.github.jnbp.nextstop.data.newExtras
+import io.github.jnbp.nextstop.data.withoutCancelledVariants
 import io.github.jnbp.nextstop.data.withoutDominated
+import io.github.jnbp.nextstop.data.withoutDuplicateRides
+import io.github.jnbp.nextstop.data.withoutTightTwins
 
 /**
  * The journeys of a search as every view of it shows them (chart, list and plan), and those
@@ -31,7 +37,9 @@ class JourneySelection(
  * is drawn (see [journeyComfort]), so the filter can never disagree with its tag or the marks
  * of its changes; [levels] is not asked for it. A journey without a change (also two rides
  * of one trip, staying on board) has no risk of missing one and is always shown. Of journeys
- * that only differ in a tighter change the one with more room is kept (see withoutDominated).
+ * that only differ in a tighter change the one with more room is kept (see withoutDominated);
+ * the same rides found twice show once, and variants with only another short last bus or tram
+ * are one column (see groupFeederAlternatives, #57).
  */
 fun journeySelection(
     journeys: List<Journey>?,
@@ -44,10 +52,39 @@ fun journeySelection(
     // A twin with a tighter change than another of the same lines and times is no choice of its
     // own (see withoutDominated); the one kept has at least as much room, so it is shown at every
     // level the twin would be.
-    val (shown, filtered) = withoutDominated(journeys).partition { direct(it) || levelOf(it).ordinal <= threshold.ordinal }
+    // The same rides found twice are one journey, whatever the walks (see withoutDuplicateRides, #57).
+    // A "knapp" twin of a looser journey on the same lines arriving in the same minute goes too (see withoutTightTwins, #130).
+    // A cancelled way to a train that another journey rides to the same stop and arrival goes (see withoutCancelledVariants, #233).
+    val kept = withoutTightTwins(withoutDuplicateRides(withoutDominated(withoutCancelledVariants(journeys))))
+    val (accepted, filtered) = kept.partition { direct(it) || levelOf(it).ordinal <= threshold.ordinal }
+    // The tightest level adds only what is new beside the others, and only a few (see newExtras):
+    // its journeys are mostly made in the app from every connection at every change (TightJourneys).
+    val sprint = threshold == TransferComfort.VeryRisky
+    val base = if (sprint) accepted.filter { direct(it) || levelOf(it) != TransferComfort.VeryRisky } else accepted
+    val grouped = groupFeederAlternatives(base)
+    val extras = if (sprint) newExtras(accepted.filter { !direct(it) && levelOf(it) == TransferComfort.VeryRisky }, grouped) else emptyList()
+    val shown = if (extras.isEmpty()) grouped else inOrderOf(journeys, grouped + extras)
     val filteredLevels = filtered.map { levelOf(it) }
     val next = filteredLevels.minByOrNull { it.ordinal }
-    return JourneySelection(shown, filtered, filteredLevels.toSet(), next, filteredLevels.count { it == next })
+    // "+N" counts the journeys the next level really adds: new ones only, grouped, and for the
+    // tightest level no more than it shows (see TIGHTER_EXTRA_CAP).
+    val nextCount = if (next == null) {
+        0
+    } else {
+        val cap = if (next == TransferComfort.VeryRisky) TIGHTER_EXTRA_CAP else Int.MAX_VALUE
+        newExtras(filtered.filter { levelOf(it) == next }, grouped, cap).size
+    }
+    return JourneySelection(shown, filtered, filteredLevels.toSet(), next, nextCount)
+}
+
+/**
+ * [picked] in the order of [order] (the search order), by the position of each journey there or
+ * of the journey it was made from (a grouped copy has the id of its original); unknown ones last.
+ */
+private fun inOrderOf(order: List<Journey>, picked: List<Journey>): List<Journey> {
+    val position = HashMap<String, Int>()
+    order.forEachIndexed { index, journey -> position.putIfAbsent(journey.id, index) }
+    return picked.sortedBy { position[it.id] ?: Int.MAX_VALUE }
 }
 
 /**

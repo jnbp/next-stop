@@ -40,13 +40,13 @@ class TransitousSource(
 ) : TransitSource {
     private val baseUrl: String = baseUrl.trim().trimEnd('/')
 
-    // Short-lived answers by request, so that repeated asks within seconds cost nothing.
-    private val cache = object : LinkedHashMap<String, Pair<Long, String>>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, String>>?): Boolean =
-            size > CACHE_ENTRIES
-    }
+    // Short-lived answers by request, so that repeated asks within seconds cost nothing; within
+    // a budget of text, and forgotten once too old (see ResponseCache, #72).
+    private val cache = ResponseCache(CACHE_ENTRIES, CACHE_MAX_CHARS, CACHE_MAX_ENTRY_CHARS)
 
     // The way of a trip on the map by its id; it does not change, so it is fetched only once.
+    // At most SHAPE_ENTRIES ways and SHAPE_MAX_POINTS points in all: the way of an ICE across
+    // the country has tens of thousands (see keepShape).
     private val shapes = object : LinkedHashMap<String, List<Pair<Double, Double>>>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Pair<Double, Double>>>?): Boolean =
             size > SHAPE_ENTRIES
@@ -210,7 +210,8 @@ class TransitousSource(
                 tripId = tripId,
                 line = lineName(leg),
                 product = productOf(leg),
-                direction = leg.text("headsign"),
+                // A bare "Hauptbahnhof" gets the town of the last stop (#85).
+                direction = fullHeadsign(leg.text("headsign"), tripPlaces(trip).lastOrNull()?.text("name")),
                 stops = stopoversOf(tripPlaces(trip), trip.realtime),
                 path = shapeOf(tripId).orEmpty(),
                 providerColor = colorOf(leg),
@@ -242,7 +243,7 @@ class TransitousSource(
             Departure(
                 line = lineName(item) ?: "?",
                 product = productOf(item),
-                direction = item.text("headsign") ?: item.optJSONObject("tripTo")?.text("name") ?: "",
+                direction = fullHeadsign(item.text("headsign"), item.optJSONObject("tripTo")?.text("name")) ?: "",
                 time = current,
                 plannedTime = planned,
                 delaySeconds = if (realtime && current != null && planned != null) {
@@ -254,8 +255,10 @@ class TransitousSource(
                 cancelled = item.optBoolean("cancelled", false) || item.optBoolean("tripCancelled", false),
                 tripId = item.text("tripId"),
                 destination = item.optJSONObject("tripTo")?.let { placeStop(it) },
-                // The alerts of the run and of its stop (MOTIS sends them with withAlerts=true).
-                warnings = (warningsOf(item.optJSONArray("alerts")) + warningsOf(place.optJSONArray("alerts"))).distinct(),
+                // The alerts of the run and of its stop (MOTIS sends them with withAlerts=true),
+                // each at the stop of the departure, so it has a place in the region and on the map.
+                warnings = (warningsOf(item.optJSONArray("alerts")) + warningsOf(place.optJSONArray("alerts")))
+                    .distinct().let { list -> placeStop(place).let { stop -> list.map { it.copy(stop = stop) } } },
                 providerColor = colorOf(item),
                 providerTextColor = textColorOf(item),
                 at = placeStop(place).position,
@@ -350,10 +353,12 @@ class TransitousSource(
         if (options.comfort.minutes > 0) query.append("&minTransferTime=").append(options.comfort.minutes)
         // Very risky also asks for changes with no time at all.
         if (options.comfort == TransferComfort.VeryRisky) query.append("&minTransferTime=0")
-        when (options.walkingSpeed) {
-            WalkingSpeed.Slow -> query.append("&pedestrianSpeed=0.9")
-            WalkingSpeed.Fast -> query.append("&pedestrianSpeed=1.7")
-            WalkingSpeed.Normal -> Unit
+        val ownSpeed = options.ownWalkFactor?.let { motisPedestrianSpeed(options.walkFactorInUse) }
+        when {
+            // An own factor (#198) at its own speed; brisk searches stay brisk.
+            ownSpeed != null && !options.brisk -> query.append("&pedestrianSpeed=").append(ownSpeed)
+            options.walkingSpeed == WalkingSpeed.Slow -> query.append("&pedestrianSpeed=0.9")
+            options.walkingSpeed == WalkingSpeed.Fast -> query.append("&pedestrianSpeed=1.7")
         }
         if (options.accessibility == Accessibility.Complete) query.append("&pedestrianProfile=WHEELCHAIR")
         if (combo) {
@@ -365,12 +370,14 @@ class TransitousSource(
             query.append("&preTransitModes=BIKE&postTransitModes=BIKE")
             query.append("&maxPreTransitTime=").append(COMBO_MAX_BIKE_SECONDS)
             query.append("&maxPostTransitTime=").append(COMBO_MAX_BIKE_SECONDS)
-            query.append("&cyclingSpeed=").append(COMBO_CYCLING_SPEED)
+            query.append("&cyclingSpeed=").append(BikePace.speedParam(BikePace.kmh))
         } else {
             query.append(journeyModeQuery(options.products))
         }
-        // Only trips that allow bike carriage (MOTIS `requireBikeTransport`), also for the combo.
-        if (options.carriesBike) query.append("&requireBikeTransport=true")
+        // The bike combo needs MOTIS to carry the bicycle through (`requireBikeTransport`) for its
+        // stretches by bicycle at both ends. "Fahrrad dabei" alone does not ask for it (#263): too
+        // many feeds say nothing about bicycles; the app's own BikeRules filter instead (see ticketFits).
+        if (options.bikeCombo) query.append("&requireBikeTransport=true")
         // A stop to pass (MOTIS: `via`, stop ids only, and `viaMinimumStay` in minutes, 0 = pass through).
         val via = options.via
         if (via != null && via.place.kind == PlaceKind.Stop && !isPositionId(via.place.id)) {
@@ -440,13 +447,22 @@ class TransitousSource(
             plannedArrival = plannedArrival,
             departurePlatform = fromJson.text("track"),
             arrivalPlatform = toJson.text("track"),
-            direction = item.text("headsign"),
+            plannedDeparturePlatform = fromJson.text("scheduledTrack"),
+            plannedArrivalPlatform = toJson.text("scheduledTrack"),
+            direction = fullHeadsign(item.text("headsign"), item.optJSONObject("tripTo")?.text("name")),
             cancelled = item.optBoolean("cancelled", false),
             realtime = realtime,
             path = if (walking && shape.isEmpty()) straightWay(fromPlace, toPlace) else shape,
             fromPlace = fromPlace,
             toPlace = toPlace,
-            warnings = warningsOf(item.optJSONArray("alerts")),
+            // The alerts of the ride, and those of the stops it is boarded and left at (MOTIS
+            // puts the notices of a station, a lift or a closed entrance, on the place).
+            warnings = if (walking) {
+                warningsOf(item.optJSONArray("alerts"))
+            } else {
+                (warningsOf(item.optJSONArray("alerts")) + placeWarnings(fromJson, fromPlace) + placeWarnings(toJson, toPlace))
+                    .distinctBy { it.summary to it.text }
+            },
             stopovers = stopoversOf(places, realtime),
             tripId = if (walking) null else tripId,
             // MOTIS: the vehicle goes on from the ride before (interlining).
@@ -568,7 +584,10 @@ class TransitousSource(
         val fromPlace = placeStop(boardJson)
         val toPlace = placeStop(alightJson)
         val path = if (polylines) {
-            cutPath(shapeOf(tripId).orEmpty(), fromPlace.position, toPlace.position)
+            val shape = shapeOf(tripId).orEmpty()
+            // Cut between the very calls of the ride: a ring line passes its stops more than once (see TripMatch).
+            TripMatch.cutBetween(shape, places.map { placePosition(it) }, board, alight)
+                ?: cutPath(shape, fromPlace.position, toPlace.position)
         } else {
             emptyList()
         }
@@ -584,14 +603,19 @@ class TransitousSource(
             plannedArrival = plannedArrival,
             departurePlatform = boardJson.text("track"),
             arrivalPlatform = alightJson.text("track"),
-            direction = leg.text("headsign"),
+            plannedDeparturePlatform = boardJson.text("scheduledTrack"),
+            plannedArrivalPlatform = alightJson.text("scheduledTrack"),
+            direction = fullHeadsign(leg.text("headsign"), leg.optJSONObject("tripTo")?.text("name")),
             cancelled = leg.optBoolean("cancelled", false) ||
                 boardJson.optBoolean("cancelled", false) || alightJson.optBoolean("cancelled", false),
             realtime = trip.realtime,
             path = path,
             fromPlace = fromPlace,
             toPlace = toPlace,
-            warnings = trip.legs.flatMap { warningsOf(it.optJSONArray("alerts")) }.distinct(),
+            warnings = (
+                trip.legs.flatMap { warningsOf(it.optJSONArray("alerts")) } +
+                    placeWarnings(boardJson, fromPlace) + placeWarnings(alightJson, toPlace)
+                ).distinctBy { it.summary to it.text },
             stopovers = stopoversOf(places.subList(board, alight + 1), trip.realtime),
             tripId = tripId,
             providerColor = colorOf(leg),
@@ -640,12 +664,25 @@ class TransitousSource(
                 val points = geometry?.text("points")
                 if (geometry == null || points == null) emptyList() else decodeGeometry(points, geometry, leg.optJSONObject("from"))
             }
-            if (shape.isNotEmpty()) synchronized(shapes) { shapes[tripId] = shape }
+            if (shape.isNotEmpty()) keepShape(tripId, shape)
         }
         return TripAnswer(legs)
     }
 
     private fun shapeOf(tripId: String): List<Pair<Double, Double>>? = synchronized(shapes) { shapes[tripId] }
+
+    // Keeps [shape] for [tripId]; the ways used longest ago go while all hold more than SHAPE_MAX_POINTS points.
+    private fun keepShape(tripId: String, shape: List<Pair<Double, Double>>) = synchronized(shapes) {
+        shapes[tripId] = shape
+        var points = shapes.values.sumOf { it.size }
+        val order = shapes.entries.iterator()
+        while (points > SHAPE_MAX_POINTS && order.hasNext()) {
+            val oldest = order.next()
+            if (oldest.key == tripId) continue
+            points -= oldest.value.size
+            order.remove()
+        }
+    }
 
     /** All stops of a trip in order, each once: the ends and the stops between of every leg. */
     private fun tripPlaces(trip: TripAnswer): List<JSONObject> {
@@ -852,12 +889,46 @@ class TransitousSource(
         }
     }
 
-    private fun get(path: String, keepMillis: Long): String {
-        val now = System.currentTimeMillis()
-        synchronized(cache) {
-            val known = cache[path]
-            if (known != null && now - known.first < keepMillis) return known.second
+    /**
+     * The hops (stop to stop, with their shapes) of the long-distance trains (HIGHSPEED_RAIL,
+     * LONG_DISTANCE, NIGHT_RAIL) that run in the box during the next [minutes], as the map of
+     * MOTIS knows them, asked at the low [zoom] of a whole country, where it sends long-distance
+     * trains alone: one request for the long-distance network of the map far out (see
+     * LongDistanceNetwork). Each hop with the mode of its trip and the name of its line.
+     */
+    suspend fun longDistanceHops(
+        north: Double,
+        west: Double,
+        south: Double,
+        east: Double,
+        zoom: Double,
+        minutes: Long,
+    ): List<LongDistanceHop> = withContext(Dispatchers.IO) {
+        val now = OffsetDateTime.now()
+        val query = "/api/v6/map/trips?zoom=${"%.1f".format(Locale.ROOT, zoom)}" +
+            "&min=$south,$west&max=$north,$east" +
+            "&startTime=${encode(isoTime(now))}&endTime=${encode(isoTime(now.plusMinutes(minutes)))}" +
+            "&precision=5&language=$language"
+        val list = JSONArray(get(query, CACHE_VEHICLES_MILLIS))
+        val hops = ArrayList<LongDistanceHop>()
+        for (index in 0 until list.length()) {
+            val segment = list.optJSONObject(index) ?: continue
+            val mode = segment.text("mode") ?: continue
+            if (mode != "HIGHSPEED_RAIL" && mode != "LONG_DISTANCE" && mode != "NIGHT_RAIL") continue
+            val shape = try {
+                decodePolyline(segment.text("polyline") ?: continue, 5)
+            } catch (e: Exception) {
+                continue
+            }
+            if (shape.size < 2) continue
+            val trip = segment.optJSONArray("trips")?.optJSONObject(0)
+            hops.add(LongDistanceHop(mode, trip?.text("routeShortName") ?: trip?.text("displayName"), shape))
         }
+        hops
+    }
+
+    private fun get(path: String, keepMillis: Long): String {
+        cache.get(path, keepMillis, System.currentTimeMillis())?.let { return it }
         val started = System.nanoTime()
         val connection = URL(baseUrl + path).openConnection() as HttpURLConnection
         try {
@@ -869,7 +940,7 @@ class TransitousSource(
             logHttpAnswer("transitous", path, code, started)
             if (code !in 200..299) throw HttpStatusException(code)
             val body = connection.inputStream.bufferedReader().use { it.readText() }
-            synchronized(cache) { cache[path] = System.currentTimeMillis() to body }
+            cache.put(path, body, keepMillis, System.currentTimeMillis())
             return body
         } finally {
             connection.disconnect()
@@ -913,9 +984,8 @@ private data class PageReplay(val arriveBy: Boolean, val time: String?) {
 }
 
 // The bike combo: the longest ride by bicycle to the first and from the last stop (MOTIS caps it
-// at its own limit), and the speed of it in metres per second (about 15 km/h, a relaxed pace).
+// at its own limit). Its pace is the one chosen in the settings (see BikePace).
 private const val COMBO_MAX_BIKE_SECONDS = 1800
-private const val COMBO_CYCLING_SPEED = "4.2"
 
 // Places saved from the former DB source carry their position in place of an id (see AppPrefs).
 private const val POSITION_ID_PREFIX = "pos:"
@@ -982,8 +1052,6 @@ private fun textColorOf(item: JSONObject): Int? =
 private fun isStreetMode(mode: String?): Boolean =
     mode in setOf("WALK", "BIKE", "RENTAL", "CAR", "CAR_PARKING", "CAR_DROPOFF", "FLEX", "HGV")
 
-private val TRAIN_MODES = setOf("HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_RAIL", "REGIONAL_FAST_RAIL", "RAIL")
-
 /** The name of the line of a leg, a stop time or a trip (see [composeLineName]). */
 private fun lineName(item: JSONObject): String? = rapidLineName(composeLineName(
     mode = item.text("mode"),
@@ -996,92 +1064,12 @@ private fun lineName(item: JSONObject): String? = rapidLineName(composeLineName(
 ), productKey(item.text("mode") ?: ""))
 
 /**
- * The name of a line. Trains and coaches get their kind in front of a bare number:
- * "ICE 29" for a route named "29", "ICE 1234" for a route named only "ICE" with trip
- * number 1234, "RE 1" for a regional route "1". The kind comes from the category, else
- * from the display name, the route names, and last from the mode and the operator.
- * Other lines keep the short name of the route or what MOTIS shows.
+ * The alerts MOTIS puts on [place] (a stop of a ride: a lift, an entrance, a stop that moved),
+ * each with [stop] as its stop; only where [stop] is a stop with a position.
  */
-internal fun composeLineName(
-    mode: String?,
-    route: String?,
-    number: String?,
-    display: String?,
-    category: String?,
-    longName: String?,
-    agency: String?,
-): String? {
-    // A name that is only the word for the product ("Bus") is no name of a line: the number
-    // comes from another field then.
-    val routeName = route?.trim()?.takeIf { it.isNotEmpty() && !isProductWord(it) }
-    val trip = number?.trim()?.takeIf { it.isNotEmpty() }
-    val shown = display?.trim()?.takeIf { it.isNotEmpty() && !isProductWord(it) }
-    val shortLong = longName?.trim()?.takeIf { it.length in 1..5 && it.any { char -> char.isDigit() } && !it.contains(' ') }
-    val categoryName = category?.trim()?.takeIf { it.isNotEmpty() }
-    // A FlixBus by the code of its line ("N1334", "260"): "FlixBus N1334" (see flixLineName).
-    if (mode == "COACH" && agency.orEmpty().contains("Flix", ignoreCase = true)) {
-        val code = routeName ?: shown ?: trip
-        return if (code == null || code.contains("flix", ignoreCase = true) || code.startsWith("FLX", ignoreCase = true)) {
-            code ?: "FlixBus"
-        } else {
-            "FlixBus $code"
-        }
-    }
-    if (mode in TRAIN_MODES || mode == "COACH") {
-        val kind = trainKindOf(categoryName) ?: categoryName?.takeIf { it.none { char -> char.isDigit() } }
-            ?: kindOf(shown) ?: kindOf(routeName) ?: kindOf(longName)
-            ?: trainKindOf(longName) ?: trainKindOf(agency) ?: defaultKind(mode, agency)
-        val routeIsNumber = routeName != null && routeName.all { it.isDigit() }
-        val tripIsNumber = trip != null && trip.all { it.isDigit() }
-        val routeKind = routeName?.takeIf { it.none { char -> char.isDigit() } }?.let { trainKindOf(it) }
-        when {
-            // The route names only the kind: the trip number goes behind it.
-            routeName != null && kind != null && routeName.equals(kind, ignoreCase = true) && tripIsNumber ->
-                return "$routeName $trip"
-            routeName != null && routeIsNumber && kind != null -> return "$kind $routeName"
-            routeName == null && kind != null && shown != null && shown.all { it.isDigit() } -> return "$kind $shown"
-            routeName == null && shown == null && kind != null && tripIsNumber -> return "$kind $trip"
-            // The route names only the kind in words ("Railjet", "EuroCity"): the kind's code
-            // and the number, from the trip or the shown name ("RJ 174"), never the word alone.
-            // Trains only: a coach named "Intercity" is no IC.
-            mode in TRAIN_MODES && routeKind != null -> {
-                val code = routeKind
-                if (tripIsNumber) return "$code $trip"
-                if (shown != null && shown.all { it.isDigit() }) return "$code $shown"
-                if (shown != null && shown.any { it.isDigit() } && kindOf(shown) != null) return shown
-            }
-        }
-    }
-    if (routeName == null && shown == null && shortLong == null) {
-        // Only the product is named: a bus or tram without its number shows the trip number
-        // only where nothing else is known.
-        val word = route?.trim()?.takeIf { it.isNotEmpty() } ?: display?.trim()?.takeIf { it.isNotEmpty() }
-        return trip?.takeIf { word == null || mode in TRAIN_MODES || it.length <= 4 } ?: word ?: categoryName
-    }
-    return routeName ?: shown ?: shortLong ?: trip ?: categoryName
-}
-
-/** The kind at the start of a line name such as "ICE 29" or "RE1": two to four capitals before a number or the end. */
-private fun kindOf(name: String?): String? {
-    val text = name?.trim() ?: return null
-    val kind = text.takeWhile { it.isLetter() && it.isUpperCase() }
-    if (kind.length !in 2..4) return null
-    val rest = text.substring(kind.length)
-    return if (rest.isEmpty() || rest.first() == ' ' || rest.first().isDigit()) kind else null
-}
-
-/** The kind of a long-distance train in Germany when MOTIS names none: by the operator and the mode. */
-private fun defaultKind(mode: String?, agency: String?): String? {
-    val operator = agency.orEmpty()
-    if (operator.contains("Flix", ignoreCase = true)) return "FLX"
-    val germanRail = agency == null || operator.contains("DB ") || operator.startsWith("DB") ||
-        operator.contains("Deutsche Bahn", ignoreCase = true)
-    if (!germanRail) return null
-    return when (mode) {
-        "HIGHSPEED_RAIL" -> "ICE"
-        "LONG_DISTANCE" -> "IC"
-        else -> null
-    }
+private fun placeWarnings(place: JSONObject, stop: Stop): List<Warning> {
+    if (stop.kind != PlaceKind.Stop || stop.position == null) return emptyList()
+    return warningsOf(place.optJSONArray("alerts")).map { it.copy(stop = stop) }
 }
 
 private fun warningsOf(alerts: JSONArray?): List<Warning> {
@@ -1121,8 +1109,9 @@ private fun cutPath(
     to: Pair<Double, Double>?,
 ): List<Pair<Double, Double>> {
     if (shape.isEmpty() || from == null || to == null) return shape
-    val start = shape.indices.minByOrNull { distanceMeters(shape[it], from) } ?: 0
-    val end = (start until shape.size).minByOrNull { distanceMeters(shape[it], to) } ?: shape.lastIndex
+    // On the first pass of the way that reaches each stop: a ring passes them more than once.
+    val start = TripMatch.pathIndex(shape, from, 0)
+    val end = TripMatch.pathIndex(shape, to, start)
     return if (end <= start) listOf(from, to) else shape.subList(start, end + 1)
 }
 
@@ -1242,6 +1231,13 @@ private fun isoTime(time: OffsetDateTime): String = time.withNano(0).format(Date
 // org.json gives the text "null" for JSON null and fails on missing keys; these return a real null.
 private fun JSONObject.text(key: String): String? = if (isNull(key)) null else optString(key).takeIf { it.isNotEmpty() }
 
+/** Where a place of a MOTIS trip lies; null without both coordinates. */
+private fun placePosition(place: JSONObject): Pair<Double, Double>? {
+    val latitude = place.number("lat") ?: return null
+    val longitude = place.number("lon") ?: return null
+    return latitude to longitude
+}
+
 private fun JSONObject.number(key: String): Double? =
     if (isNull(key)) null else optDouble(key).takeIf { !it.isNaN() }
 
@@ -1265,6 +1261,13 @@ private const val MAX_VEHICLE_BOX_DEGREES = 0.6
 
 private const val CACHE_ENTRIES = 32
 private const val SHAPE_ENTRIES = 48
+
+// All answers kept hold at most this many characters (a few megabytes), one at most a third of it.
+private const val CACHE_MAX_CHARS = 3_000_000L
+private const val CACHE_MAX_ENTRY_CHARS = 1_000_000
+
+// The ways of trips kept hold at most this many points in all (about 10 MB; an ICE across the country has some 30 000).
+private const val SHAPE_MAX_POINTS = 200_000
 private const val CACHE_PLAN_MILLIS = 60_000L
 private const val CACHE_TRIP_MILLIS = 20_000L
 private const val CACHE_STOPTIMES_MILLIS = 20_000L

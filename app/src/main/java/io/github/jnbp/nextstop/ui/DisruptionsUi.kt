@@ -1,6 +1,13 @@
 package io.github.jnbp.nextstop.ui
 
 import io.github.jnbp.nextstop.ui.theme.AppColors
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import io.github.jnbp.nextstop.ui.theme.AppFont
+import androidx.compose.foundation.layout.heightIn
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -35,6 +42,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -43,6 +51,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -83,7 +93,7 @@ import kotlinx.coroutines.CancellationException
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.AppLanguage
 import io.github.jnbp.nextstop.data.BVG_DISRUPTIONS_URL
-import io.github.jnbp.nextstop.data.LineColors
+import io.github.jnbp.nextstop.data.colourPlace
 import io.github.jnbp.nextstop.data.NoticeLinkKind
 import io.github.jnbp.nextstop.data.Disruption
 import io.github.jnbp.nextstop.data.DisruptionGroup
@@ -372,9 +382,23 @@ fun rememberNotificationAsk(): () -> Unit {
  * to the settings of the watch.
  */
 @Composable
-fun DisruptionBell(route: SavedRoute, onChange: () -> Unit = {}, onSettings: (() -> Unit)? = null) {
+fun DisruptionBell(route: SavedRoute, onChange: () -> Unit = {}, onSettings: (() -> Unit)? = null) =
+    DisruptionBell(watchKey = route.id, onChange = onChange, onSettings = onSettings)
+
+/**
+ * The bell of anything that can be watched, by its key in the watched set: a saved route
+ * (its id), a place or a favourite stop (see placeWatchKey). One logic for all: "tell me
+ * about problems"; off until switched on. [size] is the size of the round button.
+ */
+@Composable
+fun DisruptionBell(
+    watchKey: String,
+    onChange: () -> Unit = {},
+    onSettings: (() -> Unit)? = null,
+    size: androidx.compose.ui.unit.Dp = 48.dp,
+) {
     val context = LocalContext.current
-    var on by remember(route.id) { mutableStateOf(route.id in DisruptionWatch.watched(context)) }
+    var on by remember(watchKey) { mutableStateOf(watchKey in DisruptionWatch.watched(context)) }
     var explain by remember { mutableStateOf(false) }
     val askNotify = rememberNotificationAsk()
     val description = stringResource(R.string.disruption_bell_on)
@@ -386,7 +410,7 @@ fun DisruptionBell(route: SavedRoute, onChange: () -> Unit = {}, onSettings: (()
             .border(1.dp, glassRim(), CircleShape)
             .toggleable(value = on, role = Role.Switch) { value ->
                 on = value
-                DisruptionWatch.setWatched(context, route.id, value)
+                DisruptionWatch.setWatched(context, watchKey, value)
                 if (value) {
                     askNotify()
                     if (!DisruptionWatch.bellExplained(context)) {
@@ -396,7 +420,7 @@ fun DisruptionBell(route: SavedRoute, onChange: () -> Unit = {}, onSettings: (()
                 }
                 onChange()
             }
-            .size(48.dp),
+            .size(size),
         contentAlignment = Alignment.Center,
     ) {
         BellIcon(color = if (on) AppColors.OnBlue else AppColors.Ink, filled = on)
@@ -423,7 +447,8 @@ fun DisruptionBell(route: SavedRoute, onChange: () -> Unit = {}, onSettings: (()
 @Composable
 fun BellExplainSheet(onSettings: (() -> Unit)?, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val period = remember { DisruptionWatch.periodMinutes(context) }
+    // No check every n minutes any more (battery rule): only on opening the app and at the set times.
+    val period = 0
     val times = remember { DisruptionWatch.checkTimes(context) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -716,8 +741,17 @@ fun AllDisruptionsPage(
     onBack: () -> Unit,
     place: FavoritesPage.PlaceDisruptionsPage? = null,
     onShowOnMap: ((Stop) -> Unit)? = null,
+    // The middles of the region (home, where the user is), and the watched ways: notices on
+    // their lines or near their places count wherever they are (see inRegion, relevantDisruptions).
+    // Without anchors there is no region switch.
+    anchors: List<Pair<Double, Double>> = emptyList(),
+    watchedLines: Set<String> = emptySet(),
+    watchedSpots: List<Pair<Double, Double>> = emptyList(),
 ) {
     val context = LocalContext.current
+    // The region or everything the network reports, and one kind of transport or all.
+    var wide by rememberSaveable { mutableStateOf(false) }
+    var kind by rememberSaveable { mutableStateOf<String?>(null) }
     // Back is AppRoot's: it goes back within the tab (see goBack there).
     var found by remember { mutableStateOf<List<Disruption>?>(null) }
     var failed by remember { mutableStateOf(false) }
@@ -775,11 +809,50 @@ fun AllDisruptionsPage(
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
         }
-        val list = found
+        val all = found
+        // The region and the kinds: worked out once per list and choice, not per frame.
+        val regional = remember(all, wide, anchors, watchedLines, watchedSpots) {
+            if (all == null || wide || place != null) {
+                all
+            } else {
+                val always = relevantDisruptions(all, watchedLines, watchedSpots).mapTo(HashSet()) { it.id }
+                all.filter { inRegion(it, anchors, always = always) }
+            }
+        }
+        // The search field: a line ("U9", "RE1"), a station or words of the text; filters as typed.
+        var query by rememberSaveable { mutableStateOf("") }
+        val searchable = remember(regional) { regional?.let { indexDisruptions(it) } }
+        val matching = remember(searchable, query) { searchable?.let { filterDisruptions(it, query) } }
+        // The chips keep all kinds of the region; the list shows what fits the search.
+        val allGroups = remember(regional, myLines) { groupDisruptions(regional.orEmpty(), myLines) }
+        val groups = remember(matching, myLines) { groupDisruptions(matching.orEmpty(), myLines) }
+        if (all != null && !failed) {
+            DisruptionSearchField(value = query, onChange = { query = it })
+        }
+        if (place == null && all != null && !failed) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (anchors.isNotEmpty()) {
+                    ToggleChip(text = stringResource(R.string.disruptions_region), on = !wide, onClick = { wide = false })
+                    ToggleChip(text = stringResource(R.string.disruptions_everywhere), on = wide, onClick = { wide = true })
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+                ToggleChip(text = stringResource(R.string.disruptions_kind_all), on = kind == null, onClick = { kind = null })
+                allGroups.keys.forEach { group ->
+                    ToggleChip(text = stringResource(groupLabel(group)), on = kind == group.name, onClick = { kind = group.name })
+                }
+            }
+        }
+        val list = if (kind == null) matching else groups.entries.firstOrNull { it.key.name == kind }?.value.orEmpty().takeIf { matching != null }
         // Loading, a note or the notices: a change between them cross-fades.
         val phase = when {
             failed -> PAGE_FAILED
             list == null -> PAGE_LOADING
+            list.isEmpty() && query.isNotBlank() -> PAGE_NO_MATCH
             list.isEmpty() -> PAGE_NONE
             else -> PAGE_LIST
         }
@@ -796,12 +869,17 @@ fun AllDisruptionsPage(
             PAGE_LOADING -> Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                 LoadingRow(text = stringResource(R.string.disruptions_loading))
             }
+            PAGE_NO_MATCH -> Text(
+                text = stringResource(R.string.r4_disruptions_search_none, query.trim()),
+                color = AppColors.Muted,
+                modifier = Modifier.padding(16.dp),
+            )
             PAGE_NONE -> Text(
                 text = stringResource(R.string.disruptions_none),
                 color = AppColors.Muted,
                 modifier = Modifier.padding(16.dp),
             )
-            else -> groupDisruptions(list.orEmpty(), myLines).forEach { (group, items) ->
+            else -> (if (kind == null) groups else groups.filterKeys { it.name == kind }).forEach { (group, items) ->
                 SectionLabel(stringResource(groupLabel(group)), modifier = Modifier.padding(top = 8.dp))
                 GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
                     Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -868,8 +946,9 @@ private fun DisruptionRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val place = item.colourPlace
                     badges.take(MAX_ROW_BADGES).forEach { badge ->
-                        LineBadge(badge.line, badge.product, minWidth = 34.dp, at = LineColors.BERLIN_CENTRE)
+                        LineBadge(badge.line, badge.product, minWidth = 34.dp, at = place)
                     }
                     if (badges.size > MAX_ROW_BADGES) {
                         Text(text = "+${badges.size - MAX_ROW_BADGES}", color = AppColors.Muted, fontSize = 12.sp)
@@ -1117,6 +1196,45 @@ private const val PAGE_FAILED = 0
 private const val PAGE_LOADING = 1
 private const val PAGE_NONE = 2
 private const val PAGE_LIST = 3
+private const val PAGE_NO_MATCH = 4
+
+/** The search field at the top of "All disruptions": a glass of search, the query, and ✕ to clear it. */
+@Composable
+private fun DisruptionSearchField(value: String, onChange: (String) -> Unit) {
+    val hint = stringResource(R.string.r4_disruptions_search_hint)
+    BasicTextField(
+        value = value,
+        onValueChange = { onChange(it.take(SEARCH_MAX_LENGTH)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        textStyle = TextStyle(color = AppColors.Ink, fontSize = 15.sp, fontFamily = AppFont),
+        cursorBrush = SolidColor(AppColors.Blue),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = hint },
+        decorationBox = { innerTextField ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(AppColors.Chip)
+                    .heightIn(min = 44.dp)
+                    .padding(start = 14.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GlyphIcon(Glyph.Search, color = AppColors.Muted, size = 18.dp)
+                Box(modifier = Modifier.weight(1f).padding(vertical = 10.dp)) {
+                    if (value.isEmpty()) Text(text = hint, color = AppColors.Muted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    innerTextField()
+                }
+                FieldClearButton(visible = value.isNotEmpty(), onClear = { onChange("") })
+            }
+        },
+    )
+}
+
+private const val SEARCH_MAX_LENGTH = 60
 
 // The room the first line of a notice leaves for its chevron at the top right.
 private val CHEVRON_ROOM = 22.dp

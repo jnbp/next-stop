@@ -236,7 +236,7 @@ test('timeline: only the current ride is open, with its next stops', () => {
   assert.deepEqual(model.map((m) => m.status), ['done', 'current']);
   const ride = model[1];
   assert.equal(ride.line, 'U8');
-  assert.equal(ride.color, '#224F86');
+  assert.equal(ride.color, '#013F75');
   assert.equal(ride.passed, 1, 'Jannowitzbrücke passed');
   assert.deepEqual(ride.preview, []);
   assert.equal(ride.to.next, true, 'Hermannplatz is the next stop');
@@ -255,7 +255,7 @@ test('timeline: only the current ride is open, with its next stops', () => {
 });
 
 test('line colours of the app and readable ink', () => {
-  assert.equal(live.lineColor('U8'), '#224F86');
+  assert.equal(live.lineColor('U8'), '#013F75');
   assert.equal(live.lineColor('S41', 'suburban'), '#AD5937');
   assert.equal(live.lineColor('M10'), '#BE1414');
   assert.equal(live.lineColor('M41'), '#95276E');
@@ -265,8 +265,12 @@ test('line colours of the app and readable ink', () => {
   assert.equal(live.lineColor('42', null, '#00ff00'), '#00ff00');
   assert.equal(live.lineColor('42', 'bus', 'red'), '#95276E', 'only hex colours of the feed');
   assert.equal(live.lineColor('?'), '#5A6072');
-  assert.equal(live.inkOn('#F0D722'), '#16130A');
+  assert.equal(live.inkOn('#F7EC6E'), '#16130A');
   assert.equal(live.inkOn('#224F86'), '#ffffff');
+  // The ink of the BVG's U-Bahn signs: white, black on the U4.
+  assert.equal(live.inkOn('#FFC101'), '#000000');
+  assert.equal(live.inkOn('#f96815'), '#ffffff', 'white on the U9');
+  for (const u of ['U1', 'U2', 'U3', 'U5', 'U6', 'U7', 'U8', 'U9']) assert.equal(live.inkOn(live.lineColor(u)), '#ffffff', u);
 });
 
 test('the demo trip runs through every state without network', async () => {
@@ -563,7 +567,11 @@ test('line colours by the ride: product and place, the feed colour first', () =>
   assert.equal(live.lineColor('U1', 'regional', null, bohemia), '#DA251D');
   assert.equal(live.lineColor('U1', 'regional', null, berlin), '#DA251D');
   assert.equal(live.lineColor('U1', null, null, bohemia), '#5A6072');
-  assert.equal(live.lineColor('U1', 'subway', null, berlin), '#7DAD4C');
+  assert.equal(live.lineColor('U1', 'subway', null, berlin), '#419328');
+  // A Berlin U-Bahn always has the colour of the BVG's sign, whatever its feed sends.
+  assert.equal(live.lineColor('U9', 'subway', '#F3791D', berlin), '#F96815');
+  assert.equal(live.lineColor('U1', 'subway', '#123456', [53.55, 10.0]), '#123456', 'not a U1 of another city');
+  assert.equal(live.lineColor('S41', 'suburban', '#123456', berlin), '#123456', 'not an S-Bahn');
   assert.equal(live.lineColor('U1', 'subway', null, [53.55, 10.0]), '#115D91', 'a U1 of another city');
   assert.equal(live.guessProduct('U1', bohemia), null);
   assert.equal(live.guessProduct('U1', berlin), 'subway');
@@ -683,6 +691,16 @@ test('look of the app: the swipe sheet rests open or collapsed', () => {
   assert.equal(live.sheetClamp(250, 500), 250);
   assert.equal(live.sheetClamp(-30, 500), -10, 'a soft give above the top');
   assert.equal(live.sheetClamp(530, 500), 510, 'and below the bottom');
+});
+
+test('#262: the head of the open sheet pulls it down, a push up on the hero scrolls', () => {
+  assert.equal(live.sheetDragMode('grabber', true, 40, 0), 'sheet', 'the handle row always moves the sheet');
+  assert.equal(live.sheetDragMode('grabber', true, -40, 300), 'sheet');
+  assert.equal(live.sheetDragMode('hero', false, -40, 0), 'sheet', 'collapsed: the hero opens it');
+  assert.equal(live.sheetDragMode('hero', false, 40, 0), 'sheet');
+  assert.equal(live.sheetDragMode('hero', true, 40, 0), 'sheet', 'open at the top: pulled down, it closes');
+  assert.equal(live.sheetDragMode('hero', true, -40, 0), 'scroll', 'open: pushed up, the content scrolls');
+  assert.equal(live.sheetDragMode('hero', true, 40, 12), 'scroll', 'content scrolled: first back to the top');
 });
 
 test('hero: what comes next, with counter, time, delay and platform', () => {

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="r6cstate_wait">Warten auf %1$s</string>
+    <string name="r6cstate_wait_plain">Warten auf die Abfahrt</string>
+    <string name="r6cstate_ride">Fahrt mit %1$s</string>
+    <string name="r6cstate_ride_plain">Fahrt</string>
+    <string name="r6cstate_get_off">Gleich aussteigen</string>
+    <string name="r6cstate_change">Umsteigen</string>
+    <string name="r6cstate_walk">Zu Fuß</string>
+    <string name="r6cstate_cycle">Mit dem Rad</string>
+    <string name="r6cstate_arrived">Angekommen</string>
+    <plurals name="r6cstate_minutes_left">
+        <item quantity="one">noch %d Minute</item>
+        <item quantity="other">noch %d Minuten</item>
+    </plurals>
+</resources>

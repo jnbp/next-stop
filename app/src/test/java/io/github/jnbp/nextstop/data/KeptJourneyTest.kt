@@ -14,33 +14,37 @@ class KeptJourneyTest {
     private val to = Stop("hafas:2", "Alexanderplatz", 52.521, 13.411, 120, setOf("subway", "suburban"))
 
     private val ride = Leg(
-        line = "U4",
+        line = "U8",
         product = "subway",
         walking = false,
         from = from.name,
-        to = "Nollendorfplatz",
+        to = "Hackescher Markt",
         departure = start.plusMinutes(2),
         plannedDeparture = start,
         arrival = start.plusMinutes(6),
         plannedArrival = start.plusMinutes(5),
         departurePlatform = "1",
         arrivalPlatform = null,
-        direction = "Nollendorfplatz",
+        direction = "Hackescher Markt",
         cancelled = false,
         realtime = true,
-        path = listOf(52.521 to 13.411, 52.499 to 13.353),
+        path = listOf(52.521 to 13.411, 52.5225 to 13.4024),
         fromPlace = from,
         warnings = listOf(
             Warning("Lift", "Out of order", id = "w1", validFrom = start, links = listOf(NoticeLink(NoticeLinkKind.More, "https://example.org"))),
         ),
-        stopovers = listOf(Stopover("Viktoria-Luise-Platz", start.plusMinutes(4), start.plusMinutes(4), delaySeconds = 60, estimated = true)),
+        stopovers = listOf(Stopover("Rosenthaler Platz", start.plusMinutes(4), start.plusMinutes(4), delaySeconds = 60, estimated = true)),
         tripId = "trip-1",
         boardingSpot = WalkTarget(WalkTargetKind.StopPosition, "2", 52.5211, 13.4111, listOf(OsmLine("M46", "bus")), level = "-1", climbBy = PassageKind.Lift, climb = 1),
-        throughRuns = listOf(ThroughRun("trip-2", "U4", "Innsbrucker Platz", null, start.plusMinutes(3), lineChanges = false)),
+        throughRuns = listOf(ThroughRun("trip-2", "U8", "Ostkreuz", null, start.plusMinutes(3), lineChanges = false)),
         providerColor = -16776961,
+        // #264: the small chips of the ride card come back too.
+        occupancy = Occupancy.Medium,
+        features = setOf(RideFeature.BikeCarriage, RideFeature.StepFree),
+        bikeNote = "Fahrradmitnahme begrenzt möglich",
     )
     private val walk = Leg(
-        line = null, product = "walking", walking = true, from = "Nollendorfplatz", to = to.name,
+        line = null, product = "walking", walking = true, from = "Hackescher Markt", to = to.name,
         departure = start.plusMinutes(6), plannedDeparture = null, arrival = start.plusMinutes(30), plannedArrival = null,
         departurePlatform = null, arrivalPlatform = null, direction = null, cancelled = false, toPlace = to, walkMeters = 900,
     )

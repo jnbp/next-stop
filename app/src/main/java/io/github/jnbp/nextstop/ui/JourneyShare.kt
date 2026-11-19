@@ -8,28 +8,29 @@ import android.content.Intent
 import android.os.Build
 import android.provider.CalendarContract
 import android.widget.Toast
+import java.io.ByteArrayOutputStream
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.Base64
+import java.util.zip.Deflater
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 import io.github.jnbp.nextstop.R
 import io.github.jnbp.nextstop.data.AppPrefs
 import io.github.jnbp.nextstop.data.Backend
+import io.github.jnbp.nextstop.data.FavoritePlace
 import io.github.jnbp.nextstop.data.Journey
 import io.github.jnbp.nextstop.data.Leg
+import io.github.jnbp.nextstop.data.PlaceIcon
+import io.github.jnbp.nextstop.data.PlaceKind
 import io.github.jnbp.nextstop.data.WalkTargetKind
 import io.github.jnbp.nextstop.data.plainStopName
 import io.github.jnbp.nextstop.data.samePlatformByNumbers
 import java.time.OffsetDateTime
 
-/** A platform as people read it: "Platform 4" for plain numbers, texts such as "Pos. 11" as they are. */
-private fun sharePlatform(context: Context, platform: String?): String? = when {
-    platform.isNullOrBlank() -> null
-    platform.first().isDigit() -> context.getString(R.string.platform, platform)
-    else -> platform
-}
+/** A platform as people read it: "Platform 4", "Bay 13" for a tram or bus, texts such as "Pos. 11" as they are. */
+private fun sharePlatform(context: Context, platform: String?, product: String?): String? = platformLabel(context, platform, product)
 
 /**
  * The legs of [journey] as plain lines: each ride with its line, where it starts with
@@ -40,7 +41,7 @@ fun journeyLegsText(context: Context, journey: Journey): String = journey.legs.m
         val minutes = minutesBetween(leg.departure, leg.arrival)
         if (minutes > 0) context.getString(if (leg.cycling) R.string.share_cycle else R.string.share_walk, durationText(context, minutes)) else null
     } else {
-        val start = sharePlatform(context, leg.departurePlatform)
+        val start = sharePlatform(context, leg.departurePlatform, leg.product)
             ?.let { context.getString(R.string.share_platform, leg.departure.clock(), it) }
             ?: leg.departure.clock()
         context.getString(
@@ -124,7 +125,7 @@ fun tripShareText(context: Context, journey: Journey, now: OffsetDateTime): Stri
         (if (late > 0) context.getString(R.string.trip_share_late, late) else "") + "."
     val ahead = journey.legs.filter { it.arrival.isAfter(now) }
     return listOfNotNull(
-        context.getString(R.string.trip_share_heading, destination),
+        tripShareHeading(context, sharedDestination(context, journey, destination)),
         when {
             step.kind == StepKind.Arrived -> null
             // "Leave at 05:07" already says its time.
@@ -168,23 +169,105 @@ internal fun shareLiveLink(context: Context, url: String, lead: String? = null) 
 }
 
 /**
- * The live link of [journey] to [destination] on the live page at [base] (the address from the
- * settings), with the times the journey has at [now] and the first [name] the page shows (none
- * when blank); null when [base] is no web address.
+ * Where a shared trip leads as others may read it: a saved place of the user (home, work, a
+ * favourite) by its label instead of its address, [kind] "h" for home and "w" for work (the
+ * texts then say "nach Hause", "zur Arbeit"); any other destination by its [name] as it is.
  */
-fun liveLink(base: String, journey: Journey, destination: String, now: OffsetDateTime, name: String? = null): String? {
-    val root = liveBase(base) ?: return null
+internal data class SharedDestination(val name: String, val kind: String? = null, val saved: Boolean = false)
+
+/** The destination of [journey], named [name] in the app, as [SharedDestination] for a live link and its text. */
+internal fun sharedDestination(context: Context, journey: Journey, name: String): SharedDestination {
     val last = journey.legs.last()
     val end = last.toPlace?.position ?: last.path.lastOrNull()
-    val legs = journey.legs.map { leg -> liveLeg(leg) }
-    val json = liveLinkJson(
+    val prefs = AppPrefs(context)
+    val places = prefs.loadFavoritePlaces() + prefs.loadSavedPlaces().map { it.asFavorite() }
+    val saved = savedPlaceAt(places, last.toPlace?.id, end?.first, end?.second) ?: return SharedDestination(name)
+    val iconLabel = context.getString(placeIconLabelRes(saved.icon))
+    val label = saved.name.trim().ifEmpty { iconLabel }
+    // "Nach Hause" only for the home as such; a place with a name of its own goes by that name.
+    val kind = when {
+        label != iconLabel -> null
+        saved.icon == PlaceIcon.Home -> "h"
+        saved.icon == PlaceIcon.Work -> "w"
+        else -> null
+    }
+    return SharedDestination(label, kind, saved = true)
+}
+
+// How near the end of a journey must be to a saved place to count as it, in metres.
+internal const val SAVED_PLACE_MATCH_M = 150.0
+
+/** The saved place among [places] that a journey ending at [id] or at the position ends at; null for none. */
+internal fun savedPlaceAt(places: List<FavoritePlace>, id: String?, latitude: Double?, longitude: Double?): FavoritePlace? =
+    places.firstOrNull { favorite ->
+        val place = favorite.place ?: return@firstOrNull false
+        val sameId = !id.isNullOrBlank() && place.id == id && id != CURRENT_LOCATION_ID
+        val lat = place.latitude
+        val lon = place.longitude
+        sameId || (
+            latitude != null && longitude != null && lat != null && lon != null &&
+                metersBetween(latitude, longitude, lat, lon) <= SAVED_PLACE_MATCH_M
+            )
+    }
+
+/** The first line of a shared trip: "Ich bin unterwegs nach …", "… auf dem Weg nach Hause". */
+internal fun tripShareHeading(context: Context, target: SharedDestination): String = when (target.kind) {
+    "h" -> context.getString(R.string.trip_share_heading_home)
+    "w" -> context.getString(R.string.trip_share_heading_work)
+    else -> context.getString(R.string.trip_share_heading, target.name)
+}
+
+/** The language of the app as the links pass it on ("de", "en"): the pages use it when the recipient's is neither. */
+internal fun shareLanguage(context: Context): String? =
+    context.resources.configuration.locales.takeIf { it.size() > 0 }?.get(0)?.language
+
+/**
+ * The live link of [journey] to [destination] on the live page at [base] (the address from the
+ * settings), with the times the journey has at [now] and the first [name] the page shows (none
+ * when blank); null when [base] is no web address. [destination] is what the page calls it: the
+ * label of a saved place ([destinationKind] "h" or "w" for home and work, see
+ * [SharedDestination]), whose position then goes only to about 100 m. The start of the trip is
+ * never in the link: a first walk starts at the stop it leads to, named after the start only
+ * when that is a stop itself. [language] is the sender's ([shareLanguage]).
+ */
+fun liveLink(
+    base: String,
+    journey: Journey,
+    destination: String,
+    now: OffsetDateTime,
+    name: String? = null,
+    destinationKind: String? = null,
+    savedDestination: Boolean = destinationKind != null,
+    language: String? = null,
+): String? {
+    val root = liveBase(base) ?: return null
+    val last = journey.legs.last()
+    val end = (last.toPlace?.position ?: last.path.lastOrNull())
+        ?.let { if (savedDestination) coarse(it.first) to coarse(it.second) else it }
+    val target = LivePlace(destination, null, end?.first, end?.second, null, 0)
+    val legs = journey.legs.map { leg -> liveLeg(leg) }.toMutableList()
+    // A walk at the end leads to the destination as the page shows it, not to its address.
+    if (last.walking) {
+        val walk = legs.last()
+        legs[legs.size - 1] = walk.copy(to = target.copy(time = walk.to.time))
+    }
+    val first = journey.legs.first()
+    val origin = first.fromPlace
+        ?.takeIf { first.walking && it.kind == PlaceKind.Stop && it.id != CURRENT_LOCATION_ID }
+        ?.let { first.from.plainStopName() }
+    val json = liveLinkCompactJson(
         name = name?.trim()?.takeIf { it.isNotEmpty() },
         legs = legs,
-        destination = LivePlace(destination, null, end?.first, end?.second, null, 0),
+        destination = target,
         created = now.toEpochSecond(),
+        origin = origin,
+        destinationKind = destinationKind,
     )
-    return siteLink(root, LIVE_PAGE, json)
+    return siteLink(root, LIVE_PAGE, json, language)
 }
+
+/** A coordinate to 3 decimals, about 100 m: a saved place shows where it is, not which door. */
+private fun coarse(value: Double): Double = Math.round(value * 1000.0) / 1000.0
 
 private fun liveLeg(leg: Leg): LiveLeg {
     val start = leg.fromPlace?.position ?: leg.path.firstOrNull()
@@ -229,20 +312,25 @@ const val DEFAULT_SITE_ADDRESS = "https://nextstop.bapo.me"
 // The folders of the two pages on the site (web/live, web/route) and the link format they read.
 private const val LIVE_PAGE = "live"
 private const val ROUTE_PAGE = "route"
-private const val LINK_VERSION = 1
+// v1: base64url JSON (still read by the pages); v2: the JSON raw-deflated, then base64url.
+private const val LINK_VERSION = 2
 
 /** The address of the web pages for the [setting] as typed: the setting, or [DEFAULT_SITE_ADDRESS] when it is blank. */
 internal fun siteAddress(setting: String): String = setting.trim().ifEmpty { DEFAULT_SITE_ADDRESS }
 
 /**
  * The link to [page] ("live" or "route") of the site at [base] with [json] in its fragment, in the
- * form the pages read (parseFragment in web/live/app.js, parseRoute in web/route/app.js):
- * `<site>/<page>/#v=1&d=<base64url JSON>`. Null when [base] is no web address.
+ * form the pages read (readFragment in web/live/app.js, readRoute in web/route/app.js):
+ * `<site>/<page>/#v=2&l=<language>&d=<base64url of the raw-deflated JSON>`, without "l" when
+ * [language] is no language code. Null when [base] is no web address.
  */
-internal fun siteLink(base: String, page: String, json: String): String? {
+internal fun siteLink(base: String, page: String, json: String, language: String? = null): String? {
     val root = liveBase(base) ?: return null
-    return "$root/$page/#v=$LINK_VERSION&d=" + base64Url(json)
+    val lang = language?.lowercase()?.takeIf { it.matches(LANGUAGE_CODE) }
+    return "$root/$page/#v=$LINK_VERSION" + (lang?.let { "&l=$it" } ?: "") + "&d=" + base64Url(deflateRaw(json))
 }
+
+private val LANGUAGE_CODE = Regex("[a-z]{2,3}")
 
 /** The address of the web pages as typed, made a plain https root without a trailing "/live" or "/route". */
 internal fun liveBase(base: String): String? {
@@ -270,7 +358,7 @@ fun routeLink(context: Context, base: String, journey: Journey, destination: Str
     val end = last.toPlace?.position ?: last.path.lastOrNull()
     val legs = journey.legs.map { leg -> routeLeg(leg, if (hints) boardingCode(journey, leg) else null) }
     val json = routeLinkJson(legs, destination, end?.first, end?.second, now.toEpochSecond())
-    return siteLink(root, ROUTE_PAGE, json)
+    return siteLink(root, ROUTE_PAGE, json, shareLanguage(context))
 }
 
 /**
@@ -388,38 +476,98 @@ internal data class LiveLeg(
 )
 
 /**
- * The journey as compact JSON for the fragment of the live link (format v1, read by
- * web/live/app.js): {n, legs:[{p, trip, line, dir, from:{name,id,lat,lon,dep,dd}, to:{…,arr,ad}, walk}], dest, t}.
+ * The journey as compact JSON for the fragment of the live link (format v2, read by expandLive in
+ * web/live/app.js, which documents the keys; encodeLive there writes exactly the same JSON):
+ * {n, b, c, s:[[name,id,lat,lon]], r:[{f,t,d,a,dd,ad,p,i,l,r,w}], o, e, z:[name,lat,lon], k}.
+ * Times are seconds after the first departure [b], each stop is written once, positions have 4
+ * decimals, and a walk between two legs is only its two times on the leg after it ([w]; [e] for
+ * the walk to the destination). The start of a first walk is never written: it starts at the
+ * stop it leads to, named [origin] when given.
  */
-internal fun liveLinkJson(name: String?, legs: List<LiveLeg>, destination: LivePlace, created: Long): String {
-    fun place(place: LivePlace, timeKey: String, delayKey: String): String = jsonObject(
-        "name" to jsonString(place.name),
-        "id" to place.id?.let { jsonString(it) },
-        "lat" to place.latitude?.takeIf { it.isFinite() }?.let { jsonNumber(it) },
-        "lon" to place.longitude?.takeIf { it.isFinite() }?.let { jsonNumber(it) },
-        timeKey to place.time?.toString(),
-        delayKey to place.delayMinutes.takeIf { it != 0L }?.toString(),
-    )
-    val legList = legs.joinToString(",", "[", "]") { leg ->
-        jsonObject(
-            "p" to leg.provider?.let { jsonString(it) },
-            "trip" to leg.trip?.let { jsonString(it) },
-            "line" to leg.line?.let { jsonString(it) },
-            "dir" to leg.direction?.let { jsonString(it) },
-            "from" to place(leg.from, "dep", "dd"),
-            "to" to place(leg.to, "arr", "ad"),
-            "walk" to if (leg.walk) "true" else null,
-        )
+internal fun liveLinkCompactJson(
+    name: String?,
+    legs: List<LiveLeg>,
+    destination: LivePlace,
+    created: Long,
+    origin: String? = null,
+    destinationKind: String? = null,
+): String {
+    val base = legs.first().from.time ?: created
+    fun at(place: LivePlace): String = ((place.time ?: base) - base).toString()
+    fun position(value: Double?): String? = value?.takeIf { it.isFinite() }?.let { jsonNumber(it, 4) }
+    val stops = mutableListOf<String>()
+    val keys = HashMap<String, Int>()
+    fun stopIndex(place: LivePlace): String {
+        val id = place.id?.takeIf { it.isNotEmpty() }
+        val lat = position(place.latitude)
+        val lon = position(place.longitude)
+        val where = if (lat != null && lon != null) "$lat,$lon" else ""
+        val key = if (id != null) "i:$id|${place.name}" else "n:${place.name}|$where"
+        keys[key]?.let { return it.toString() }
+        val entry = mutableListOf(jsonString(place.name))
+        when {
+            lat != null && lon != null -> entry += listOf(id?.let { jsonString(it) } ?: "null", lat, lon)
+            id != null -> entry += jsonString(id)
+        }
+        stops += entry.joinToString(",", "[", "]")
+        keys[key] = stops.size - 1
+        return (stops.size - 1).toString()
     }
+    // The same stop: the same id where both have one, else the same name.
+    fun same(a: LivePlace, b: LivePlace): Boolean =
+        if (!a.id.isNullOrEmpty() && !b.id.isNullOrEmpty()) a.id == b.id else a.name == b.name
+    val rides = mutableListOf<String>()
+    var walkBefore: String? = null
+    var end: String? = null
+    legs.forEachIndexed { i, leg ->
+        val next = legs.getOrNull(i + 1)
+        val prev = legs.getOrNull(i - 1)
+        if (leg.walk) {
+            val linksFrom = i == 0 || (prev != null && !prev.walk && same(prev.to, leg.from))
+            if (next != null && !next.walk && linksFrom && same(leg.to, next.from)) {
+                walkBefore = "[${at(leg.from)},${at(leg.to)}]"
+            } else if (next == null && prev != null && !prev.walk && same(prev.to, leg.from)) {
+                end = "[${at(leg.from)},${at(leg.to)}]"
+            } else {
+                rides += jsonObject(
+                    "k" to "1",
+                    // The start of the trip is never in the link: a first walk starts where it leads.
+                    "f" to stopIndex(if (i == 0) leg.to else leg.from),
+                    "t" to stopIndex(leg.to),
+                    "d" to at(leg.from),
+                    "a" to at(leg.to),
+                )
+            }
+            return@forEachIndexed
+        }
+        rides += jsonObject(
+            "f" to stopIndex(leg.from),
+            "t" to stopIndex(leg.to),
+            "d" to at(leg.from),
+            "a" to at(leg.to),
+            "dd" to leg.from.delayMinutes.takeIf { it != 0L }?.toString(),
+            "ad" to leg.to.delayMinutes.takeIf { it != 0L }?.toString(),
+            "p" to leg.provider?.takeIf { it.isNotEmpty() }?.let { jsonString(it) },
+            "i" to leg.trip?.takeIf { it.isNotEmpty() }?.let { jsonString(it) },
+            "l" to leg.line?.takeIf { it.isNotEmpty() }?.let { jsonString(it) },
+            "r" to leg.direction?.takeIf { it.isNotEmpty() }?.let { jsonString(it) },
+            "w" to walkBefore,
+        )
+        walkBefore = null
+    }
+    val destLat = position(destination.latitude)
+    val destLon = position(destination.longitude)
+    val z = listOf(jsonString(destination.name)) + if (destLat != null && destLon != null) listOf(destLat, destLon) else emptyList()
     return jsonObject(
-        "n" to name?.takeIf { it.isNotBlank() }?.let { jsonString(it.trim()) },
-        "legs" to legList,
-        "dest" to jsonObject(
-            "name" to jsonString(destination.name),
-            "lat" to destination.latitude?.takeIf { it.isFinite() }?.let { jsonNumber(it) },
-            "lon" to destination.longitude?.takeIf { it.isFinite() }?.let { jsonNumber(it) },
-        ),
-        "t" to created.toString(),
+        "n" to name?.trim()?.takeIf { it.isNotEmpty() }?.let { jsonString(it) },
+        "b" to base.toString(),
+        "c" to (created - base).toString(),
+        "s" to stops.joinToString(",", "[", "]"),
+        "r" to rides.joinToString(",", "[", "]"),
+        "o" to origin?.takeIf { it.isNotEmpty() }?.let { jsonString(it) },
+        "e" to end,
+        "z" to z.joinToString(",", "[", "]"),
+        "k" to destinationKind?.takeIf { it == "h" || it == "w" }?.let { jsonString(it) },
     )
 }
 
@@ -618,15 +766,38 @@ internal fun routeShape(points: List<Pair<Double, Double>>, toleranceMeters: Dou
 }
 
 /** UTF-8 [text] as base64url without padding, safe in a URL fragment. */
-internal fun base64Url(text: String): String =
-    Base64.getUrlEncoder().withoutPadding().encodeToString(text.toByteArray(Charsets.UTF_8))
+internal fun base64Url(text: String): String = base64Url(text.toByteArray(Charsets.UTF_8))
+
+/** [bytes] as base64url without padding. */
+internal fun base64Url(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+
+/**
+ * UTF-8 [text] as raw deflate data (RFC 1951, no zlib header), as the pages unpack it with
+ * DecompressionStream("deflate-raw"). A JSON of some 4 kB shrinks to about a quarter.
+ */
+internal fun deflateRaw(text: String): ByteArray {
+    val deflater = Deflater(Deflater.BEST_COMPRESSION, true)
+    try {
+        deflater.setInput(text.toByteArray(Charsets.UTF_8))
+        deflater.finish()
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(4096)
+        while (!deflater.finished()) {
+            val n = deflater.deflate(buffer)
+            out.write(buffer, 0, n)
+        }
+        return out.toByteArray()
+    } finally {
+        deflater.end()
+    }
+}
 
 private fun jsonObject(vararg entries: Pair<String, String?>): String =
     entries.filter { it.second != null }.joinToString(",", "{", "}") { (key, value) -> jsonString(key) + ":" + value }
 
-/** A coordinate rounded to 5 decimals (about a metre), without trailing zeros. */
-private fun jsonNumber(value: Double): String =
-    BigDecimal.valueOf(value).setScale(5, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+/** A coordinate rounded to [decimals] (5: about a metre, 4: about 10 m), without trailing zeros. */
+private fun jsonNumber(value: Double, decimals: Int = 5): String =
+    BigDecimal.valueOf(value).setScale(decimals, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
 
 private fun jsonString(value: String): String {
     val out = StringBuilder("\"")

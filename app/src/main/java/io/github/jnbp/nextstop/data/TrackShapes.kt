@@ -1,6 +1,10 @@
 package io.github.jnbp.nextstop.data
 
 import java.time.Duration
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.time.OffsetDateTime
 import kotlin.math.PI
 import kotlin.math.cos
@@ -247,6 +251,133 @@ private fun nameDigits(name: String?): Int? =
 /** True when [departure] is the run of [line] that leaves at [planned] by its name (see runScore). */
 fun sameRun(departure: Departure, line: String?, planned: OffsetDateTime): Boolean = runScore(departure, line, planned) >= 3
 
+/**
+ * How well [departure] fits as the run that lends its track to a ride of [line] leaving at
+ * [planned] (see runScore): also 2 for a long-distance train of the same number under another
+ * kind within [SAME_RUN_SECONDS] ("RJ 384" of Rejseplanen's copy and "ICE 384" of DELFI's, #280).
+ */
+fun trackRunScore(departure: Departure, line: String?, planned: OffsetDateTime, direction: String? = null): Int {
+    val score = runScore(departure, line, planned, direction)
+    if (score >= 2) return score
+    val number = longDistanceNumber(line) ?: return score
+    if (longDistanceNumber(departure.line) != number) return score
+    val time = departure.plannedTime ?: departure.time ?: return score
+    return if (Math.abs(Duration.between(time, planned).seconds) <= SAME_RUN_SECONDS) 2 else score
+}
+
+/**
+ * The handle of the run among [found] (departures at a station of the ride) that lends its
+ * track to the ride of [line] towards [direction] leaving at [planned]: the best fitting one by
+ * [trackRunScore], never [own] itself (a Transitous ride whose feed has no shape, as
+ * Rejseplanen's copy of a German train, borrows the way of another feed's copy of the run,
+ * #280). Null where none fits.
+ */
+fun trackLender(found: List<Departure>, own: String?, line: String?, planned: OffsetDateTime, direction: String?): String? =
+    trackLenders(found, own, line, planned, direction).firstOrNull()
+
+/**
+ * The handles of the runs among [found] that may lend their track to the ride of [line] towards
+ * [direction] leaving at [planned], best first: by [trackRunScore], then by their feed (see
+ * [lenderFeedRank]: DELFI's copy of a German train before another German feed's, a foreign
+ * feed's last), never [own]. Each is tried in turn until one has a real way (see [lendsWay]):
+ * on 19 Nov 2026 the RJ 382 Berlin - Hamburg of Rejseplanen found the Dutch feed's copy of the
+ * run first, itself only straight lines, and kept that (#280).
+ */
+fun trackLenders(found: List<Departure>, own: String?, line: String?, planned: OffsetDateTime, direction: String?): List<String> =
+    found.filter { !it.cancelled && it.tripId != null && it.tripId != own }
+        .map { it to trackRunScore(it, line, planned, direction) }
+        .filter { it.second > 0 }
+        .sortedWith(compareByDescending<Pair<Departure, Int>> { it.second }.thenBy { lenderFeedRank(it.first.tripId) })
+        .mapNotNull { it.first.tripId }
+        .distinct()
+
+// The feed in a Transitous trip handle, with or without its "tr:" mark: country and name ("de", "DELFI").
+private val LENDER_FEED = Regex("""^(?:tr:)?[0-9]{8}_[0-9]{1,2}:[0-9]{2}_([a-z]{2})-([A-Za-z0-9]+)""")
+
+/**
+ * How early the run [tripId] is asked to lend its track: 0 for a trip of DELFI (the German
+ * feed with the shapes of German trains), 1 for another German feed, 2 for a handle without a
+ * feed (another source), 3 for a foreign feed, whose copy of a German train often has no way.
+ */
+fun lenderFeedRank(tripId: String?): Int {
+    val match = tripId?.let { LENDER_FEED.find(it) } ?: return 2
+    val country = match.groupValues[1]
+    return when {
+        country == "de" && match.groupValues[2] == "DELFI" -> 0
+        country == "de" -> 1
+        else -> 3
+    }
+}
+
+/** At most this share of a lent track may be air lines (see [airShare]); a copy drawn station to station lends nothing. */
+const val LENDER_AIR_SHARE = 0.2
+
+/**
+ * The share of the length of [track] that lies in gaps longer than [AIR_GAP_METERS] (straight
+ * lines from station to station); 1 for a way without length or with a point that is no
+ * place on the earth (not finite, beyond the poles or the date line).
+ */
+fun airShare(track: List<Pair<Double, Double>>): Double {
+    if (track.size < 2 || track.any { !placeOnEarth(it) }) return 1.0
+    var total = 0.0
+    var air = 0.0
+    for (index in 1 until track.size) {
+        val metres = metersBetween(track[index - 1], track[index])
+        total += metres
+        if (metres > AIR_GAP_METERS) air += metres
+    }
+    return if (total > 0.0) air / total else 1.0
+}
+
+/** True when [track] is a real way that may lend itself to a ride (not mostly air lines, see [airShare]). */
+fun lendsWay(track: List<Pair<Double, Double>>): Boolean = airShare(track) <= LENDER_AIR_SHARE
+
+/** True for a point with a finite latitude within the poles and a finite longitude within the date line. */
+fun placeOnEarth(point: Pair<Double, Double>): Boolean =
+    point.first.isFinite() && point.second.isFinite() && point.first in -90.0..90.0 && point.second in -180.0..180.0
+
+/** The positions of the stops of the ride [leg] in order (null where one has none): where it is boarded, the stops between, where it is left. */
+fun rideStopPositions(leg: Leg): List<Pair<Double, Double>?> =
+    listOf(leg.fromPlace?.position ?: leg.path.firstOrNull()) + leg.stopovers.map { it.place?.position } +
+        listOf(leg.toPlace?.position ?: leg.path.lastOrNull())
+
+/** [leg] with its air hops taken from [track] (see [spliceTrack]); [leg] itself where nothing changes. */
+fun withLentTrack(leg: Leg, track: List<Pair<Double, Double>>?): Leg {
+    if (leg.walking || track == null || track.size < 2) return leg
+    val path = spliceTrack(leg.path, rideStopPositions(leg), track)
+    return if (path === leg.path) leg else leg.copy(path = path)
+}
+
+/**
+ * [journey] with the tracks known by now ([trackOf], the TrackCache) put into its rides with air
+ * hops, no request: a track lent after the journey was shown takes its place in it (#280).
+ * [journey] itself where nothing changes.
+ */
+fun withLentTracks(journey: Journey, trackOf: (String) -> List<Pair<Double, Double>>? = { TrackCache.get(it) }): Journey {
+    var changed = false
+    val legs = journey.legs.map { leg ->
+        val tripId = leg.tripId
+        if (leg.walking || tripId == null) return@map leg
+        val lent = withLentTrack(leg, trackOf(tripId))
+        if (lent !== leg) changed = true
+        lent
+    }
+    return if (changed) journey.copy(legs = legs) else journey
+}
+
+/**
+ * [course] with the track known by now ([trackOf], the TrackCache) put into its air hops, and
+ * its air hops found anew; [course] itself where nothing changes (see TripCourse.airHops).
+ */
+fun withLentTrack(course: TripCourse, trackOf: (String) -> List<Pair<Double, Double>>? = { TrackCache.get(it) }): TripCourse {
+    if (course.airHops.isEmpty()) return course
+    val track = trackOf(course.tripId)?.takeIf { it.size >= 2 } ?: return course
+    val stops = course.stops.map { it.place?.position }
+    val path = spliceTrack(course.path, stops, track)
+    if (path === course.path) return course
+    return course.copy(path = path, airHops = airHops(path, stops))
+}
+
 /** Trains of one kind towards one town that leave this close together are taken for one run when their names differ. */
 const val SAME_KIND_SECONDS = 60L
 
@@ -260,7 +391,8 @@ private fun directionTown(direction: String?): String? {
     return town?.takeIf { it.length >= 2 }
 }
 
-private fun longestGap(points: List<Pair<Double, Double>>): Double {
+/** The longest step between two neighbouring points of [points], in metres. */
+internal fun longestGap(points: List<Pair<Double, Double>>): Double {
     var longest = 0.0
     for (index in 1 until points.size) longest = maxOf(longest, metersBetween(points[index - 1], points[index]))
     return longest
@@ -302,10 +434,16 @@ object TrackCache {
         entry.track
     }
 
-    /** Keeps [track] for [tripId]; an empty one when it has none. */
+    /** Keeps [track] for [tripId]; an empty one when it has none. A new track counts [version] up. */
     fun put(tripId: String, track: List<Pair<Double, Double>>, now: Long = System.currentTimeMillis()) {
         synchronized(this) { entries[tripId] = Entry(track, now) }
+        if (track.size >= 2) versionFlow.update { it + 1 }
     }
+
+    private val versionFlow = MutableStateFlow(0)
+
+    /** Counts up whenever a track is kept: what shows rides with air hops takes it in place (#280). */
+    val version: StateFlow<Int> = versionFlow.asStateFlow()
 
     /**
      * Keeps for [tripId] that its lookup failed: it counts as without a track for

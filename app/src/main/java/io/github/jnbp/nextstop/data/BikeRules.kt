@@ -20,6 +20,13 @@ enum class BikeCarriage {
 
     /** Not at all, or not at this time. */
     NotAllowed,
+
+    /**
+     * No rule of the app knows (#263): a bus outside Berlin, say. "Fahrrad dabei" keeps such a
+     * ride (the provider's own word on bicycles is too often missing or wrong to drop it); the
+     * bike combo, which plans the stretches by bicycle around them, does not.
+     */
+    Unknown,
 }
 
 /**
@@ -53,18 +60,20 @@ data class BikeRule(
 }
 
 /**
- * Where a bicycle may come along, for the bike combo (see [SearchOptions.bikeCombo]). The first
- * rule that matches a ride counts; a ride no rule matches falls to [defaultCarriage]:
+ * Where a bicycle may come along, for "Fahrrad dabei" and the bike combo (see
+ * [SearchOptions.bike], [SearchOptions.bikeCombo]). The first rule that matches a ride counts; a
+ * ride no rule matches falls to [defaultCarriage]. The providers are not asked to filter (#263):
+ * many say nothing about bicycles, some say "no" where bicycles are allowed (the BVG S-Bahn).
  *
  * - S-Bahn, U-Bahn, tram, ferry and regional trains carry bicycles (BVG/VBB at all times with a
- *   bicycle ticket; DB Regio nationwide), except in the rush hours of Hamburg (hvv: U-Bahn and
+ *   bicycle ticket where there is room; DB Regio nationwide), except in the rush hours of Hamburg (hvv: U-Bahn and
  *   S-Bahn not Mon–Fri 6–9 and 16–18) and Munich (MVV: S-Bahn not Mon–Fri 6–9, U-Bahn not
  *   Mon–Fri 6–9 and 16–18). Holidays and school holidays, when those bans are lifted, are not
  *   known here: the ban counts, on the safe side.
  * - Long-distance trains only with a reservation for the bicycle (ICE, IC/EC).
  * - Coaches (FlixBus …) not: only some routes with a booked place.
- * - Buses not, by default: in Berlin only the night lines N1–N9 that stand in for the U-Bahn
- *   at night (BVG: "if there is room").
+ * - Buses in Berlin not (BVG), but the night lines N1–N9 that stand in for the U-Bahn at night
+ *   ("if there is room"). Buses elsewhere: [BikeCarriage.Unknown], their rules differ by region.
  */
 object BikeRules {
     private val WEEKDAYS = setOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY)
@@ -83,14 +92,22 @@ object BikeRules {
         BikeRule("MVV U-Bahn rush evening", setOf("subway"), BikeCarriage.NotAllowed, ::inMunichArea,
             days = WEEKDAYS, from = LocalTime.of(16, 0), until = LocalTime.of(18, 0)),
         BikeRule("BVG night lines N1-N9", setOf("bus"), BikeCarriage.Allowed, ::inVbbArea, lines = Regex("N[1-9]")),
+        // #263: Berlin (BVG/VBB) S-Bahn, U-Bahn, tram and ferry at all times with a bicycle ticket where
+        // there is room, whatever the provider's remark says; the BVG's buses not (but the night lines above).
+        BikeRule("Berlin S-Bahn, U-Bahn, tram, ferry", setOf("suburban", "subway", "tram", "ferry", "regional"), BikeCarriage.Allowed,
+            area = { latitude, longitude -> LineColors.inBerlin(latitude, longitude) }),
+        BikeRule("BVG buses", setOf("bus"), BikeCarriage.NotAllowed,
+            area = { latitude, longitude -> LineColors.inBerlin(latitude, longitude) }),
     )
 
     /** What a ride of [product] carries where no rule matches. */
     fun defaultCarriage(product: String): BikeCarriage = when (product) {
         "suburban", "subway", "tram", "ferry", "regional" -> BikeCarriage.Allowed
         "express" -> BikeCarriage.Reservation
-        // Buses, coaches and what the app has no product for: not, on the safe side.
-        else -> BikeCarriage.NotAllowed
+        // Coaches: only some routes with a booked place.
+        "coach" -> BikeCarriage.NotAllowed
+        // Buses outside Berlin and what the app has no product for: no rule known (#263).
+        else -> BikeCarriage.Unknown
     }
 
     /** Whether a ride of [product] on [line], boarded at [position] at [time], takes a bicycle. */
@@ -100,8 +117,18 @@ object BikeRules {
     fun carriage(ride: Leg): BikeCarriage =
         carriage(ride.product, ride.line, ride.fromPlace?.position ?: ride.path.firstOrNull(), ride.plannedDeparture ?: ride.departure)
 
-    /** True when every ride of [journey] takes the bicycle along (a reservation counts). */
-    fun journeyCarriesBike(journey: Journey): Boolean = journey.rides.all { carriage(it) != BikeCarriage.NotAllowed }
+    /**
+     * True when every ride of [journey] is known to take the bicycle along (a reservation counts),
+     * for the bike combo; a ride no rule knows ([BikeCarriage.Unknown]) counts not.
+     */
+    fun journeyCarriesBike(journey: Journey): Boolean =
+        journey.rides.all { carriage(it).let { it == BikeCarriage.Allowed || it == BikeCarriage.Reservation } }
+
+    /**
+     * #263: true unless a ride of [journey] is known not to take a bicycle along, for "Fahrrad
+     * dabei": a ride no rule knows stays, whatever the provider says about bicycles.
+     */
+    fun journeyMayCarryBike(journey: Journey): Boolean = journey.rides.none { carriage(it) == BikeCarriage.NotAllowed }
 
     /**
      * True when a bus may carry the bicycle around [position] at [time]: then a search of the bike

@@ -198,6 +198,8 @@ class VbbHafasSource(
         val fromPlace = place(origin)
         val toPlace = place(destination)
         val shape = polyline(item)
+        // The attributes among its notes: bicycles and step-free as small chips (#264, as HAFAS ReST does since #220).
+        val hints = if (walking) emptyList() else vbbNoteHints(notesOf(item))
         return Leg(
             line = if (walking) null else product?.let { lineName(it) },
             product = if (walking) "" else product?.let { productKey(it) } ?: "",
@@ -210,6 +212,8 @@ class VbbHafasSource(
             plannedArrival = plannedArrival,
             departurePlatform = origin.optString("rtTrack").ifEmpty { origin.optString("track") }.ifEmpty { null },
             arrivalPlatform = destination.optString("rtTrack").ifEmpty { destination.optString("track") }.ifEmpty { null },
+            plannedDeparturePlatform = origin.optString("track").ifEmpty { null },
+            plannedArrivalPlatform = destination.optString("track").ifEmpty { null },
             direction = item.optString("direction").ifEmpty { null },
             cancelled = item.optBoolean("cancelled", false),
             realtime = origin.has("rtTime") || destination.has("rtTime"),
@@ -219,7 +223,22 @@ class VbbHafasSource(
             stopovers = stopovers(item.optJSONObject("Stops")),
             tripId = item.optJSONObject("JourneyDetailRef")?.optString("ref")?.ifEmpty { null },
             walkMeters = if (walking && item.has("dist")) item.optInt("dist") else null,
+            features = if (walking) emptySet() else rideFeatures(hints),
+            bikeNote = if (walking) null else bikeRemarkText(hints),
         )
+    }
+
+    /** The notes of a leg ("Notes": {"Note": [...]}, one or a list), each as its type, key and text. */
+    private fun notesOf(item: JSONObject): List<Triple<String?, String?, String?>> {
+        val list = asArray(item.optJSONObject("Notes")?.opt("Note"))
+        return (0 until list.length()).mapNotNull { index ->
+            val note = list.optJSONObject(index) ?: return@mapNotNull null
+            Triple(
+                note.optString("type").ifEmpty { null },
+                note.optString("key").ifEmpty { null },
+                note.optString("value").ifEmpty { note.optString("txtN") }.ifEmpty { null },
+            )
+        }
     }
 
     private fun departure(item: JSONObject): Departure? {

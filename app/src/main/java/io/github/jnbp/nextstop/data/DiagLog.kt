@@ -79,6 +79,26 @@ class DiagRing(val capacity: Int) {
         /** One event as a line: "2026-11-17 01:02:03.456 W/Tag: message" (line breaks of the message indented). */
         fun formatLine(format: SimpleDateFormat, time: Long, level: Char, tag: String, message: String): String =
             "${format.format(Date(time))} $level/$tag: ${message.replace("\n", "\n    ")}"
+
+        // How a line of a message after its first starts (see formatLine).
+        private const val CONTINUATION = "    "
+
+        /**
+         * The events in [lines] as read back from a file, one per event: a line that goes on an
+         * event (indented, see [formatLine]) is joined to the one before it, so an event of
+         * several lines counts as one. A continuation without an event before it stays alone.
+         */
+        fun entriesOf(lines: List<String>): List<String> {
+            val out = ArrayList<String>(lines.size)
+            for (line in lines) {
+                if (line.startsWith(CONTINUATION) && out.isNotEmpty()) {
+                    out[out.size - 1] = out[out.size - 1] + "\n" + line
+                } else if (line.isNotEmpty()) {
+                    out.add(line)
+                }
+            }
+            return out
+        }
     }
 }
 

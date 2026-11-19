@@ -14,13 +14,6 @@ import io.github.jnbp.nextstop.ui.theme.VehicleDirectionChoice
 import io.github.jnbp.nextstop.ui.theme.mapVehiclesChoice
 import io.github.jnbp.nextstop.widget.WidgetColorChoice
 
-/**
- * How a time with a delay is shown everywhere in the app.
- * - [RealtimeAndDelay]: the expected time (delay included) with "+2" beside it (default).
- * - [PlannedAndDelay]: the timetable time with "+2" beside it.
- * - [RealtimeOnly]: the expected time alone, red when late and green when on time.
- */
-enum class DelayDisplay { RealtimeAndDelay, PlannedAndDelay, RealtimeOnly }
 
 /**
  * Where the connections chart shows the total time of each journey, door to door: nowhere,
@@ -232,10 +225,17 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_CONNECTION_CHOICE, true)
         set(value) = prefs.edit().putBoolean(KEY_CONNECTION_CHOICE, value).apply()
 
-    /** True: the small maps of walks in the companion and the journey detail start unfolded. */
-    var walkMapsOpen: Boolean
-        get() = prefs.getBoolean(KEY_WALK_MAPS_OPEN, false)
-        set(value) = prefs.edit().putBoolean(KEY_WALK_MAPS_OPEN, value).apply()
+    /**
+     * "Minikarte für Fußwege" (#202): which small maps of walks in the Live-Fahrt and the journey
+     * detail start unfolded. Before it, a switch "immer aufgeklappt": on reads as all unfolded,
+     * off as the new default, the next one (see walkMapModeOf).
+     */
+    var walkMapsMode: PickerMode
+        get() = walkMapModeOf(
+            prefs.getString(KEY_WALK_MAPS_MODE, null),
+            if (prefs.contains(KEY_WALK_MAPS_OPEN)) prefs.getBoolean(KEY_WALK_MAPS_OPEN, false) else null,
+        )
+        set(value) = prefs.edit().putString(KEY_WALK_MAPS_MODE, value.name).apply()
 
     /**
      * True: the connections show the chart or the list at full height and a picked journey opens
@@ -276,6 +276,35 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_ALIGHT_REMINDERS, true)
         set(value) = prefs.edit().putBoolean(KEY_ALIGHT_REMINDERS, value).apply()
 
+    /**
+     * "Standort im Begleiter nutzen": while the trip companion runs, it follows the position of
+     * the device (only then, never in the background otherwise) to tell the next stop and when
+     * to get off, also when the times are late. On by default.
+     */
+    var companionLocation: Boolean
+        get() = prefs.getBoolean(KEY_COMPANION_LOCATION, true)
+        set(value) = prefs.edit().putBoolean(KEY_COMPANION_LOCATION, value).apply()
+
+    /** The wake-up alarm ("Aufwach-Alarm") of long rides: off, by itself from 60 min (default) or always. */
+    var wakeAlarmMode: WakeAlarmMode
+        get() = WakeAlarmMode.entries.firstOrNull { it.name == prefs.getString(KEY_WAKE_MODE, null) } ?: WakeAlarmMode.Auto
+        set(value) = prefs.edit().putString(KEY_WAKE_MODE, value.name).apply()
+
+    /** Minutes before getting off the wake-up alarm rings; 10 by default. */
+    var wakeAlarmMinutes: Int
+        get() = prefs.getInt(KEY_WAKE_MINUTES, WAKE_DEFAULT_LEAD_MINUTES)
+        set(value) = prefs.edit().putInt(KEY_WAKE_MINUTES, value).apply()
+
+    /** A change of platform on a followed trip is notified. On by default. */
+    var platformAlerts: Boolean
+        get() = prefs.getBoolean(KEY_PLATFORM_ALERTS, true)
+        set(value) = prefs.edit().putBoolean(KEY_PLATFORM_ALERTS, value).apply()
+
+    /** Minutes before leaving a planned trip reminds ("Bald losgehen"); 10 by default. */
+    var plannedLeadMinutes: Int
+        get() = prefs.getInt(KEY_PLANNED_LEAD, PLANNED_DEFAULT_LEAD_MINUTES)
+        set(value) = prefs.edit().putInt(KEY_PLANNED_LEAD, value).apply()
+
     /** True once the developer options were unlocked by tapping the version. */
     var developerOptions: Boolean
         get() = prefs.getBoolean(KEY_DEVELOPER, false)
@@ -293,10 +322,11 @@ class AppPrefs(context: Context) {
 
     /**
      * "Abkürzungs-Alarm" (shortcut alert): every followed trip searches again in the background
-     * at the user's transfer level and notifies when something faster turns up. Off by default.
+     * at the user's transfer level and notifies when something faster turns up. On by default
+     * (#75); it stays quiet right after a connection was chosen (see ShortcutQuiet).
      */
     var shortcutAlert: Boolean
-        get() = prefs.getBoolean(KEY_SHORTCUT_ALERT, false)
+        get() = prefs.getBoolean(KEY_SHORTCUT_ALERT, true)
         set(value) = prefs.edit().putBoolean(KEY_SHORTCUT_ALERT, value).apply()
 
     /**
@@ -315,10 +345,23 @@ class AppPrefs(context: Context) {
     var shortcutQuietStart: Boolean
         get() = prefs.getBoolean(KEY_SHORTCUT_QUIET_START, false)
         set(value) = prefs.edit().putBoolean(KEY_SHORTCUT_QUIET_START, value).apply()
+
+    /**
+     * "Ab wie vielen Minuten", the threshold of the shortcut alert: a way must arrive at least
+     * this many minutes sooner (see [shortcutThresholdSeconds]); "Jede Minute zählt" takes one
+     * minute. [DEFAULT_SHORTCUT_MINUTES] by default.
+     */
+    var shortcutMinutes: Int
+        get() = prefs.getInt(KEY_SHORTCUT_MINUTES, DEFAULT_SHORTCUT_MINUTES).coerceIn(1, 30)
+        set(value) = prefs.edit().putInt(KEY_SHORTCUT_MINUTES, value.coerceIn(1, 30)).apply()
     /** True: the map shows the small hint that vehicle positions come from live data, not GPS. */
     var vehicleHint: Boolean
         get() = prefs.getBoolean(KEY_VEHICLE_HINT, true)
         set(value) = prefs.edit().putBoolean(KEY_VEHICLE_HINT, value).apply()
+    /** True: a followed trip's map shows dashed where the vehicles of the later rides still are; off by default. */
+    var showApproaches: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_APPROACHES, false)
+        set(value) = prefs.edit().putBoolean(KEY_SHOW_APPROACHES, value).apply()
 
     /** True once the dialog about the mode "Every minute counts" was shown. */
     var everyMinuteHintSeen: Boolean
@@ -514,6 +557,8 @@ class AppPrefs(context: Context) {
                     ?: Accessibility.None,
                 bike = prefs.getBoolean(KEY_BIKE, false),
                 bikeCombo = prefs.getBoolean(KEY_BIKE_COMBO, false),
+                // "Eigener Faktor" (#198); none stored before it, so "Langsamer unterwegs" goes on as it was.
+                ownWalkFactor = if (prefs.contains(KEY_OWN_WALK_FACTOR)) ownWalkFactor(prefs.getFloat(KEY_OWN_WALK_FACTOR, SLOWER_WALK_FACTOR.toFloat()).toDouble()) else null,
             )
         }
         set(value) {
@@ -527,6 +572,10 @@ class AppPrefs(context: Context) {
                 // The bicycle options as the defaults of the next searches ([bikeDefault], [bikeComboDefault]).
                 .putBoolean(KEY_BIKE, value.bike)
                 .putBoolean(KEY_BIKE_COMBO, value.bikeCombo)
+                .apply {
+                    val own = value.ownWalkFactor
+                    if (own == null) remove(KEY_OWN_WALK_FACTOR) else putFloat(KEY_OWN_WALK_FACTOR, ownWalkFactor(own).toFloat())
+                }
                 .apply()
             applyWalkSettings(value)
         }
@@ -568,7 +617,7 @@ class AppPrefs(context: Context) {
     }
 
     private fun applyWalkSettings(options: SearchOptions) {
-        walkSpeedFactor = walkFactor(options.slower)
+        walkSpeedFactor = options.walkFactorInUse
         stepFreeWalks = options.accessibility != Accessibility.None
     }
 
@@ -775,6 +824,8 @@ class AppPrefs(context: Context) {
     private fun toJson(place: Stop): JSONObject {
         val item = JSONObject()
         item.put("id", place.id)
+        // The station's key (DHID, UIC code, VBB number) beside the id, see StationIdentity.resolveId.
+        StationIdentity.stationKey(place)?.let { item.put("key", it) }
         item.put("name", place.name)
         if (place.latitude != null) item.put("latitude", place.latitude)
         if (place.longitude != null) item.put("longitude", place.longitude)
@@ -787,6 +838,7 @@ class AppPrefs(context: Context) {
         val id = item.optString("id", "")
         val name = item.optString("name", "")
         if (id.isEmpty() || name.isEmpty()) return null
+        StationIdentity.noteStored(id, item.optString("key", ""))
         val products = mutableSetOf<String>()
         val list = item.optJSONArray("products")
         if (list != null) {
@@ -818,7 +870,7 @@ class AppPrefs(context: Context) {
 
         /** The keys whose change the watch should learn about: favourites, saved places, recent destinations and the get-off reminder. */
         val WATCH_SYNC_KEYS: Set<String>
-            get() = setOf(KEY_HOME, KEY_WORK, KEY_FAVORITE_PLACES, KEY_SAVED_PLACES, KEY_SEARCH_HISTORY, KEY_RECENT_ROUTES, KEY_ALIGHT_REMINDERS)
+            get() = setOf(KEY_HOME, KEY_WORK, KEY_FAVORITE_PLACES, KEY_SAVED_PLACES, KEY_SEARCH_HISTORY, KEY_RECENT_ROUTES, KEY_ALIGHT_REMINDERS, KEY_DELAY_DISPLAY)
 
         // Home and work as an earlier version of the app saved them; read once for the favourite places.
         private const val KEY_HOME = "home"
@@ -839,6 +891,7 @@ class AppPrefs(context: Context) {
         private const val KEY_CONNECTIONS_LIST = "connectionsList"
         private const val KEY_CONNECTION_CHOICE = "connectionChoice"
         private const val KEY_WALK_MAPS_OPEN = "walkMapsOpen"
+        private const val KEY_WALK_MAPS_MODE = "walkMapsMode"
         private const val KEY_CONNECTIONS_FULL = "connectionsFull"
         private const val KEY_CHART_CHANGE_STOPS = "chartChangeStops"
         private const val KEY_CHART_TOTAL_TIME = "chartTotalTime"
@@ -875,12 +928,19 @@ class AppPrefs(context: Context) {
         private const val KEY_DEVELOPER = "developerOptions"
         private const val KEY_SETUP_DONE = "setupDone"
         private const val KEY_ALIGHT_REMINDERS = "alightReminders"
+        private const val KEY_COMPANION_LOCATION = "companionLocation"
+        private const val KEY_WAKE_MODE = "wakeAlarmMode"
+        private const val KEY_WAKE_MINUTES = "wakeAlarmMinutes"
+        private const val KEY_PLATFORM_ALERTS = "platformAlerts"
+        private const val KEY_PLANNED_LEAD = "plannedLeadMinutes"
         private const val KEY_SIMULATE_FASTER = "simulateFaster"
         private const val KEY_EVERY_MINUTE_HINT = "everyMinuteHintSeen"
         private const val KEY_SHORTCUT_ALERT = "shortcutAlert"
         private const val KEY_SHORTCUT_SAME_COMFORT = "shortcutSameComfort"
         private const val KEY_SHORTCUT_QUIET_START = "shortcutQuietStart"
+        private const val KEY_SHORTCUT_MINUTES = "shortcutMinutes"
         private const val KEY_VEHICLE_HINT = "vehicleHint"
+        private const val KEY_SHOW_APPROACHES = "showApproaches"
         private const val KEY_PRODUCTS = "products"
         private const val KEY_WALKING = "walkingSpeed"
         private const val KEY_SLOWER = "slowerWalking"
@@ -888,6 +948,7 @@ class AppPrefs(context: Context) {
         private const val KEY_RELAXED_SPARE = "transferRelaxedSpare"
         private const val KEY_CHANGE_BUFFER = "transferChangeBufferSeconds"
         private const val KEY_ACCESSIBILITY = "accessibility"
+        private const val KEY_OWN_WALK_FACTOR = "ownWalkFactor"
         private const val KEY_LOCAL_ONLY = "local_only"
         private const val KEY_BIKE = "bike"
         private const val KEY_BIKE_COMBO = "bike_combo"
