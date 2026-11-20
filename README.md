@@ -14,24 +14,25 @@
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-1B4FD8)](LICENSE)
 [![No ads · no tracking](https://img.shields.io/badge/no%20ads%20%C2%B7%20no%20tracking-C8F16B)](#privacy)
 
-**Berlin first, all of Germany on board.**<br>
-Knows how long a change really takes, where to board, when a faster way turns up and when to get off –<br>
-on the phone, on the watch and on a page your friends can follow.
+A public transport app for Android and Wear OS that follows your whole trip: transfers rated from live times and real walking distances, boarding hints, a live trip on phone and watch, and links to share it.
 
 [Highlights](#highlights) · [How it works](#how-it-works) · [Getting started](#getting-started) · [Data & attribution](#data-sources-and-attribution) · [Privacy](#privacy) · [Roadmap](#roadmap)
 
 </div>
 
 > [!NOTE]
-> **In active development.** The phone app, the Wear OS app, the live page and the route page work; there is no release yet.
+> **Version 0.2.0** is in internal testing on Google Play; the GitHub release follows. Work on **0.3** is under way
+> on the development branch. Parts that exist only there are marked *0.3*.
 
 <details>
 <summary><b>Contents</b></summary>
 
 - [Highlights](#highlights) · [All features](#all-features)
 - [How it works](#how-it-works)
-  - [Transfer levels](#transfer-levels) · [Chart view](#chart-view) · [Setup and settings](#setup-and-settings) · [Live trip](#live-trip)
-  - [Live link and route link](#live-link-and-route-link) · [Little motions](#little-motions) · [Timetable sources](#timetable-sources) · [From OpenStreetMap to the app](#from-openstreetmap-to-the-app)
+  - [Where the data comes from](#where-the-data-comes-from) – timetables, realtime, station data, other services
+  - [How connections are chosen](#how-connections-are-chosen) – levels, selector, grouping, 0.3 work
+  - [Smart hints while planning and riding](#smart-hints-while-planning-and-riding)
+  - [Live trip and sharing](#live-trip-and-sharing) – live trip, live and route link, chart view, setup, little motions
 - [Screenshots](#screenshots)
 - [Architecture](#architecture)
 - [Getting started](#getting-started) – build, keys, tests, station data, web pages
@@ -123,7 +124,7 @@ No account, no ads, no tracking – and no server of ours in between.
 
 | | |
 |---|---|
-| **Transfer levels** | Every change is rated by the live times and the walking pace it needs: *relaxed* (plenty of buffer, stroll), *normal* (normal walking pace), *tight* (works at a brisk pace) and *sprint* (only running or with luck, and every 0–1 min change). German UI: Entspannt, Normal, Knapp, Sprint. |
+| **Transfer levels** | Every change is rated by the live times and the walking pace it needs: *relaxed* (5 or more spare minutes), *normal* (1 to 4), *tight* (works at a brisk pace) and *sprint* (only running or with luck, and every 0–1 min change). Details: [How connections are chosen](#how-connections-are-chosen). |
 | **Slower on the move** | With luggage, a pram or a walking aid every walk counts 1.3 times as long, at every level. |
 | **Exact transfer walks** | Change walks are measured on the OpenStreetMap footway network of the station. |
 | **Through-runs** | When your train continues as another line, the app tells you to *stay seated* and which line it continues as. |
@@ -173,6 +174,14 @@ No account, no ads, no tracking – and no server of ours in between.
 | **Map** | A map of the stops and departures nearby. |
 | **Standalone search** | Type or speak a destination on the watch; it uses the phone's position or its own. |
 
+**Watch redesign (*0.3*).** These items are in the code of the 0.3 development branch:
+
+- Start page with a trip card and departures as line-colour capsules; departure board and nearby stops with platform and delay chips, a disruption banner and pull-to-refresh with the crown.
+- Route search as *Where to?* with speaking as the main action; results as journey cards with a band of line colours; connection detail and trip overview as one time line.
+- Live trip pages redone (depart, ride, change, arrival), and a redesigned wake alarm and watch map.
+- Tiles with line-colour capsules, complications with rings in the colour of the line (Wear OS 4 and up), and richer notifications with platform and line badge.
+- Settings with real switches and an accent colour page (as on the phone, Next Stop blue, or your own).
+
 </details>
 
 <details>
@@ -182,14 +191,14 @@ No account, no ads, no tracking – and no server of ours in between.
 |---|---|
 | **As text** | A clean text summary of the connection for any messenger. |
 | **Live link** | A static web page (`web/live`) where others watch your trip live in the browser. |
-| **Route link** | A static web page (`web/route`, "So kommst du hin") that turns a shared connection into steps to travel yourself, with live times. |
+| **Route link** | A static web page (`web/route`) that turns a shared connection into steps to travel yourself, with live times. |
 | **State packs** | Station, entrance, change-position and transfer-walk data for all 16 German states, built from OpenStreetMap. |
 | **Line colours** | From the providers' feeds and OpenStreetMap route relations, picked by place – tram 1 in Mannheim is not tram 1 in Karlsruhe. |
-| **Many sources** | Berlin/Brandenburg through VBB and BVG, the rest of Germany (long-distance trains included) through Transitous. |
+| **Many sources** | Transitous for all of Germany (long-distance trains included), VBB and BVG for Berlin/Brandenburg, and regional realtime sources on top (*0.3*, see [Where the data comes from](#where-the-data-comes-from)). |
 | **Widgets** | Departures, favourite, current trip, mini, next appointment and an automatic one that shows what matters now. |
 | **Disruptions** | Notices for your saved routes, with an optional morning check. |
 | **Lift status** | accessibility.cloud and DB FaSta, with warnings for lifts out of order on a journey. |
-| **Fare zone hint** | A tag when a journey reaches VBB zone C. |
+| **Fare zone hint** | A tag when a journey leaves VBB zones A and B. |
 | **Next appointment** | From your calendar, with when to leave for it. |
 | **Settings** | Everyday choices up front; data sources, API keys, an own server, the live page address and developer options under *Advanced*. |
 
@@ -197,45 +206,239 @@ No account, no ads, no tracking – and no server of ours in between.
 
 ## How it works
 
-### Transfer levels
+Next Stop has no server of its own. The app asks public services directly and keeps what it can on the device. This
+section follows the path from data to what you see: [where the data comes from](#where-the-data-comes-from),
+[how connections are chosen](#how-connections-are-chosen), [the hints](#smart-hints-while-planning-and-riding)
+and [the live trip with its links](#live-trip-and-sharing).
+
+### Where the data comes from
+
+| Kind | From | Used for |
+|---|---|---|
+| Timetables | Transitous, VBB and BVG, public-transport-enabler | Connections, departures, trips |
+| Realtime (*0.3*) | Regional overlays on top of Transitous | The freshest live time of each ride |
+| Station data | OpenStreetMap, built into state packs | Walks, entrances, platforms, lifts, stop positions |
+| Other services | Lift status, place search, map tiles, walking paths, weather | Warnings, search, map, walks, sunny side |
+
+#### Timetables
+
+Transitous (open data, all of Germany, long-distance trains included) is the backbone. For Berlin and Brandenburg the
+VBB and BVG servers are asked as well. You order the sources in the settings; the app asks them in that order and falls
+back to the next one when one fails.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-data-sources-dark.svg">
+  <img src="docs/images/diagram-data-sources.svg" width="100%" alt="Fallback chain: VBB HAFAS ReST, BVG REST, public-transport-enabler, Transitous">
+</picture>
+
+The first three share VBB stop ids, so a stop found by one can be asked about at another.
+Details: `SourceChain.kt` and `FamilySource.kt`.
+
+#### Realtime (*0.3*)
+
+Transitous keeps routing, trips and shapes. On top of it, regional realtime sources are asked for the rides you look at,
+and **the freshest plausible live time wins**. Sources are only asked while the app is in front or a live trip runs,
+never on a timer of their own, and each feed is downloaded at most once per interval for the whole app. Open feeds that
+share trip ids with Transitous are matched by trip id and are authoritative for cancellations of their own trips. The
+others are matched by line, stop and planned time. The settings list every source with its holder and licence and let you
+switch each one off.
+
+| Source | Kind | Default |
+|---|---|---|
+| VBB GTFS-RT | open feed, Berlin/Brandenburg | on |
+| VBN GTFS-RT | open feed, Bremen/Lower Saxony | on |
+| KVV SIRI-ET | open feed, Karlsruhe | on |
+| EFA servers of 14 regional associations, through public-transport-enabler, no credentials | public timetable servers, unofficial, never authoritative for cancellations | on |
+| gtfs.de service alerts | disruption texts for all of Germany, a large download | off; when switched on, only on Wi-Fi |
+| RMV HAPI | official API, needs your own key entered in the settings | off until a key is entered |
+
+Deutsche Bahn's APIs are not used, nor any source that needs a key taken out of another app. Code: `RealtimeOverlays.kt`,
+`OverlayChoice.kt`, `SourceChain.kt`.
+
+#### Station data from OpenStreetMap
+
+State packs for all 16 German states are built from OpenStreetMap and shipped as assets, so stations work offline.
+
+| In the packs | Used for |
+|---|---|
+| Entrances, accesses through buildings, lifts | Station map, step-free walks |
+| Platforms and the footways between them | Transfer walks measured on the real network, not as straight lines |
+| Stop positions of bus and tram stops | Where to board, with the lines that stop at each |
+| Change positions | Where to stand in the train: the open dataset vbb-change-positions for Berlin/Brandenburg, positions worked out from OpenStreetMap elsewhere |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-osm-pipeline-dark.svg">
+  <img src="docs/images/diagram-osm-pipeline.svg" width="100%" alt="Geofabrik extract, extract script, build scripts, state packs, app">
+</picture>
+
+The pipeline needs no public server: it reads local Geofabrik `.osm.pbf` files. See
+[tools/README.md](tools/README.md).
+
+#### Other services
+
+| Service | Used for |
+|---|---|
+| accessibility.cloud and DB FaSta | Lifts out of order (each needs an access key) |
+| Photon (komoot) | Place search |
+| OpenFreeMap | Map tiles |
+| OSRM (FOSSGIS) | Walking and cycling paths |
+| Open-Meteo | Cloud cover for the sunny side hint |
+
+The full list with licences is in [Data sources and attribution](#data-sources-and-attribution).
+
+### How connections are chosen
+
+Every change between two rides gets a **level**. A connection has the level of its **tightest change**, and you choose
+how tight you are willing to go. Code: `Models.kt`, `WalkPace.kt`, `TransferTuning.kt`, `JourneySelection.kt`,
+`JourneyGroups.kt`.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-transfer-levels-dark.svg">
-  <img src="docs/images/diagram-transfer-levels.svg" width="100%" alt="A change rated by walking pace: Relaxed with 5 or more minutes to spare, Normal with 2 to 4, Tight when it works at a brisk pace, Sprint only running or with luck">
+  <img src="docs/images/diagram-transfer-levels.svg" width="100%" alt="A change rated by walking pace: Relaxed with 5 or more minutes to spare, Normal with 1 to 4, Tight when it works at a brisk pace, Sprint only running or with luck">
 </picture>
 
-A change needs 1 min on the same platform, 3 to another, 5 at large rail stations, or its walk
-plus 1 min. Beyond that, 5 spare minutes are *relaxed* and 2 *normal*. If it still works at a brisk
-pace – the walk ×0.8 and no buffer, at least 2 min – it is *tight*; otherwise it is a *sprint*. A
-journey found only by a search without any minimum change time counts as tight at least. The
-rules live in `Models.kt` (`changeNeed`, `paceTightness`, `journeyChangeRatings`) and
-`WalkPace.kt` (brisk and slower walking).
+#### What a change needs
 
-### Chart view
+The **gap** is the time from the live arrival to the live departure. The **need** is what the change takes at your walking
+pace. The **spare** minutes are the gap minus the need. A late ride is rated with its live time, not its timetable time.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-chart-dark.svg">
-  <img src="docs/images/diagram-chart.svg" width="100%" alt="Five connections as columns on a time axis, one coloured block per ride, the change minutes between them in green, grey, red, magenta or amber">
-</picture>
+| Situation | Need |
+|---|---|
+| Walk known from the OpenStreetMap footways of the station | the walk at your pace plus a change buffer (30 s by default), rounded up to whole minutes, at least 2 min; 1 min on the same platform |
+| Same platform, no walk known | 1 min |
+| Another platform of the same station | 3 min (5 min at a large rail station with regional or long-distance trains) |
+| A walk given by the provider | the walk plus 1 min |
 
-### Setup and settings
+#### The four levels
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-setup-dark.svg">
-  <img src="docs/images/diagram-setup.svg" width="100%" alt="Setup sketches: four mini maps for the map style, the transfer level bar, three ways to show a delay, and two vehicles on a loop track, one with a live dot">
-</picture>
+| Level | Meaning | Default rule |
+|---|---|---|
+| **Relaxed** | Plenty of buffer | 5 or more spare minutes |
+| **Normal** | Normal walking pace is enough | 1 to 4 spare minutes |
+| **Tight** | Works only at a brisk pace | Fewer spare minutes, but the gap still covers the walk at 0.8 times its time with no buffer, and is at least 2 min |
+| **Sprint** | Only by running or with luck | Everything else, including every change of 0 or 1 min |
 
-The same sketches move when you pick an option, and stand still when the system has animations
-turned off.
+Worked example: a measured walk of 3 min gives a need of 4 min (3 min plus 30 s, rounded up).
 
-### Live trip
+| Gap | Spare | Level | Why |
+|---|---|---|---|
+| 9 min | 5 | Relaxed | 5 or more spare |
+| 7 min | 3 | Normal | 1 to 4 spare |
+| 4 min | 0 | Tight | the brisk walk is 2.4 min, rounded up to 3 min, and fits in 4 |
+| 2 min | -2 | Sprint | shorter than the brisk walk |
+
+An arrival that is only estimated (no live data) is rated normal at best.
+
+<details>
+<summary><b>Walking pace and tuning</b></summary>
+
+- **Slower on the move** (luggage, a pram, a walking aid) makes every measured walk 1.3 times as long, at every level, and
+  asks the providers for slow walking. The same 3 min walk then needs 5 min: the 7 min gap above is Normal with 2 spare
+  minutes, and the 9 min gap is Normal instead of Relaxed. You can also set your own factor (0.8 to 2.0).
+- The brisk pace of *Tight* is always 0.8 times the walk at the pace you set.
+- In the settings you can move the thresholds: Normal from 0 to 3 spare minutes (default 1), Relaxed from 3 to 10 (default
+  5), and the change buffer from 0 to 2 min in 30 s steps (default 30 s). The explanation *How transfers are rated* in the
+  app is generated from the values in use.
+
+</details>
+
+#### Choosing a level
+
+The level bar has four segments. Picking a level shows **every connection up to that level**.
+
+| You pick | You see |
+|---|---|
+| Relaxed | relaxed connections |
+| Normal | relaxed and normal |
+| Tight | relaxed, normal and tight |
+| Sprint | all of them |
+
+The bar fills from the left up to your choice. A small figure at the end of the fill walks at Relaxed and Normal and runs
+at Tight and Sprint. Tap a segment or drag across the bar to pick.
+
+Next to the next tighter level that still holds hidden connections, a blue **+N** says how many connections that level
+would add; tap it to pick that level. It counts only connections that are really new: not the same rides again and not a
+variant already shown. A connection without a change (also two rides of one trip, staying on board) cannot be missed and is
+always shown. At Sprint at most 6 extra connections are added, because most of them are put together in the app from every
+connection at every change.
+
+#### What counts as the same connection
+
+```mermaid
+flowchart LR
+    A["Connections found"] --> B["Tidy: duplicates,<br>tighter twins,<br>cancelled variants"]
+    B --> C["Level of each:<br>its tightest change"]
+    C --> D{"At or below<br>the chosen level?"}
+    D -- yes --> E["Group near-identical<br>alternatives"] --> F["Shown<br>(+N alternative)"]
+    D -- no --> G["Hidden, counted<br>as +N on the level bar"]
+```
+
+- The same rides found twice are one connection; the best copy stays.
+- Of two connections on the same lines and times that differ only in a tighter change, the one with more room stays.
+- A cancelled way to a train that another connection rides to the same stop and arrival is dropped.
+- Connections that only differ in another short last bus or tram (up to 15 min) and arrive within 5 min of the best one are
+  **one column** with a small **+1 alternative** tag (+2, +3 and so on).
+
+#### Where the level is shown
+
+| Where | What you see |
+|---|---|
+| Level bar | Your chosen level, the figure and the **+N** of the next level |
+| Chart | A level word (relaxed, normal, tight, sprint) next to the total time of each column; each change block has the colour of its own level |
+| Details | Every change with its own rating and the walk behind it |
+
+The chart word follows the **total time** setting: *Above* or *Below* the column, pinned to the *top* or *bottom* edge so
+all columns can be compared, or **Level only**, which hides the total time while the word stays below the arrival. Where a
+column has no level, only a warning shows for tight and sprint changes. A cancelled connection shows no word.
+
+*Every minute counts* is a per-trip mode for the ride: the level jumps to Sprint, the shortcut alert is on and the app
+searches again from the next stop you can reach.
+
+#### 0.3, in progress
+
+> [!NOTE]
+> These points describe 0.3 development. They are not part of the released 0.2.0.
+
+| Change | Status |
+|---|---|
+| Hide a connection that another one beats in every respect: leaves no earlier, arrives no later (and is better in one of the two), no more changes, at least as relaxed, at most 2 min more walking, no more rides without step-free or bicycle features. The followed trip and connections you swapped yourself stay. Works across different lines. | In the 0.3 development build |
+| Do not offer connections whose boarding or alighting stop is explicitly marked cancelled in the data | Planned. Today only a cancelled way to a train that another connection rides is dropped (see above) |
+| Show a more relaxed connection only if it arrives at most about 10 min after the best one of the chosen level; if none exists at that level, show all | Idea under test, not in the code, the value may change |
+
+### Smart hints while planning and riding
+
+Small helpers that work from the data above. Each row says what it does and when it speaks up.
+
+| Hint | What it does and how it decides |
+|---|---|
+| **Sunny side** | Tells you which side of the vehicle the sun shines in. The sun's position is worked out on the device from time and place and compared with the direction of the ride along its path on the map. It needs a ride of at least 20 min, the sun at least 5 degrees above the horizon for at least half of the ride, one side clearly ahead of the other, and enough of the way above ground (a quarter of it, at least 3 min). It also needs cloud cover below 60 percent. That comes from Open-Meteo, hour by hour, for an area of about 11 km; only the rounded area is sent, it is kept 30 min, and it is asked only while a hint is on screen or a followed trip goes to the watch. Without network the hint stays away. |
+| **Boarding position** | *Front, middle or rear* for a short change. First choice is a record of the change-positions data (vbb-change-positions, then positions built from OpenStreetMap). Where there is none, the position is estimated from the map: the way from the change to the departure is projected onto the direction the train runs along; far enough ahead means front, far enough behind means rear, else middle. Estimates are marked as estimated. For a bus or tram the stop position is the one with the provider's platform number, else the one OpenStreetMap lists the line at, else the nearest. |
+| **Lift warnings** | For the station where you board, each change station and where you get off, the app asks for lifts out of order within 250 m (accessibility.cloud and DB FaSta, each with its key; kept 5 min). A source that fails counts as knowing nothing, so a missing key or network never shows a lift as broken. |
+| **Disruptions** | Notices come with the journeys and departures the app loads (remarks of the BVG API and the alerts Transitous passes on) and show on the journeys and stops they were found on. Outside Berlin the overview is put together from the large stations around you and the notices of every journey loaded, so it is only as complete as the feeds. In 0.3, gtfs.de texts are matched by the stops they name. |
+| **Shortcut alert** | While you follow a trip, the app searches from the next stop you can reach. It speaks up only for a real alternative (get off earlier, change elsewhere, take another line, stay seated) that wins at least the minutes you set (2, 3, 5 or 10; 3 by default), leaves no earlier, is news since you chose your trip, and is reachable with your own vehicle's current live time and your level's change time. A way you put aside returns only if it wins clearly more. Options: *only equally comfortable* (no more changes ahead than your trip) and a quiet start (3 min gain during the first 3 min). It never switches by itself. |
+| **Get-off reminders** | Sound and vibration when your vehicle leaves the stop before yours, and again about a minute before arrival, at every change and at the end. Times are live times (loaded every 30 s) and, while the live trip is open, also timed by your position. On a long hop, over 10 min, the time left is told instead. Each reminder is sent once, a late one (over 150 s) is dropped, and it clears itself after 5 min. |
+| **Walk rerouting** | While you follow a walk with live positions, more than 40 m beside the way (or walking away from its end) for 20 s gets a new way from where you are, with what it costs in minutes. Positions less accurate than 30 m are ignored, and reroutes are at least 30 s apart. |
+| **Through-runs** | When your train continues as another line, the app says *stay seated*. Two rides count as one when they are the same vehicle, or the same line and direction at one station and platform after a short wait. A change from a line into the same line behind it is joined too, since staying seated is never slower. |
+| **Fare zone hint** | A tag when a journey leaves VBB zones A and B, so a Berlin AB ticket is not enough. It is a hint, not a fare calculation: zone A is the area inside the S-Bahn ring, zone C an approximation by distance from the centre. |
+| **Next appointment** | The next appointments of your device calendar that have a location and are not all-day, within 7 days, with when to leave once a journey is known. Read on demand, never stored, only with your permission. |
+
+### Live trip and sharing
+
+#### Live trip
+
+The live trip follows your connection with live times: the next step, the countdown, the stops left, in the app, as a live
+notification and on the watch.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-companion-dark.svg">
   <img src="docs/images/diagram-companion.svg" width="100%" alt="Phone and watch showing the next departure with a countdown ring and a boarding hint">
 </picture>
 
-### Live link and route link
+#### Live link and route link
+
+Two static pages in `web/`. The live link lets others watch your trip in a browser; the route link turns a shared
+connection into steps to travel yourself. The trip or connection travels in the link fragment, and the viewer's browser
+asks the public timetable APIs itself.
 
 <table>
 <tr>
@@ -258,10 +461,28 @@ turned off.
 </tr>
 </table>
 
-Both are static pages in `web/`; the trip or connection travels in the link fragment, and the
-viewer's browser asks the public timetable APIs itself.
+#### Chart view
 
-### Little motions
+Connections as columns on a shared time axis, one block per ride, with the change minutes in the colour of their level.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-chart-dark.svg">
+  <img src="docs/images/diagram-chart.svg" width="100%" alt="Five connections as columns on a time axis, one coloured block per ride, the change minutes between them in green, grey, red, magenta or amber">
+</picture>
+
+#### Setup and settings
+
+The setup and the settings show what an option does while you pick it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-setup-dark.svg">
+  <img src="docs/images/diagram-setup.svg" width="100%" alt="Setup sketches: four mini maps for the map style, the transfer level bar, three ways to show a delay, and two vehicles on a loop track, one with a live dot">
+</picture>
+
+The sketches move when you pick an option, and stand still when the system has animations
+turned off.
+
+#### Little motions
 
 <table>
 <tr>
@@ -281,26 +502,6 @@ viewer's browser asks the public timetable APIs itself.
 </table>
 
 Short, soft and never in the way – and off when the system asks for reduced motion.
-
-### Timetable sources
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-data-sources-dark.svg">
-  <img src="docs/images/diagram-data-sources.svg" width="100%" alt="Fallback chain: VBB HAFAS ReST, BVG REST, public-transport-enabler, Transitous">
-</picture>
-
-The first three share VBB stop ids, so a stop found by one can be asked about at another.
-Details: `SourceChain.kt` and `FamilySource.kt`.
-
-### From OpenStreetMap to the app
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagram-osm-pipeline-dark.svg">
-  <img src="docs/images/diagram-osm-pipeline.svg" width="100%" alt="Geofabrik extract, extract script, build scripts, state packs, app">
-</picture>
-
-The pipeline needs no public server: it reads local Geofabrik `.osm.pbf` files. See
-[tools/README.md](tools/README.md).
 
 ## Screenshots
 
@@ -408,7 +609,7 @@ python3 tools/test_extract_osm_pbf.py
   app's links lead by default. To use your own copy, upload it to any static host (Cloudflare
   Pages, GitHub Pages, …) and enter its address in the app's settings (*Advanced*). Open `…/live/#demo`
   or `…/route/#demo` for made-up examples. See [web/README.md](web/README.md).
-- **Info site** – `web/index.html` (German) and `web/en/` (English) are the project's website,
+- **Info site** – `web/index.html` and `web/en/` are the project's website, in two languages,
   with its assets in `web/site/`. They sit beside the pages above and need nothing else.
 
 ## Data sources and attribution
@@ -421,6 +622,12 @@ python3 tools/test_extract_osm_pbf.py
 | Walking and cycling paths | [OSRM](https://routing.openstreetmap.de) (FOSSGIS e.V.) | OpenStreetMap data, ODbL |
 | Timetables, Germany | [Transitous](https://transitous.org) – sources at [transitous.org/sources](https://transitous.org/sources/) | per feed |
 | Timetables, Berlin/Brandenburg | VBB HAFAS ReST API, BVG REST ([v6.bvg.transport.rest](https://v6.bvg.transport.rest)) | per provider terms |
+| Realtime, Berlin/Brandenburg (*0.3*) | VBB GTFS-RT, VBB Verkehrsverbund Berlin-Brandenburg GmbH | CC BY 4.0 |
+| Realtime, Bremen/Lower Saxony (*0.3*) | VBN GTFS-RT, Verkehrsverbund Bremen/Niedersachsen (VBN), connect | CC BY-SA 4.0 |
+| Realtime, Karlsruhe (*0.3*) | KVV SIRI-ET via Mobilithek, Karlsruher Verkehrsverbund | CC BY 4.0 |
+| Realtime, regional servers (*0.3*) | EFA timetable servers of transit associations, through public-transport-enabler | unofficial, no licence for third parties |
+| Disruption texts (*0.3*, off by default) | [gtfs.de](https://gtfs.de/de/realtime/) service alerts | CC BY-SA 4.0 |
+| Realtime, RMV (*0.3*, own key) | RMV HAPI (HAFAS ReST) | provider terms |
 | Change positions | [vbb-change-positions](https://github.com/derhuerst/vbb-change-positions) | ODbL |
 | Lift status | [accessibility.cloud](https://accessibility.cloud) (brokenlifts.org), DB FaSta | provider terms |
 | Cloud cover (sunny side hint) | [Open-Meteo](https://open-meteo.com) | CC BY 4.0 |
@@ -450,7 +657,7 @@ Open-source licenses*, from `data/ThirdPartyNotices.kt`, which a unit test holds
   device. Only a short link of Google Maps (maps.app.goo.gl/…) has to be asked once at its own
   host where it leads; the map page behind it is not loaded.
 - **Android's backup** (Google backup and phone-to-phone transfer) takes your settings,
-  favourites, saved places, "Meine Wege" and recent destinations, so a new phone starts where the
+  favourites, saved places, saved routes and recent destinations, so a new phone starts where the
   old one left off; cloud backup only where Android can encrypt it on the device (a screen lock is
   set). Keys, caches, downloaded OpenStreetMap data and the widgets' state are left out
   (`app/src/main/res/xml/data_extraction_rules.xml`; the watch app likewise keeps its settings and
@@ -461,7 +668,9 @@ Open-source licenses*, from `data/ThirdPartyNotices.kt`, which a unit test holds
 ## Roadmap
 
 - [x] GPL-3.0 `LICENSE`
-- [ ] First release
+- [x] 0.2.0 in internal testing on Google Play
+- [ ] Public release on GitHub and Google Play
+- [ ] 0.3: realtime overlays, redesigned Wear OS app, cleaner connection lists
 - [ ] Screenshots and a store listing
 - [ ] More networks beyond Berlin/Brandenburg with the same depth (boarding hints, lifts)
 - [ ] Keep the OpenStreetMap state packs fresh with a regular rebuild
@@ -470,7 +679,7 @@ Open-source licenses*, from `data/ThirdPartyNotices.kt`, which a unit test holds
 
 Bug reports, ideas and pull requests are welcome.
 
-- Everything in the repository is written in English (the app itself has English and German UI).
+- Everything in the repository is written in English (the app itself is translated).
 - No personal data, credentials, or home or work addresses in code, sample data or screenshots;
   use well-known central stations as examples.
 - Never commit keys (see [docs/keys.md](docs/keys.md)), and run the tests above before opening a
