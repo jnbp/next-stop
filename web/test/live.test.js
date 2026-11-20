@@ -1,9 +1,10 @@
-// Offline tests of the logic of web/live/app.js: node web/test/live.test.js [v2 data from Kotlin]
-// With an argument (base64url of the raw-deflated liveLinkCompactJson of LiveLinkTest.kt), it also
-// checks that a fragment made by the app (JourneyShare.kt) decodes.
-// test/fixtures/live-v2.json is the v2 JSON the app writes for a fixed trip (LiveLinkTest.kt checks
-// the Kotlin encoder against the same file); live-v2.deflate.txt is that JSON raw-deflated by
-// java.util.zip.Deflater(nowrap = true), as the app does it.
+// Offline tests of the logic of web/live/app.js: node web/test/live.test.js [v3 data from Kotlin]
+// With an argument (the data of a v3 link made by the app from the trip of LiveLinkTest.kt, what
+// follows "#3d"), it also checks that a fragment made by the app (JourneyShare.kt) decodes.
+// test/fixtures/live-v3.json is the v3 JSON the app writes for a fixed trip (LiveLinkTest.kt checks
+// the Kotlin encoder against the same file); live-v3.deflate.txt is that JSON raw-deflated with the
+// link dictionary by java.util.zip.Deflater, as the app does it. live-v2.json and
+// live-v2.deflate.txt are the same trip as the app wrote it before v3 (links the page still reads).
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -11,6 +12,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const test = require('node:test');
 const live = require('../live/app.js');
+const core = require('../shared/core.js');
 
 const T0 = Date.UTC(2026, 10, 13, 13, 0) / 1000; // 14:00 in Berlin
 const sample = {
@@ -383,7 +385,7 @@ function checkV2Journey(j) {
   assert.deepEqual(j.dest, { name: 'Zuhause', pos: [52.366, 13.51], kind: 'h' });
 }
 
-test('v2: the JS encoder writes exactly the JSON of the app (live-v2.json)', () => {
+test('v2: the JS encoder writes exactly the JSON of the app before v3 (live-v2.json)', () => {
   assert.equal(live.encodeLive(V2_INPUT, { k: 'h' }), V2_FIXTURE);
 });
 
@@ -483,7 +485,102 @@ test('v2: a trip of 13 legs from Bonn to Berlin fits in a short link', async (t)
   assert.equal(live.tripState(live.computeLegs(after, {}), now).phase, live.tripState(live.computeLegs(before, {}), now).phase);
 });
 
+const V3_FIXTURE = fs.readFileSync(fixturePath('live-v3.json'), 'utf8').trim();
+const V3_FROM_JAVA = fs.readFileSync(fixturePath('live-v3.deflate.txt'), 'utf8').trim();
+const DICTIONARY = Buffer.from(core.LINK_DICTIONARY, 'utf8');
+const deflated3 = (json) => zlib.deflateRawSync(Buffer.from(json, 'utf8'), { level: 9, dictionary: DICTIONARY }).toString('base64url');
+const fragment3 = (json, lang) => '#3' + (lang === 'de' ? 'd' : lang === 'en' ? 'e' : '0') + deflated3(json);
+
+test('v3: the JS encoder writes exactly the JSON of the app (live-v3.json)', () => {
+  assert.equal(live.encodeLive3(V2_INPUT, { k: 'h' }), V3_FIXTURE);
+});
+
+test('v3: the dictionary is the one of the app, byte for byte (link-dictionary.txt)', () => {
+  const [size, crc] = fs.readFileSync(fixturePath('link-dictionary.txt'), 'utf8').trim().split(' ');
+  assert.equal(DICTIONARY.length, Number(size));
+  assert.equal(zlib.crc32(DICTIONARY).toString(16), crc);
+});
+
+test('v3: the fixture deflated by Java (as the app does it) reads back as the same trip as v2', async () => {
+  const j = await live.readFragment('#3d' + V3_FROM_JAVA);
+  checkV2Journey(j);
+  assert.equal(j.lang, 'de');
+  // The same with node's own deflate, and the same journey as the v2 link of the same trip.
+  checkV2Journey(await live.readFragment(fragment3(V3_FIXTURE)));
+  const v2 = await live.readFragment('#v=2&l=de&d=' + V2_FROM_JAVA);
+  assert.deepEqual(j, v2);
+  assert.equal((await live.readFragment(fragment3(V3_FIXTURE, 'en'))).lang, 'en');
+  assert.equal((await live.readFragment(fragment3(V3_FIXTURE))).lang, null);
+});
+
+test('v3: broken links are refused', async () => {
+  await assert.rejects(live.readFragment('#3d'), /version/);
+  await assert.rejects(live.readFragment('#3x' + V3_FROM_JAVA), /version/);
+  await assert.rejects(live.readFragment('#3d' + live.toBase64Url('not deflate data at all')), /data/);
+  await assert.rejects(live.readFragment('#3d' + V3_FROM_JAVA.slice(0, 40)), /data/);
+  // Data deflated without the dictionary reads all the same: it just never refers to it.
+  checkV2Journey(await live.readFragment('#3d' + deflated(V3_FIXTURE).replace(/=+$/, '')));
+  await assert.rejects(live.readFragment(fragment3('{"b":1}')), /data/);
+  await assert.rejects(live.readFragment(fragment3('[0,1,-1,[],[]]')), /data/);
+  await assert.rejects(live.readFragment(fragment3('[0,1,0,[["A",0,1,2]],[[0,7,0,1]],0,0,["B"]]')), /data/);
+  await assert.rejects(live.readFragment(fragment3('[0,1,0,[["A",0,1.5,2]],[[0,0,0,1]],0,0,["B"]]')), /data/);
+  await assert.rejects(live.readFragment(fragment3('[0,1,0,[["A"]],[[0,0,0.5,1]],0,0,["B"]]')), /data/);
+  await assert.rejects(live.readFragment(fragment3('[1,2')), /data/);
+});
+
+test('v3: a browser without DecompressionStream gets its own message', async () => {
+  const saved = globalThis.DecompressionStream;
+  delete globalThis.DecompressionStream;
+  try {
+    await assert.rejects(live.readFragment('#3d' + V3_FROM_JAVA), /unsupported/);
+  } finally {
+    globalThis.DecompressionStream = saved;
+  }
+});
+
+test('v3: walks that are no change, a named start, times to the minute', async () => {
+  const raw = {
+    t: T0,
+    dest: { name: 'Hermannplatz', lat: 52.48693, lon: 13.42484 },
+    legs: [
+      { walk: true, from: { name: 'Startstraße 1', lat: 52.52, lon: 13.405, dep: T0 }, to: { name: 'Park', lat: 52.51, lon: 13.41, arr: T0 + 600 } },
+      { walk: true, from: { name: 'Park', lat: 52.51, lon: 13.41, dep: T0 + 600 }, to: { name: 'Hermannplatz', lat: 52.48693, lon: 13.42484, arr: T0 + 1530 } },
+    ],
+  };
+  const json = live.encodeLive3(raw);
+  assert.doesNotMatch(json, /Startstra/, 'the start of the trip is not in the link');
+  assert.doesNotMatch(json, /134050/);
+  const j = await live.readFragment(fragment3(json));
+  assert.equal(j.legs.length, 2);
+  assert.ok(j.legs.every((l) => l.walk));
+  assert.equal(j.legs[0].from.name, 'Park');
+  assert.deepEqual(j.legs[0].from.pos, [52.51, 13.41]);
+  // Times go to the minute: 25 min 30 s after the start is 14:25.
+  assert.equal(j.legs[1].to.planned, (T0 + 1500) * 1000);
+  assert.equal(j.name, null);
+  const named = await live.readFragment(fragment3(live.encodeLive3(V2_INPUT, { o: 'S Hackescher Markt' })));
+  assert.equal(named.legs[0].from.name, 'S Hackescher Markt');
+  assert.deepEqual(named.legs[0].from.pos, [52.5215, 13.4113]);
+  assert.equal(named.dest.kind, null);
+});
+
+test('v3: a trip of 13 legs from Bonn to Berlin, a third shorter than v2 and the same journey', async (t) => {
+  const site = 'https://nextstop.bapo.me/live/';
+  const v2 = site + fragment2(live.encodeLive(V1_13_LEGS), 'de');
+  const v3 = site + fragment3(live.encodeLive3(V1_13_LEGS), 'de');
+  t.diagnostic('13 legs: v2 ' + v2.length + ' characters, v3 ' + v3.length);
+  assert.ok(v3.length * 10 <= v2.length * 7, 'v3 is ' + v3.length + ' characters, v2 ' + v2.length);
+  const before = await live.readFragment(v2.slice(v2.indexOf('#')));
+  const after = await live.readFragment(v3.slice(v3.indexOf('#')));
+  assert.deepEqual(after, before);
+});
+
 test('page language: the recipient\'s German or English, else the sender\'s', () => {
+  assert.equal(core.linkLanguage('#3d' + V3_FROM_JAVA), 'de');
+  assert.equal(core.linkLanguage('#3eAAAA'), 'en');
+  assert.equal(core.linkLanguage('#30AAAA'), null);
+  assert.equal(core.linkLanguage('#v=2&l=de&d=AAAA'), 'de');
+  assert.equal(core.linkLanguage('#v=1&d=AAAA'), null);
   assert.equal(live.pickTexts('de-AT', 'en').lang, 'de');
   assert.equal(live.pickTexts('en-GB', 'de').lang, 'en');
   assert.equal(live.pickTexts('fr-FR', 'de').lang, 'de');
@@ -507,8 +604,8 @@ test('headline: a saved home or work goes by "nach Hause", not by its address', 
 
 const fromKotlin = process.argv[2];
 if (fromKotlin) {
-  test('a fragment made by the app (Kotlin deflateRaw + base64Url of live-v2.json) decodes', async () => {
-    checkV2Journey(await live.readFragment('#v=2&d=' + fromKotlin));
+  test('a fragment made by the app (Kotlin deflateRaw + base64Url of live-v3.json) decodes', async () => {
+    checkV2Journey(await live.readFragment('#3d' + fromKotlin));
   });
 }
 

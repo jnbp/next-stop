@@ -28,10 +28,12 @@ web/
   route/demo.js        made-up connection for "#demo"; route/demo.html redirects to it
   test/live.test.js    offline tests: node web/test/live.test.js
   test/route.test.js   offline tests: node web/test/route.test.js
-  test/fixtures/       route-v1.json: the route link JSON of the app for a fixed connection;
-                       live-v2.json: the v2 live link JSON of the app for a fixed trip; *.deflate.txt:
-                       both raw-deflated by Java as the app does it; live-v1-13-legs.json: a v1
-                       payload of 13 legs from Bonn to Berlin for the link length
+  test/fixtures/       live-v3.json, route-v3.json: the v3 link JSON of the app for a fixed trip and
+                       connection; *-v3.deflate.txt: both deflated with the dictionary by Java as the
+                       app does it; link-dictionary.txt: size and CRC-32 of the dictionary;
+                       live-v2.json, route-v1.json (+ .deflate.txt): the same as the app wrote them
+                       before v3; live-v1-13-legs.json: a v1 payload of 13 legs from Bonn to Berlin
+                       for the link length
 ```
 
 ## Live page
@@ -147,24 +149,45 @@ stay where they are. The Google Play badge is prepared as a comment in both page
 
 ## Link formats
 
-The app writes **v2**: `#v=2&l=<language>&d=<base64url of the raw-deflated JSON>` (deflate
-without zlib header, as `java.util.zip.Deflater(nowrap = true)` writes it; the pages unpack it
-with `DecompressionStream('deflate-raw')` and say so in browsers without it). `l` is the
-language of the sender's app; a page takes the recipient's browser language when it is German or
-English and only otherwise the sender's. The pages still read **v1** links,
-`#v=1&d=<base64url JSON>` (UTF-8, no padding). Coordinates have 5 decimals unless said
+The app writes **v3**: `#3<language><data>`, the language `d` (German), `e` (English) or `0`
+(another or none), the data the base64url (no padding) of the JSON below, raw-deflated with a
+preset dictionary (`LINK_DICTIONARY` in `shared/core.js` and in `ui/JourneyShare.kt`, byte for
+byte: words links often have, such as JSON frames, "S+U ", "Hbf", Transitous and HAFAS id parts).
+`DecompressionStream` knows no dictionaries, so the pages put the dictionary in front of the data
+as a stored deflate block and drop it from the output (`inflateRawWithDictionary`); browsers
+without `DecompressionStream` get a message. The format is so short because WhatsApp folds a long
+message away behind "Mehr lesen", and its link can only be tapped after unfolding: the dictionary
+must never change within v3 (a new one needs a new version). A page takes the recipient's browser
+language when it is German or English and only otherwise the sender's.
+
+The pages still read the links of the app before v3: **v2** `#v=2&l=<language>&d=<base64url of
+the raw-deflated JSON>` (deflate without zlib header and without dictionary) and **v1**
+`#v=1&d=<base64url JSON>` (UTF-8, no padding). In v1/v2 coordinates have 5 decimals unless said
 otherwise; delays (minutes known when shared) and empty fields are left out. `p` is `bvg` (HAFAS
 ids, `v6.bvg.transport.rest`) or `tr` (Transitous/MOTIS ids, without the app's `tr:` prefix).
 
-**Live link v2** `https://<site>/live/#v=2&l=de&d=…`, built by `liveLinkCompactJson` in
-`ui/JourneyShare.kt`; `expandLive` in `live/app.js` documents the keys and turns it into the v1
-shape. Each stop is written once, times are seconds after the first departure `b`, positions
-have 4 decimals, and a walk between two legs is only its two times on the leg after it. The
-start of the trip is never in it (a first walk starts at the stop it leads to), and a saved
-place as destination goes by its label (`k`: `h` home, `w` work) with a position to 3 decimals.
-`test/fixtures/live-v2.json` is checked by `LiveLinkTest.kt` (app) and `live.test.js` (page).
-A sample trip of 13 legs from Bonn to Berlin (`test/fixtures/live-v1-13-legs.json`): 4,812
-characters as v1, 940 as v2.
+**Live link v3** `https://<site>/live/#3d…`, built by `liveLinkCompactJson` in
+`ui/JourneyShare.kt`; `expandLive3` in `live/app.js` documents it and turns it into v2. The
+content of v2 as an array without keys, `[n, b, c, s, r, o, e, z, k]`, with `0` for what is not
+there and nothing at the end of an array that is not there. Times are whole minutes, each after
+the time written before it (`b` in epoch minutes); each stop is written once, `[name, id or 0,
+lat, lon]` with its position in steps of 1e-4 degrees after the stop before it; a ride is `[f, t,
+d, a, p (1 bvg, 2 tr), trip, line, direction, dd, ad, w]`, a walk that is no change `[f, t, d, a,
+-1]`. `test/fixtures/live-v3.json` is checked by `LiveLinkTest.kt` (app) and `live.test.js`
+(page), `live-v3.deflate.txt` is it as the app packs it. The 13 legs from Bonn to Berlin
+(`test/fixtures/live-v1-13-legs.json`): 4,812 characters as v1, 940 as v2, 640 as v3.
+
+```json
+["Ana",29910672,-10,[["S+U Alexanderplatz","900100003",525215,134113],["S Ostkreuz","900120003",-185,577]],
+ [[0,1,1,9,1,"<trip id>","S5","Strausberg Nord",2,3,[0,4]]],0,[0,7],["Zuhause",16,3],"h"]
+```
+
+**Live link v2** `https://<site>/live/#v=2&l=de&d=…` (read only); `expandLive` in `live/app.js`
+documents the keys and turns it into the v1 shape. Each stop is written once, times are seconds
+after the first departure `b`, positions have 4 decimals, and a walk between two legs is only its
+two times on the leg after it. The start of the trip is never in it (a first walk starts at the
+stop it leads to), and a saved place as destination goes by its label (`k`: `h` home, `w` work)
+with a position to 3 decimals. `test/fixtures/live-v2.json` is such a link of the app before v3.
 
 ```json
 {"n":"Ana","b":1794640320,"c":-600,
@@ -184,9 +207,18 @@ characters as v1, 940 as v2.
          {"walk":true,"from":{…},"to":{…}}]}
 ```
 
-**Route link** `https://<site>/route/#v=2&l=de&d=…` (v2: the JSON below raw-deflated; v1 the
-same JSON without deflate), built by `routeLinkJson` in `ui/JourneyShare.kt` (no name field). Key order as in `test/fixtures/route-v1.json`, which
-`RouteLinkTest.kt` (app) and `route.test.js` (page) both check, so the two sides stay in step:
+**Route link v3** `https://<site>/route/#3d…`, built by `routeLinkJson` in `ui/JourneyShare.kt`;
+`expandRoute3` in `route/app.js` documents it and turns it into the v1 JSON below. Packed as the
+live link v3, `[b, c, s, l, z]`, with positions in steps of 1e-5 degrees; a ride is `[f, t, d, a, p,
+trip, line, prod, dir, poly, dd, ad, plFrom, plTo, n + 1, b, flags (1 be, 2 x), posFrom, posTo]`,
+a walk `[f, t, d, a, -1 (-2 by bike), m, poly, exit, entr, posTo]`, and the first point of `poly`
+is written after the position of the stop it leaves from. `test/fixtures/route-v3.json` is checked
+by `RouteLinkTest.kt` and `route.test.js`. The ways are most of a route link and hardly pack, so
+v3 is about a quarter shorter than v2 there (`LinkLengthTest.kt` prints the lengths).
+
+**Route link v2 / v1** `https://<site>/route/#v=2&l=de&d=…` (read only; v2: the JSON below
+raw-deflated; v1 the same JSON without deflate), as the app wrote it before v3. Key order as in
+`test/fixtures/route-v1.json`, which `route.test.js` checks against its encoder:
 
 ```json
 {"legs":[{"p":"bvg","trip":"…","line":"S5","prod":"suburban","dir":"Strausberg Nord",
@@ -253,9 +285,9 @@ straight line). A connection of three legs gives a link of about 1–2 kB.
 
 ```
 node web/test/live.test.js                  # logic tests of the live page with sample answers
-node web/test/live.test.js <base64url>      # also checks a live fragment made by the app
+node web/test/live.test.js <data>           # also checks a live fragment made by the app (what follows "#3d")
 node web/test/route.test.js                 # logic tests of the route page, the shared fixture, the demo
-node web/test/route.test.js <base64url>     # also checks a route fragment made by the app
+node web/test/route.test.js <data>          # also checks a route fragment made by the app (what follows "#3d")
 ```
 
 To try the pages, serve the folder (`python3 -m http.server -d web 8080`) and open

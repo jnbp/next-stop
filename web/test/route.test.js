@@ -1,12 +1,15 @@
-// Offline tests of the logic of web/route/app.js: node web/test/route.test.js [base64url from the app]
-// test/fixtures/route-v1.json is the JSON the app writes for a fixed connection (RouteLinkTest.kt
-// checks the Kotlin encoder against the same file), so both sides of the link format stay in step.
+// Offline tests of the logic of web/route/app.js: node web/test/route.test.js [v3 data from the app]
+// test/fixtures/route-v3.json is the JSON the app writes for a fixed connection (RouteLinkTest.kt
+// checks the Kotlin encoder against the same file), so both sides of the link format stay in step;
+// route-v1.json is the same connection as the app wrote it before v3 (links the page still reads).
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const zlib = require('node:zlib');
 const route = require('../route/app.js');
+const core = require('../shared/core.js');
 const demoScript = require('../route/demo.js');
 
 const FIXTURE = fs.readFileSync(path.join(__dirname, 'fixtures', 'route-v1.json'), 'utf8').trim();
@@ -123,10 +126,9 @@ test('bad links are refused, odd fields are dropped', () => {
   assert.equal(r.name, undefined);
 });
 
-test('a fragment from the app (Kotlin base64Url) decodes', () => {
+test('a fragment from the app decodes (v1 here; with an argument the data of a v3 link of the app)', async () => {
   const fromKotlin = process.argv[2];
-  const b64 = fromKotlin || route.toBase64Url(FIXTURE);
-  const r = route.parseRoute('#v=1&d=' + b64);
+  const r = fromKotlin ? await route.readRoute('#3d' + fromKotlin) : route.parseRoute('#v=1&d=' + route.toBase64Url(FIXTURE));
   assert.equal(r.legs[2].direction, 'Frankfurt (Oder) "Bhf" ü€😀');
 });
 
@@ -153,11 +155,57 @@ test('v2: a browser without DecompressionStream gets its own message', async () 
   }
 });
 
+const FIXTURE_V3 = fs.readFileSync(path.join(__dirname, 'fixtures', 'route-v3.json'), 'utf8').trim();
+// route-v3.deflate.txt: route-v3.json raw-deflated with the link dictionary by java.util.zip.Deflater, as the app does it.
+const FROM_JAVA_V3 = fs.readFileSync(path.join(__dirname, 'fixtures', 'route-v3.deflate.txt'), 'utf8').trim();
+const fragment3 = (json) => '#3d' + zlib.deflateRawSync(Buffer.from(json, 'utf8'), { level: 9, dictionary: Buffer.from(core.LINK_DICTIONARY, 'utf8') }).toString('base64url');
+
+test('v3: the JS encoder writes exactly the JSON of the app (route-v3.json)', () => {
+  assert.equal(route.encodeRoute3(fixtureObject), FIXTURE_V3);
+});
+
+test('v3: the fixture deflated by Java reads back as the very same route as v1', async () => {
+  const r = await route.readRoute('#3d' + FROM_JAVA_V3);
+  assert.equal(r.lang, 'de');
+  assert.deepEqual(r, Object.assign(route.parseRoute(fragment(FIXTURE)), { lang: 'de' }));
+  assert.deepEqual(await route.readRoute(fragment3(FIXTURE_V3)), r);
+  // Expanded, it is the v1 JSON of the app before v3.
+  assert.equal(route.encodeRoute(route.expandRoute3(JSON.parse(FIXTURE_V3))), FIXTURE);
+});
+
+test('v3: a way is written after its stop and moved back', () => {
+  const shape = '_yp_IgdypA_D{TmCiP';
+  // The same strings as in RouteLinkTest.kt (Kotlin rebasePolyline).
+  assert.equal(core.rebasePolyline(shape, -5252000, -1340500), '??_D{TmCiP');
+  assert.equal(core.rebasePolyline('??_D{TmCiP', 5252000, 1340500), shape);
+  assert.equal(core.rebasePolyline('', 1, 1), '');
+  assert.equal(core.rebasePolyline('_', 1, 1), '_');
+  assert.match(FIXTURE_V3, /"\?\?_D\{TmCiP"/);
+});
+
+test('v3: a walk by bike, a ride without trip, odd and broken links', async () => {
+  const bike = await route.readRoute(fragment3('[0,0,[["A"],["B"]],[[0,1,0,2,-2]],["B"]]'));
+  assert.equal(bike.legs[0].walk, true);
+  assert.equal(bike.legs[0].bike, true);
+  assert.equal(bike.legs[0].to.planned, 120000);
+  const ride = await route.readRoute(fragment3('[0,0,[["A"],["B"]],[[0,1,0,0,0,0,"S1"]],["B"]]'));
+  assert.equal(ride.legs[0].walk, false);
+  assert.equal(ride.legs[0].line, 'S1');
+  assert.equal(ride.legs[0].provider, null);
+  assert.equal(ride.legs[0].stopCount, null);
+  await assert.rejects(route.readRoute('#3d'), /version/);
+  await assert.rejects(route.readRoute('#3d' + FROM_JAVA_V3.slice(0, 40)), /data/);
+  await assert.rejects(route.readRoute(fragment3('[0,0,[["A"]],[[0,3]],["B"]]')), /data/);
+  await assert.rejects(route.readRoute(fragment3('[0,0,[["A"]],[],["B"]]')), /data/);
+  await assert.rejects(route.readRoute(fragment3('{"legs":[]}')), /data/);
+});
+
 test('page language: the recipient\'s German or English, else the sender\'s', () => {
   assert.equal(route.pickTexts('fr', 'de'), T);
   assert.equal(route.pickTexts('en-US', 'de'), E);
   assert.equal(route.pickTexts('de-CH', 'en'), T);
   assert.equal(route.pickTexts('es', null), E);
+  assert.equal(core.linkLanguage('#3e' + FROM_JAVA_V3), 'en');
 });
 
 test('steps without live data follow the delays known when shared; walks start after the ride before', () => {

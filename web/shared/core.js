@@ -37,11 +37,72 @@ function fromBase64Url(text) {
 const MAX_LINK_BYTES = 256 * 1024;
 
 /**
+ * The preset dictionary of the deflate data of v3 links (LINK_DICTIONARY in ui/JourneyShare.kt,
+ * byte for byte): words that links often have, the most common last. Changing it breaks every
+ * link made before: a new dictionary needs a new format version.
+ */
+const LINK_DICTIONARY = [
+  // HAFAS trip ids of the long form
+  '#VN#1#ST#', '#PI#0#ZI#', '#TA#0#DA#', '#1S#', '#1T#', '#LS#', '#LT#', '#PU#86#RT#1#CA#', '#ZE#', '#ZB#', '#PC#',
+  '#FR#', '#FT#', '#TO#', '#TT#',
+  // trains and towns
+  'ICE ', 'IC ', 'EC ', 'FLX ', 'FEX', 'RB', 'RE', 'Hamburg', 'München', 'Leipzig', 'Dresden', 'Hannover',
+  'Frankfurt (Main)', 'Köln', 'Cottbus', 'Frankfurt (Oder)', 'Potsdam', 'Brandenburg', 'Oranienburg', 'Bernau',
+  'Erkner', 'Königs Wusterhausen', 'Strausberg', 'Hennigsdorf', 'Teltow', 'Blankenfelde', 'Ahrensfelde', 'Wartenberg',
+  'Spandau', 'Wannsee', 'Pankow', 'Rudow', 'Wittenau', 'Krumme Lanke', 'Ruhleben', 'Hönow',
+  // stations and words of stop names
+  'Hermannstr.', 'Osloer Str.', 'Warschauer Str.', 'Flughafen BER', 'Gesundbrunnen', 'Südkreuz', 'Ostkreuz',
+  'Westkreuz', 'Ostbahnhof', 'Zoologischer Garten', 'Alexanderplatz', 'Friedrichstr.', 'Hauptbahnhof', 'Bahnhof',
+  'Rathaus ', 'Kirche', 'Chaussee', 'Ring', 'Nord', 'Süd', 'Ost', 'West', 'Stadt', 'Mitte', 'Center', 'Schule', 'Park',
+  'Weg', 'Allee', 'allee', 'damm', 'brücke', 'berg', 'dorf', 'felde', 'Hbf', '(tief)', 'Platz', 'platz', 'straße',
+  'Str.', 'str. ', ', 1', 'Berlin', 'Bus ', 'Tram ', 'M1',
+  // products, platforms and exits of the route link
+  'express', 'regional', 'ferry', 'coach', 'tram', 'bus', 'subway', 'suburban', 'Gleis ', 'Pos. ',
+  // Transitous ids
+  'de-DELFI_de:12', '_de-DELFI_', 'de-DELFI_de:11000:900', '::1', '::2',
+  // BVG HAFAS trip ids
+  '|86|', '"1|',
+  // the frame of the JSON
+  ']],[[', '"],["', ',-1,', ',0,"', '","', '",0,', '[["', '",', ',[0,', 'S+U ', 'U ', 'S ',
+].join('');
+
+/**
  * Raw deflate data (RFC 1951, as java.util.zip.Deflater(nowrap = true) writes it) unpacked to a
  * UTF-8 string by the browser itself (DecompressionStream). Rejects with Error("unsupported") in
  * browsers without it and with Error("data") for broken data.
  */
 async function inflateRaw(bytes) {
+  return utf8(await inflateRawBytes(bytes));
+}
+
+/**
+ * Raw deflate data packed with the preset [dictionary] (a string), unpacked to a UTF-8 string.
+ * DecompressionStream knows no dictionaries, so the dictionary goes in front of the data as a
+ * stored block (RFC 1951, 3.2.4): the data then finds it in the window, as the packer saw it.
+ */
+async function inflateRawWithDictionary(bytes, dictionary) {
+  const dict = new TextEncoder().encode(dictionary);
+  const n = dict.length;
+  const all = new Uint8Array(5 + n + bytes.length);
+  // A stored block that is not the last one: BFINAL 0, BTYPE 00, then LEN and NLEN.
+  all.set([0, n & 0xff, n >> 8, ~n & 0xff, (~n >> 8) & 0xff], 0);
+  all.set(dict, 5);
+  all.set(bytes, 5 + n);
+  const out = await inflateRawBytes(all);
+  if (out.length < n) throw new Error('data');
+  return utf8(out.subarray(n));
+}
+
+function utf8(bytes) {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (e) {
+    throw new Error('data');
+  }
+}
+
+/** Raw deflate data unpacked to bytes (see inflateRaw). */
+async function inflateRawBytes(bytes) {
   let stream;
   try {
     stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
@@ -69,20 +130,32 @@ async function inflateRaw(bytes) {
     all.set(part, at);
     at += part.length;
   }
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(all);
-  } catch (e) {
-    throw new Error('data');
-  }
+  return all;
 }
 
+// A v3 fragment: "3", the sender's language ("d" German, "e" English, "0" another or none) and the data.
+const V3_FRAGMENT = /^#?3([de0])([A-Za-z0-9_-]+)$/;
+const V3_LANGUAGES = { d: 'de', e: 'en', 0: null };
+
 /**
- * The parts of a link fragment ("#v=2&l=de&d=..."): the format version, the sender's language
- * ("l", null when absent) and the payload as text: v1 base64url JSON, v2 the same JSON
- * raw-deflated before base64url. Rejects with Error("version"), Error("data") or
- * Error("unsupported") (no DecompressionStream in this browser).
+ * The parts of a link fragment: the format version, the sender's language (null when absent)
+ * and the payload as text. v3 "#3d<data>": JSON without keys (expandLive3, expandRoute3),
+ * raw-deflated with LINK_DICTIONARY, then base64url; v2 "#v=2&l=de&d=<data>": JSON with keys,
+ * raw-deflated, then base64url; v1 "#v=1&d=<base64url JSON>". Rejects with Error("version"),
+ * Error("data") or Error("unsupported") (no DecompressionStream in this browser).
  */
 async function readLinkFragment(hash) {
+  const v3 = V3_FRAGMENT.exec(String(hash || ''));
+  if (v3) {
+    let bytes;
+    try {
+      bytes = base64UrlBytes(v3[2]);
+    } catch (e) {
+      throw new Error('data');
+    }
+    if (bytes.length === 0) throw new Error('data');
+    return { version: 3, lang: V3_LANGUAGES[v3[1]], text: await inflateRawWithDictionary(bytes, LINK_DICTIONARY) };
+  }
   const params = new URLSearchParams(String(hash || '').replace(/^#/, ''));
   const version = params.get('v');
   const lang = /^[a-z]{2,3}$/.test(params.get('l') || '') ? params.get('l') : null;
@@ -103,6 +176,13 @@ async function readLinkFragment(hash) {
   }
   if (bytes.length === 0) throw new Error('data');
   return { version: 2, lang, text: await inflateRaw(bytes) };
+}
+
+/** The sender's language of a link fragment of any version ("de", "en", ...), null when it has none. */
+function linkLanguage(hash) {
+  const v3 = V3_FRAGMENT.exec(String(hash || ''));
+  if (v3) return V3_LANGUAGES[v3[1]];
+  return new URLSearchParams(String(hash || '').replace(/^#/, '')).get('l');
 }
 
 /**
@@ -711,6 +791,176 @@ function delayLevel(minutes) {
 }
 
 /** [[lat, lon]] as a Google encoded polyline with [precision] decimal places (the inverse of decodePolyline). */
+/* ---------- Packing of v3 links (as LinkClock and LinkStops in ui/JourneyShare.kt) ---------- */
+
+// The grids of the positions in v3 links: 1e-4 degrees (about 10 m) in the live link, 1e-5 (about 1 m) in the route link.
+const LIVE_GRID = 1e4;
+const ROUTE_GRID = 1e5;
+
+/** A position in whole steps of 1/[grid] degree; null without a usable one. */
+function gridPosition(lat, lon, grid) {
+  return Number.isFinite(lat) && Number.isFinite(lon) ? [Math.round(lat * grid), Math.round(lon * grid)] : null;
+}
+
+/**
+ * The clock of a v3 link as the app writes it: each time (epoch seconds, null for [base]) as
+ * whole minutes after the time written before it, the first after [base] (epoch minutes).
+ */
+function linkClock(base) {
+  let last = 0;
+  return (epochSeconds) => {
+    const time = (epochSeconds == null ? base : Math.floor(epochSeconds / 60)) - base;
+    const step = time - last;
+    last = time;
+    return step;
+  };
+}
+
+/** The clock of a v3 link as the page reads it: each step added to the one before; minutes after the base. */
+function linkTimes() {
+  let time = 0;
+  return (step) => {
+    const value = step === undefined ? 0 : step;
+    if (!Number.isInteger(value)) throw new Error('data');
+    time += value;
+    return time;
+  };
+}
+
+/**
+ * The stops of a v3 link as the app writes them: each once as [name, id or 0, lat, lon] with the
+ * position in steps of 1/[grid] degree after the stop written before it, [name, id] or [name].
+ */
+function linkStops(grid) {
+  const entries = [];
+  const positions = [];
+  const indexes = new Map();
+  let last = [0, 0];
+  return {
+    entries,
+    add(key, name, id, lat, lon) {
+      if (indexes.has(key)) return indexes.get(key);
+      const at = gridPosition(lat, lon, grid);
+      const entry = [name];
+      if (at) {
+        entry.push(id || 0, at[0] - last[0], at[1] - last[1]);
+        last = at;
+      } else if (id) {
+        entry.push(id);
+      }
+      entries.push(entry);
+      positions.push(at);
+      indexes.set(key, entries.length - 1);
+      return entries.length - 1;
+    },
+    positionOf: (index) => positions[index] || null,
+    /** The destination after all stops: [name, lat, lon] after the last stop, or [name]. */
+    destination(name, lat, lon) {
+      const at = gridPosition(lat, lon, grid);
+      return at ? [name, at[0] - last[0], at[1] - last[1]] : [name];
+    },
+  };
+}
+
+/**
+ * The stops of a v3 link read back: {name, id, lat, lon, at}, the position in degrees and in
+ * steps of the grid ([at], null without one), and [last], the position after the last stop.
+ * Throws Error("data") on anything malformed.
+ */
+function readLinkStops(list, grid, limit) {
+  if (!Array.isArray(list) || list.length > limit) throw new Error('data');
+  let last = [0, 0];
+  const stops = list.map((s) => {
+    if (!Array.isArray(s) || typeof s[0] !== 'string') throw new Error('data');
+    const id = typeof s[1] === 'string' && s[1] ? s[1] : null;
+    if (s.length >= 4) {
+      if (!Number.isInteger(s[2]) || !Number.isInteger(s[3])) throw new Error('data');
+      last = [last[0] + s[2], last[1] + s[3]];
+      return { name: s[0], id, lat: last[0] / grid, lon: last[1] / grid, at: last };
+    }
+    return { name: s[0], id, lat: null, lon: null, at: null };
+  });
+  return { stops, last };
+}
+
+/** The destination [name, lat, lon] of a v3 link read back after the stops ([last]): {name, lat, lon}. */
+function readLinkDestination(z, last, grid) {
+  if (!Array.isArray(z)) throw new Error('data');
+  const name = typeof z[0] === 'string' ? z[0] : null;
+  if (z.length >= 3 && Number.isInteger(z[1]) && Number.isInteger(z[2])) {
+    return { name, lat: (last[0] + z[1]) / grid, lon: (last[1] + z[2]) / grid };
+  }
+  return { name, lat: null, lon: null };
+}
+
+/** [items] without the zeros at their end: they are what is not there. */
+function linkTrim(items) {
+  let n = items.length;
+  while (n > 0 && items[n - 1] === 0) n--;
+  return items.slice(0, n);
+}
+
+/** A text of a v3 link: trimmed, 0 when empty. */
+function linkText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : 0;
+}
+
+/** The item [index] of a v3 array; 0 when it is left out at the end. */
+function linkItem(items, index) {
+  return items[index] === undefined ? 0 : items[index];
+}
+
+/** A text item of a v3 array; undefined for 0 and anything that is no text. */
+function linkString(value) {
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+// The provider of a ride in a v3 link: 1 BVG HAFAS, 2 Transitous.
+const LINK_PROVIDERS = { 1: 'bvg', 2: 'tr' };
+const LINK_PROVIDER_CODES = { bvg: 1, tr: 2 };
+
+/**
+ * The encoded polyline with its first point moved by [lat] and [lon] whole steps (of its
+ * precision); the rest stays, as each point after the first is written after the one before it.
+ * A v3 route link writes the first point after the stop the way leaves from (rebasePolyline in
+ * ui/JourneyShare.kt). The text as it is when it cannot be read.
+ */
+function rebasePolyline(encoded, lat, lon) {
+  const text = String(encoded);
+  let index = 0;
+  const next = () => {
+    let result = 0;
+    let shift = 0;
+    for (;;) {
+      if (index >= text.length || shift > 30) return null;
+      const b = text.charCodeAt(index++) - 63;
+      if (b < 0 || b > 63) return null;
+      result += (b & 0x1f) * Math.pow(2, shift);
+      shift += 5;
+      if (b < 0x20) break;
+    }
+    return result % 2 ? -(result + 1) / 2 : result / 2;
+  };
+  const a = next();
+  const o = next();
+  if (a === null || o === null) return text;
+  return polylineSteps([a + lat, o + lon]) + text.slice(index);
+}
+
+/** Whole steps as the values of an encoded polyline, one after the other. */
+function polylineSteps(values) {
+  let out = '';
+  for (const value of values) {
+    let v = value < 0 ? -value * 2 - 1 : value * 2;
+    while (v >= 0x20) {
+      out += String.fromCharCode((0x20 | (v % 32)) + 63);
+      v = Math.floor(v / 32);
+    }
+    out += String.fromCharCode(v + 63);
+  }
+  return out;
+}
+
 function encodePolyline(points, precision) {
   const factor = Math.pow(10, precision == null ? 5 : precision);
   let out = '';
@@ -832,8 +1082,26 @@ function boardParts(part) {
 const api = {
   base64UrlBytes,
   inflateRaw,
+  inflateRawWithDictionary,
+  LINK_DICTIONARY,
   readLinkFragment,
+  linkLanguage,
   pickLanguage,
+  rebasePolyline,
+  LIVE_GRID,
+  ROUTE_GRID,
+  gridPosition,
+  linkClock,
+  linkTimes,
+  linkStops,
+  readLinkStops,
+  readLinkDestination,
+  linkTrim,
+  linkText,
+  linkItem,
+  linkString,
+  LINK_PROVIDERS,
+  LINK_PROVIDER_CODES,
   MAX_LINK_BYTES,
   BVG_URL,
   TRANSITOUS_URL,

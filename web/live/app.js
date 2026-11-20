@@ -1,7 +1,7 @@
 /*
  * Next Stop live page: follows a shared journey in the browser of the recipient.
  *
- * The link carries the planned journey in its fragment (#v=1&d=<base64url JSON>), so it never
+ * The link carries the planned journey in its fragment (#3d<data>, see readLinkFragment), so it never
  * reaches a server log. This page asks the public APIs itself (BVG HAFAS REST and Transitous
  * MOTIS) for the live times of each ride and estimates where the vehicle is from them. It shows
  * the planned trip with live data, not the GPS position of the traveller.
@@ -21,7 +21,9 @@ const {
   MAP_STYLE, fromBase64Url, toBase64Url, str, num, coord, ms, parseBvgTrip, decodePolyline,
   parseTransitousTrip, distance, along, cutPath, cutPathBetween, expectedTime, matchStop, tripUrl, guessProduct,
   canonicalLine, lineColor, inkOn, ROUTE_DRAW_MS, textNumber, rollsUp, lineLength, snakeFeatures, easeOutCubic,
-  ageText, freshness, freshnessText, clock, delayText, delayLevel, readLinkFragment, pickLanguage,
+  ageText, freshness, freshnessText, clock, delayText, delayLevel, readLinkFragment, pickLanguage, linkLanguage,
+  LIVE_GRID, gridPosition, linkClock, linkTimes, linkStops, readLinkStops, readLinkDestination, linkTrim, linkText,
+  linkItem, linkString, LINK_PROVIDERS, LINK_PROVIDER_CODES,
   counterText, progressSegments, sheetRest, sheetClamp, sheetDragMode, appIntentUrl, PLAY_URL,
 } = core;
 
@@ -67,17 +69,19 @@ function parseFragment(hash) {
 }
 
 /**
- * Reads the fragment of a link of either format: v1 ("v=1&d=<base64url JSON>") or v2
- * ("v=2&l=<language>&d=<base64url of the raw-deflated compact JSON>", see expandLive). Resolves
- * to the checked journey with the sender's language as [lang]; rejects with an Error whose
- * message is "version", "data" or "unsupported" (a browser that cannot unpack v2).
+ * Reads the fragment of a link of any format: v3 ("3<language><data>", see expandLive3), v2
+ * ("v=2&l=<language>&d=<base64url of the raw-deflated compact JSON>", see expandLive) or v1
+ * ("v=1&d=<base64url JSON>"). Resolves to the checked journey with the sender's language as
+ * [lang]; rejects with an Error whose message is "version", "data" or "unsupported" (a browser
+ * that cannot unpack v2 or v3).
  */
 async function readFragment(hash) {
   const link = await readLinkFragment(hash);
   let raw;
   try {
     raw = JSON.parse(link.text);
-    if (link.version === 2) raw = expandLive(raw);
+    if (link.version === 3) raw = expandLive3(raw);
+    else if (link.version === 2) raw = expandLive(raw);
   } catch (e) {
     throw new Error('data');
   }
@@ -279,6 +283,116 @@ function encodeLive(raw, extra) {
   out.z = z;
   if (opts.k) out.k = opts.k;
   return JSON.stringify(out);
+}
+
+/*
+ * Format v3 of the live link (written by liveLinkCompactJson in JourneyShare.kt), before deflate
+ * with LINK_DICTIONARY: the content of v2 without keys, [n, b, c, s, r, o, e, z, k], 0 for what is
+ * not there and nothing at the end of an array that is not there (read as 0).
+ *   b  planned departure of the first leg in epoch minutes; every other time is whole minutes
+ *      after the time written before it, in the order they are written ([w] of a ride before its
+ *      own times), c (when the link was made) after b
+ *   s  the stops, each once: [name, id or 0, lat, lon] with the position in steps of 1e-4 degrees
+ *      after the stop with a position written before it (the first after 0, 0), [name, id], [name]
+ *   r  the legs: a ride [f, t, d, a, p, i, l, r, dd, ad, w] (p 1 bvg, 2 tr; w [dep, arr] of the
+ *      walk before it); a walk that is no such link [f, t, d, a, -1]
+ *   o, e, k as in v2; z [name, lat, lon] with the position after the last stop
+ */
+
+/** A v3 payload as the v1 payload it stands for (by way of v2); throws on anything malformed. */
+function expandLive3(c) {
+  if (!Array.isArray(c) || !Number.isInteger(c[1]) || !Array.isArray(c[4])) throw new Error('data');
+  const { stops, last } = readLinkStops(c[3], LIVE_GRID, 2 * LIMITS.legs + 2);
+  const time = linkTimes();
+  const seconds = (step) => time(step) * 60;
+  const rides = c[4].map((x) => {
+    if (!Array.isArray(x)) throw new Error('data');
+    if (linkItem(x, 4) === -1) {
+      return { k: 1, f: linkItem(x, 0), t: linkItem(x, 1), d: seconds(x[2]), a: seconds(x[3]) };
+    }
+    const w = linkItem(x, 10);
+    let walk = null;
+    if (w !== 0) {
+      if (!Array.isArray(w) || w.length !== 2) throw new Error('data');
+      walk = [seconds(w[0]), seconds(w[1])];
+    }
+    const out = { f: linkItem(x, 0), t: linkItem(x, 1), d: seconds(x[2]), a: seconds(x[3]) };
+    if (num(x[8])) out.dd = x[8];
+    if (num(x[9])) out.ad = x[9];
+    if (LINK_PROVIDERS[x[4]]) out.p = LINK_PROVIDERS[x[4]];
+    out.i = linkString(x[5]);
+    out.l = linkString(x[6]);
+    out.r = linkString(x[7]);
+    if (walk) out.w = walk;
+    return out;
+  });
+  const e = linkItem(c, 6);
+  let end = null;
+  if (e !== 0) {
+    if (!Array.isArray(e) || e.length !== 2) throw new Error('data');
+    end = [seconds(e[0]), seconds(e[1])];
+  }
+  const dest = readLinkDestination(linkItem(c, 7) || [], last, LIVE_GRID);
+  return expandLive({
+    n: c[0],
+    b: c[1] * 60,
+    c: num(c[2]) !== null ? c[2] * 60 : null,
+    s: stops.map((s) => (s.at ? [s.name, s.id, s.lat, s.lon] : s.id ? [s.name, s.id] : [s.name])),
+    r: rides,
+    o: c[5],
+    e: end,
+    z: dest.lat !== null ? [dest.name, dest.lat, dest.lon] : [dest.name],
+    k: c[8],
+  });
+}
+
+/**
+ * The v3 JSON of a v1 payload, written exactly as the app writes it (liveLinkCompactJson in
+ * JourneyShare.kt), for the tests and the demo. [extra]: o (start name of the first walk), k.
+ */
+function encodeLive3(raw, extra) {
+  const opts = extra || {};
+  const legs = raw.legs;
+  const base = Math.floor((legs[0].from.dep != null ? legs[0].from.dep : raw.t) / 60);
+  const next = linkClock(base);
+  const stops = linkStops(LIVE_GRID);
+  const stopIndex = (p) => {
+    const at = gridPosition(p.lat, p.lon, LIVE_GRID);
+    const key = p.id ? 'i:' + p.id + '|' + p.name : 'n:' + p.name + '|' + (at ? at[0] + ',' + at[1] : '');
+    return stops.add(key, p.name, p.id || null, p.lat, p.lon);
+  };
+  const same = (a, b) => (a.id && b.id ? a.id === b.id : a.name === b.name);
+  const rides = [];
+  let walkBefore = null;
+  let end = null;
+  legs.forEach((l, i) => {
+    const nextLeg = legs[i + 1];
+    const prev = legs[i - 1];
+    if (l.walk) {
+      const linksFrom = i === 0 || (prev && !prev.walk && same(prev.to, l.from));
+      if (nextLeg && !nextLeg.walk && linksFrom && same(l.to, nextLeg.from)) {
+        walkBefore = [next(l.from.dep), next(l.to.arr)];
+      } else if (!nextLeg && prev && !prev.walk && same(prev.to, l.from)) {
+        end = [next(l.from.dep), next(l.to.arr)];
+      } else {
+        const from = stopIndex(i === 0 ? l.to : l.from);
+        const to = stopIndex(l.to);
+        rides.push(linkTrim([from, to, next(l.from.dep), next(l.to.arr), -1]));
+      }
+      return;
+    }
+    const from = stopIndex(l.from);
+    const to = stopIndex(l.to);
+    rides.push(linkTrim([
+      from, to, next(l.from.dep), next(l.to.arr), LINK_PROVIDER_CODES[l.p] || 0,
+      linkText(l.trip), linkText(l.line), linkText(l.dir), l.from.dd || 0, l.to.ad || 0, walkBefore || 0,
+    ]));
+    walkBefore = null;
+  });
+  return JSON.stringify(linkTrim([
+    linkText(raw.n), base, Math.floor(raw.t / 60) - base, stops.entries, rides, linkText(opts.o), end || 0,
+    stops.destination(raw.dest.name, raw.dest.lat, raw.dest.lon), opts.k === 'h' || opts.k === 'w' ? opts.k : 0,
+  ]));
 }
 
 /* ---------- Times and state ---------- */
@@ -971,7 +1085,7 @@ function headline(T, phase, name, dest) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    fromBase64Url, toBase64Url, parseFragment, readFragment, expandLive, encodeLive, parseBvgTrip, parseTransitousTrip, decodePolyline,
+    fromBase64Url, toBase64Url, parseFragment, readFragment, expandLive, encodeLive, expandLive3, encodeLive3, parseBvgTrip, parseTransitousTrip, decodePolyline,
     computeLegs, tripState, ridePosition, legsToPoll, tripUrl, stateLine, delayText, delayLevel, pickTexts, headline,
     cutPath, along, clock, tripProgress, splitPathAt, easeToward, countdownText, ageText, freshness,
     freshnessText, pollDelay, timelineModel, lineColor, inkOn, guessProduct, distance, EXPIRY_MS, POLL_MS,
@@ -986,7 +1100,7 @@ if (typeof module !== 'undefined' && module.exports) {
 if (typeof document !== 'undefined') {
   (function page() {
     // The recipient's language; the sender's ("l" in the link) only when it is neither German nor English.
-    const T = pickTexts(navigator.language, new URLSearchParams(location.hash.slice(1)).get('l'));
+    const T = pickTexts(navigator.language, linkLanguage(location.hash));
     document.documentElement.lang = T.lang;
     const $ = (id) => document.getElementById(id);
     const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
